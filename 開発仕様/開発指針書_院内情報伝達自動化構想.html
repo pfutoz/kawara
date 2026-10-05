@@ -887,34 +887,130 @@
                 <div class="section-num">5</div>
                 <h2>後任引き継ぎ・保守ガイドライン</h2>
             </div>
-            <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:1.2rem; font-size:0.88rem; color:#333;">
-                <p><strong>■ 設定ファイルの集約先:</strong></p>
-                <ul style="padding-left:1.2rem; margin-bottom:1rem;">
-                    <li><strong>LINE Bot設定:</strong> <code>includes/line_helper.php</code>（ボットID: <code>@tmw3446q</code> おの肛門科、長期アクセストークン、チャネルシークレット）</li>
-                    <li><strong>LINE Webhook受信:</strong> <code>api/line_webhook.php</code>（4桁コード判定、自動友だち紐付け、自動あいさつ返答）</li>
+            <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:1.4rem; font-size:0.88rem; color:#333;">
+                
+                <h3 style="color:#005a9c; margin-bottom:0.8rem; font-size:1.05rem; display:flex; align-items:center; gap:6px;">
+                    🔑 1. LINE Developers ＆ Messaging API 設定パラメータ一覧
+                </h3>
+                <p style="margin-bottom:0.8rem; color:#475569;">
+                    院内かわら版とLINE公式アカウントを接続するためにLINE Developersコンソールおよび管理画面で実証・設定した全パラメータです：
+                </p>
+
+                <table style="width:100%; border-collapse:collapse; margin-bottom:1.4rem; background:#fff; font-size:0.84rem;">
+                    <thead>
+                        <tr style="background:#e8f2f9; color:#003d6b; text-align:left;">
+                            <th style="padding:8px 10px; border:1px solid #cbd5e1; width:28%;">設定項目</th>
+                            <th style="padding:8px 10px; border:1px solid #cbd5e1; width:42%;">設定値 / 登録情報</th>
+                            <th style="padding:8px 10px; border:1px solid #cbd5e1;">備考・用途</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td style="padding:8px 10px; border:1px solid #cbd5e1; font-weight:bold;">公式アカウント名</td>
+                            <td style="padding:8px 10px; border:1px solid #cbd5e1;">おの肛門科</td>
+                            <td style="padding:8px 10px; border:1px solid #cbd5e1;">職員向け通知ボットの表示名</td>
+                        </tr>
+                        <tr>
+                            <td style="padding:8px 10px; border:1px solid #cbd5e1; font-weight:bold;">ボットのベーシックID</td>
+                            <td style="padding:8px 10px; border:1px solid #cbd5e1;"><code>@tmw3446q</code></td>
+                            <td style="padding:8px 10px; border:1px solid #cbd5e1;">友だち検索ID（@必須）</td>
+                        </tr>
+                        <tr>
+                            <td style="padding:8px 10px; border:1px solid #cbd5e1; font-weight:bold;">友だち追加URL</td>
+                            <td style="padding:8px 10px; border:1px solid #cbd5e1;"><a href="https://line.me/R/ti/p/@tmw3446q" target="_blank" rel="noopener">https://line.me/R/ti/p/@tmw3446q</a></td>
+                            <td style="padding:8px 10px; border:1px solid #cbd5e1;">かわら版モーダル内QRのリンク先</td>
+                        </tr>
+                        <tr>
+                            <td style="padding:8px 10px; border:1px solid #cbd5e1; font-weight:bold;">プロバイダー名</td>
+                            <td style="padding:8px 10px; border:1px solid #cbd5e1;"><code>onokai_intra</code></td>
+                            <td style="padding:8px 10px; border:1px solid #cbd5e1;">LINE Developers上の管理グループ</td>
+                        </tr>
+                        <tr>
+                            <td style="padding:8px 10px; border:1px solid #cbd5e1; font-weight:bold;">チャネルID</td>
+                            <td style="padding:8px 10px; border:1px solid #cbd5e1;"><code>2006791558</code></td>
+                            <td style="padding:8px 10px; border:1px solid #cbd5e1;">Messaging API チャネル固有ID</td>
+                        </tr>
+                        <tr>
+                            <td style="padding:8px 10px; border:1px solid #cbd5e1; font-weight:bold;">チャネルシークレット</td>
+                            <td style="padding:8px 10px; border:1px solid #cbd5e1;"><code>89d06cced6219e24e5176b938d4e2f6a</code></td>
+                            <td style="padding:8px 10px; border:1px solid #cbd5e1;">Webhook署名検証用（セキュリティ）</td>
+                        </tr>
+                        <tr>
+                            <td style="padding:8px 10px; border:1px solid #cbd5e1; font-weight:bold;">チャネルアクセストークン（長期）</td>
+                            <td style="padding:8px 10px; border:1px solid #cbd5e1; word-break:break-all; font-family:monospace; font-size:0.75rem;">
+                                N9DG4MduhnsK47e20jk0vPMOtPsU3qGWDOKs6ZQ37EofWVglz8bxRRvcNr2P+l48OU5U4sLw5xG2VR8izTcWWU0NUgYog8/gDaflv+m67dkV41HhUM5nlLLYVHj6YlMe35TWKUJ80xNjN94dwYuEeAdB04t89/1O/w1cDnyilFU=
+                            </td>
+                            <td style="padding:8px 10px; border:1px solid #cbd5e1;">メッセージ送信API（Push/Multicast）認証鍵</td>
+                        </tr>
+                        <tr>
+                            <td style="padding:8px 10px; border:1px solid #cbd5e1; font-weight:bold;">Webhook URL</td>
+                            <td style="padding:8px 10px; border:1px solid #cbd5e1;"><code>https://[公開ホスト]/kawara/api/line_webhook.php</code></td>
+                            <td style="padding:8px 10px; border:1px solid #cbd5e1;">4桁コード・イベント受信エンドポイント</td>
+                        </tr>
+                        <tr>
+                            <td style="padding:8px 10px; border:1px solid #cbd5e1; font-weight:bold;">Webhookの利用</td>
+                            <td style="padding:8px 10px; border:1px solid #cbd5e1; color:#15803d; font-weight:bold;">オン（有効）</td>
+                            <td style="padding:8px 10px; border:1px solid #cbd5e1;">Messaging API設定タブ内</td>
+                        </tr>
+                        <tr>
+                            <td style="padding:8px 10px; border:1px solid #cbd5e1; font-weight:bold;">管理画面 応答設定</td>
+                            <td style="padding:8px 10px; border:1px solid #cbd5e1;">
+                                応答モード: <strong>Bot</strong><br>
+                                Webhook: <strong>オン</strong><br>
+                                応答メッセージ: <strong>オフ</strong>
+                            </td>
+                            <td style="padding:8px 10px; border:1px solid #cbd5e1;">
+                                ※「応答メッセージ」がオンだと4桁送信時に標準定型文が重複返信されるため必ずオフ
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <h3 style="color:#005a9c; margin-bottom:0.8rem; font-size:1.05rem; display:flex; align-items:center; gap:6px;">
+                    🌐 2. Webhook URL の有効期限 ＆ 本番運用移行ガイド
+                </h3>
+                <div style="background:#fff; border:1px solid #cbd5e1; border-radius:6px; padding:12px; margin-bottom:1.4rem; line-height:1.6;">
+                    <p style="margin-bottom:8px;">
+                        <strong>Q. 現在設定した <code>https://microwave-honey-configuration-console.trycloudflare.com/...</code> はいつまで使えるのか？</strong>
+                    </p>
+                    <ul style="padding-left:1.2rem; margin-bottom:10px;">
+                        <li><strong>有効期間:</strong> このPC上で <code>cloudflared</code> トンネルプロセスが<strong>起動している間ずっと継続して利用可能</strong>です。</li>
+                        <li><strong>期限と制限（一時URLの仕様）:</strong> PCを再起動したりプロセスを終了すると切断されます。再度起動すると別の新しいランダムURL（サブドメイン）が発行されるため、<strong>「現在の開発・検証・テスト運用期間用」</strong>のURLとなります。</li>
+                    </ul>
+                    <p style="margin-bottom:6px;">
+                        <strong>🚀 本番常設運用への3つの移行方法（後任への申し送り）:</strong>
+                    </p>
+                    <ol style="padding-left:1.2rem; font-size:0.85rem; color:#475569;">
+                        <li><strong>【推奨・最も簡単】固定 Cloudflare Tunnel の常駐サービス化（無料）:</strong><br>
+                            無料のCloudflareアカウントを作成し、固定URL（例: <code>kawara.onokai.jp</code> 等）を払い出してWindowsサービスとして常駐登録します。これを行うと、PC再起動後もURLが一切変わらず、ルーターのポート開放も不要で永久に自動無償稼働します。</li>
+                        <li><strong>院内固定グローバルIP / DDNS ＆ ルーターHTTPSポート開放:</strong><br>
+                            病院の固定回線IPに向けてルーターで443番ポートを院内サーバーへルーティングし、SSL証明書（Let's Encrypt等）で運用する従来型オンプレミス公開方式。</li>
+                        <li><strong>外部クラウド / VPS（さくらVPS・Xserver等）への配置:</strong><br>
+                            将来的にかわら版を院外のWebサーバーへ移設した場合は、その常設ドメイン（例: <code>https://portal.onokai.or.jp/kawara/api/line_webhook.php</code>）をLINE Developersへ登録するだけで即日移行できます。</li>
+                    </ol>
+                </div>
+
+                <h3 style="color:#005a9c; margin-bottom:0.8rem; font-size:1.05rem; display:flex; align-items:center; gap:6px;">
+                    📁 3. 設定ファイルの集約先 ＆ 職員マスター保守
+                </h3>
+                <ul style="padding-left:1.2rem; margin-bottom:1rem; line-height:1.6;">
+                    <li><strong>LINE Bot設定:</strong> <code>includes/line_helper.php</code>（ボットID: <code>@tmw3446q</code> おの肛門科、長期アクセストークン、チャネルシークレット、SSL通信オプション）</li>
+                    <li><strong>LINE Webhook受信:</strong> <code>api/line_webhook.php</code>（署名照合、4桁コード判定、自動友だち紐付け、自動返信）</li>
                     <li><strong>データベース設定:</strong> PostgreSQL <code>kawara</code>（各スクリプト冒頭のPDO設定）</li>
-                </ul>
-
-                <p><strong>■ 職員マスターの一元管理（STF連携アーキテクチャ）:</strong></p>
-                <ul style="padding-left:1.2rem; margin-bottom:1rem;">
-                    <li><strong>原本（信頼できる単一の情報源）:</strong> <code>../stf/staff_data.json</code></li>
-                    <li><strong>マスター管理画面:</strong> <code>../stf/master_mente.php</code>（登録・編集・削除・自動バックアップ <code>stf/bak/</code>）</li>
-                    <li><strong>運用ルール:</strong> スタッフのマスターメンテナンス（入職・退職・改姓・携帯番号変更等）はすべて <code>stf</code> 側で実施。</li>
+                    <li><strong>職員マスター原本（Single Source of Truth）:</strong> <code>../stf/staff_data.json</code></li>
+                    <li><strong>職員マスター管理画面:</strong> <code>../stf/master_mente.php</code>（登録・編集・削除・自動タイムスタンプバックアップ <code>stf/bak/</code>・アトミック保存）</li>
                     <li><strong>自動同期の仕組み:</strong> かわら版（<code>safety_contacts.php</code>）の「🔄 STF同期」ボタン、または <code>stf/master_mente.php</code> の「🔄 かわら版へ即時同期」ボタン1発で、全職員情報が完全同期されます。</li>
+                    <li><strong>災害緊急モード切替権限（暗証番号）:</strong> 平時・訓練モード（嘘番号・住所非表示）と災害緊急モード（全個人情報開示）の切り替えには、特定権限者の暗証番号が必要です（管理画面: <code>admin_disaster_staff.php</code>）。</li>
                 </ul>
 
-                <p><strong>■ 災害緊急モード切替権限（暗証番号）:</strong></p>
-                <ul style="padding-left:1.2rem; margin-bottom:1rem;">
-                    <li>平時・訓練モード（嘘番号・住所非表示）と災害緊急モード（全個人情報開示）の切り替えには、特定権限者の暗証番号が必要です。</li>
-                    <li>権限者および暗証番号の設定・変更は、<code>admin_disaster_staff.php</code>（管理者画面）から実施します。</li>
-                </ul>
-
-                <p><strong>■ 後任の日常ルーティン（引き継ぎマニュアル要点）:</strong></p>
+                <h3 style="color:#005a9c; margin-bottom:0.8rem; font-size:1.05rem; display:flex; align-items:center; gap:6px;">
+                    📋 4. 後任の日常ルーティン（引き継ぎマニュアル要点）
+                </h3>
                 <ol style="padding-left:1.2rem; line-height:1.6;">
                     <li>業者から工事等の連絡を受けたら、かわら版で「設備・営繕」で投稿する。</li>
                     <li>「ポスター印刷」ボタンを押し、出てきたA4紙を該当箇所のドアに貼る。</li>
                     <li>不在日（水曜夕方・金曜夕方）は「不在まとめ印刷」ボタンを押し、当番者・日直に手渡す。</li>
-                    <li>LINEには自動で1タップ返答ボタン付きカードが届き、了解状況はシステムで確認できるため個別電話は不要。</li>
+                    <li>有事・避難訓練時は、<code>safety_contacts.php</code> の「💬 LINE安否連絡」または「📢 点呼発令」から一斉送信を行う。職員からの生存報告は自動集計されるため、電話確認の手間がゼロになります。</li>
                 </ol>
             </div>
         </section>
