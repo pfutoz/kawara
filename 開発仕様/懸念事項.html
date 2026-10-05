@@ -1,0 +1,534 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>アカウント管理上の懸念事項と事業継続（引継ぎ）対策書 | 院内かわら版</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&family=Outfit:wght@600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #005a9c;
+            --primary-light: #e8f2f9;
+            --primary-dark: #003d6b;
+            --accent-alert: #dc2626;
+            --accent-warn: #d97706;
+            --accent-success: #16a34a;
+            --accent-line: #06c755;
+            --accent-cf: #f38020;
+            --text-main: #1e293b;
+            --text-sub: #64748b;
+            --bg-body: #f8fafc;
+            --bg-card: #ffffff;
+            --border: #e2e8f0;
+            --shadow-sm: 0 1px 3px rgba(0,0,0,0.06);
+            --shadow-md: 0 4px 14px rgba(0,0,0,0.08);
+            --radius-md: 10px;
+            --radius-lg: 16px;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Noto Sans JP', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: var(--bg-body);
+            color: var(--text-main);
+            line-height: 1.75;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        header {
+            background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+            color: #ffffff;
+            padding: 2.5rem 1.5rem;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+            border-bottom: 4px solid var(--accent-alert);
+        }
+        .header-inner {
+            max-width: 1060px;
+            margin: 0 auto;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 1.5rem;
+        }
+        .header-tag {
+            display: inline-block;
+            background: rgba(220, 38, 38, 0.3);
+            border: 1px solid rgba(220, 38, 38, 0.6);
+            color: #fca5a5;
+            padding: 4px 14px;
+            border-radius: 20px;
+            font-size: 0.82rem;
+            font-weight: 700;
+            letter-spacing: 0.05em;
+            margin-bottom: 0.5rem;
+        }
+        .header-title h1 {
+            font-size: 1.85rem;
+            font-weight: 900;
+            letter-spacing: -0.02em;
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            color: #ffffff;
+        }
+        .header-title p {
+            font-size: 0.95rem;
+            color: #cbd5e1;
+            margin-top: 0.4rem;
+        }
+        .header-nav-btn {
+            background: rgba(255, 255, 255, 0.15);
+            color: #ffffff;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            padding: 8px 16px;
+            border-radius: 8px;
+            text-decoration: none;
+            font-size: 0.88rem;
+            font-weight: 700;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.2s;
+        }
+        .header-nav-btn:hover {
+            background: #ffffff;
+            color: #0f172a;
+        }
+
+        .container {
+            max-width: 1060px;
+            margin: 2rem auto;
+            padding: 0 1.5rem 4rem 1.5rem;
+        }
+
+        .alert-banner {
+            background: #fff1f2;
+            border: 1px solid #fecdd3;
+            border-left: 6px solid var(--accent-alert);
+            border-radius: var(--radius-md);
+            padding: 1.25rem 1.5rem;
+            margin-bottom: 2rem;
+            display: flex;
+            align-items: flex-start;
+            gap: 1rem;
+        }
+        .alert-banner-icon {
+            font-size: 1.8rem;
+            line-height: 1;
+        }
+        .alert-banner-text h3 {
+            font-size: 1.05rem;
+            font-weight: 800;
+            color: #991b1b;
+            margin-bottom: 0.25rem;
+        }
+        .alert-banner-text p {
+            font-size: 0.92rem;
+            color: #7f1d1d;
+        }
+
+        .card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-lg);
+            padding: 1.8rem 2rem;
+            margin-bottom: 2rem;
+            box-shadow: var(--shadow-sm);
+        }
+        .card-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 1.25rem;
+            padding-bottom: 0.75rem;
+            border-bottom: 2px solid #f1f5f9;
+        }
+        .card-title {
+            font-size: 1.3rem;
+            font-weight: 800;
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            color: var(--text-main);
+        }
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 3px 10px;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 700;
+        }
+        .badge-danger { background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; }
+        .badge-warn { background: #fef3c7; color: #92400e; border: 1px solid #fcd34d; }
+        .badge-success { background: #dcfce7; color: #166534; border: 1px solid #86efac; }
+        .badge-cf { background: #ffedd5; color: #9a3412; border: 1px solid #fdba74; }
+        .badge-line { background: #dcfce7; color: #065f46; border: 1px solid #6ee7b7; }
+
+        /* Tables */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 1rem 0;
+            font-size: 0.92rem;
+        }
+        th, td {
+            padding: 10px 14px;
+            border: 1px solid var(--border);
+            text-align: left;
+            vertical-align: top;
+        }
+        th {
+            background: #f1f5f9;
+            font-weight: 700;
+            color: #334155;
+            white-space: nowrap;
+        }
+        tr:nth-child(even) { background: #fafbfc; }
+
+        /* Step cards */
+        .step-list {
+            display: flex;
+            flex-direction: column;
+            gap: 1.2rem;
+            margin-top: 1rem;
+        }
+        .step-item {
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-left: 5px solid var(--primary);
+            border-radius: 8px;
+            padding: 1.2rem 1.4rem;
+        }
+        .step-item.step-cf { border-left-color: var(--accent-cf); }
+        .step-item.step-line { border-left-color: var(--accent-line); }
+        .step-num {
+            display: inline-block;
+            background: var(--text-main);
+            color: #fff;
+            font-size: 0.75rem;
+            font-weight: 800;
+            padding: 2px 8px;
+            border-radius: 4px;
+            margin-bottom: 0.4rem;
+        }
+        .step-title {
+            font-weight: 800;
+            font-size: 1.05rem;
+            color: var(--text-main);
+            margin-bottom: 0.4rem;
+        }
+
+        .checklist {
+            list-style: none;
+            margin: 1rem 0;
+        }
+        .checklist li {
+            position: relative;
+            padding-left: 2rem;
+            margin-bottom: 0.6rem;
+            font-size: 0.95rem;
+        }
+        .checklist li::before {
+            content: "✓";
+            position: absolute;
+            left: 0;
+            top: 2px;
+            width: 1.3rem;
+            height: 1.3rem;
+            background: #e2e8f0;
+            color: #475569;
+            border-radius: 50%;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.8rem;
+            font-weight: 900;
+        }
+        .checklist li.critical::before {
+            content: "!";
+            background: #fee2e2;
+            color: #dc2626;
+        }
+
+        footer {
+            text-align: center;
+            color: var(--text-sub);
+            font-size: 0.85rem;
+            padding: 2rem 0;
+            border-top: 1px solid var(--border);
+        }
+    </style>
+</head>
+<body>
+
+<header>
+    <div class="header-inner">
+        <div>
+            <span class="header-tag">⚠️ 運用・事業継続計画（BCP）重要管理項目</span>
+            <div class="header-title">
+                <h1>アカウント管理の属人化リスクと引継ぎ対策書</h1>
+                <p>Cloudflare および LINE公式アカウントの個人紐付けに関する懸念と組織共有化プロトコル</p>
+            </div>
+        </div>
+        <div>
+            <a href="index.html" class="header-nav-btn">← 開発指針書・進捗トップに戻る</a>
+        </div>
+    </div>
+</header>
+
+<div class="container">
+
+    <!-- Overview Banner -->
+    <div class="alert-banner">
+        <div class="alert-banner-icon">🚨</div>
+        <div class="alert-banner-text">
+            <h3>作成の背景と重要認識</h3>
+            <p>
+                迅速なプロトタイプ構築と実機検証（PoC）を最優先するため、暫定的に担当者（山本 太 氏）の個人Googleアカウントおよび個人LINEアカウントを使用してCloudflare TunnelおよびLINE Developersの初期設定を実施しました。<br>
+                この状態のまま本番運用に移行した場合、<strong>「担当者の異動・退職」「端末紛失・アカウント削除」</strong>等が発生した際に、院内システムの管理権限を喪失し、安否確認LINE連携が停止する重大な属人化リスクが存在します。本ドキュメントは、この懸念点を可視化し、安全な法人共有アカウントへの移行手順を定義するものです。
+            </p>
+        </div>
+    </div>
+
+    <!-- Current State Analysis -->
+    <div class="card">
+        <div class="card-header">
+            <h2 class="card-title"><span>📊</span> 1. 現在の紐付け状況とリスク分析</h2>
+            <span class="badge badge-danger">高リスク（要対策）</span>
+        </div>
+        <p style="margin-bottom: 1rem; font-size: 0.95rem; color: var(--text-sub);">
+            現在設定されている外部クラウドサービスと、紐付いているアカウントの対応状況です。
+        </p>
+
+        <table>
+            <thead>
+                <tr>
+                    <th>対象サービス</th>
+                    <th>現在の管理者 / 登録情報</th>
+                    <th>属人化に伴う潜在リスク</th>
+                    <th>影響度</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>
+                        <strong style="color: #ea580c;">Cloudflare Zero Trust</strong><br>
+                        <small>トンネル・公開URL・SSL管理</small>
+                    </td>
+                    <td>
+                        <strong>山本個人のGoogleアカウント</strong><br>
+                        <code>P***07@gmail.com</code>
+                    </td>
+                    <td>
+                        <ul>
+                            <li>退職時に管理画面（Zero Trust）にログイン不可となり、トンネル再設定や障害対応が不可能になる。</li>
+                            <li>個人アカウントが停止・削除された場合、Webhookトンネルが切断され、LINE新規連携が不能になる。</li>
+                            <li>有償プラン契約や請求情報の管理が法人として行えない。</li>
+                        </ul>
+                    </td>
+                    <td><span class="badge badge-danger">重大（運用停止リスク）</span></td>
+                </tr>
+                <tr>
+                    <td>
+                        <strong style="color: #059669;">LINE Official Account</strong><br>
+                        <small>公式ボット「おの肛門科」</small>
+                    </td>
+                    <td>
+                        <strong>山本個人のLINEアカウント</strong><br>
+                        <small>LINE Official Account Manager 最高管理者</small>
+                    </td>
+                    <td>
+                        <ul>
+                            <li>退職や端末機種変・解約時に公式アカウントの管理画面へアクセスできなくなる。</li>
+                            <li>他の職員が友だち追加数や配信メッセージの管理・監査を行えない。</li>
+                            <li>個人のLINE利用規約違反や私的トラブルによるアカウント凍結に巻き込まれる恐れ。</li>
+                        </ul>
+                    </td>
+                    <td><span class="badge badge-danger">重大（公式アカウント喪失）</span></td>
+                </tr>
+                <tr>
+                    <td>
+                        <strong style="color: #0284c7;">LINE Developers</strong><br>
+                        <small>Messaging APIチャネル管理</small>
+                    </td>
+                    <td>
+                        <strong>山本個人のLINEアカウント</strong><br>
+                        <small>プロバイダー管理者（Admin）</small>
+                    </td>
+                    <td>
+                        <ul>
+                            <li>アクセストークン（Channel Access Token）の再発行やWebhook URLの変更ができなくなる。</li>
+                            <li>開発者コンソールに誰もログインできず、API仕様変更時の追従が不能になる。</li>
+                        </ul>
+                    </td>
+                    <td><span class="badge badge-danger">重大（開発保守不能）</span></td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Solution 1: Cloudflare -->
+    <div class="card">
+        <div class="card-header">
+            <h2 class="card-title"><span>🛡️</span> 2. 対策手順：Cloudflare の法人・共有アカウント化</h2>
+            <span class="badge badge-cf">Cloudflare 移行手順</span>
+        </div>
+        <p style="margin-bottom: 1rem; font-size: 0.95rem;">
+            Cloudflareは<strong>「マルチユーザー管理（管理者の招待）」</strong>に対応しています。以下の手順で病院公式の共有アカウントを最高管理者に昇格させることで、個人への依存を完全に解消できます。
+        </p>
+
+        <div class="step-list">
+            <div class="step-item step-cf">
+                <span class="step-num">Step 1</span>
+                <div class="step-title">病院共用の管理用メールアドレスを用意</div>
+                <p style="font-size: 0.92rem; color: var(--text-sub);">
+                    例：<code>it-admin@onokai.or.jp</code> や、病院管理者複数名で受信可能なメーリングリスト/共有Googleアカウントを準備します。個人の私用アドレスは絶対に使用しません。
+                </p>
+            </div>
+            <div class="step-item step-cf">
+                <span class="step-num">Step 2</span>
+                <div class="step-title">Cloudflareにメンバーとして招待</div>
+                <p style="font-size: 0.92rem; color: var(--text-sub);">
+                    現行の山本アカウントで Cloudflare ダッシュボードにログイン → 右上の「アカウント管理」→「メンバー」→「メンバーの招待」をクリックし、上記共有アドレスを招待します。
+                </p>
+            </div>
+            <div class="step-item step-cf">
+                <span class="step-num">Step 3</span>
+                <div class="step-title">Super Administrator（最高管理者）権限を付与</div>
+                <p style="font-size: 0.92rem; color: var(--text-sub);">
+                    ロールとして「Super Administrator」を選択して招待メールを送信。届いたメールの承認リンクから登録を完了させます。
+                </p>
+            </div>
+            <div class="step-item step-cf">
+                <span class="step-num">Step 4</span>
+                <div class="step-title">本番稼働後の個人アカウント切り離し</div>
+                <p style="font-size: 0.92rem; color: var(--text-sub);">
+                    共有アカウント側でログインできることを確認後、本番移行完了時または退職時に、山本個人のアカウントをメンバー一覧から削除（Revoke）します。
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Solution 2: LINE Business -->
+    <div class="card">
+        <div class="card-header">
+            <h2 class="card-title"><span>💬</span> 3. 対策手順：LINE Official Account ＆ Developers の管理者分散化</h2>
+            <span class="badge badge-line">LINE 権限分散手順</span>
+        </div>
+        <p style="margin-bottom: 1rem; font-size: 0.95rem;">
+            LINE公式アカウントおよびLINE Developersは、<strong>複数の管理者を登録可能</strong>です。退職時に備え、最低2名以上の副管理者または病院共用ビジネスアカウントを管理者として追加します。
+        </p>
+
+        <div class="step-list">
+            <div class="step-item step-line">
+                <span class="step-num">Step 1</span>
+                <div class="step-title">LINE Official Account Manager での管理者追加</div>
+                <p style="font-size: 0.92rem; color: var(--text-sub); margin-bottom: 0.5rem;">
+                    1. <a href="https://manager.line.biz/" target="_blank" style="color: var(--primary); font-weight: bold;">LINE Official Account Manager</a> にログイン<br>
+                    2. 右上の「設定」⚙️ → 「権限管理」をクリック<br>
+                    3. 「メンバーを追加」ボタンをクリックし、権限種類を<strong>「管理者」</strong>に指定<br>
+                    4. 発行された認証URLを院内引き継ぎ先（院長・事務長・次期IT担当者等）に送り、承認してもらう
+                </p>
+                <div style="background: #e6fffa; border: 1px solid #b2f5ea; padding: 8px 12px; border-radius: 6px; font-size: 0.85rem; color: #234e52;">
+                    💡 <strong>ポイント:</strong> LINEビジネスIDとして「病院共有のメールアドレス」で登録したビジネスアカウントを管理者に追加しておくと、個人の私用LINEと完全に分離できます。
+                </div>
+            </div>
+
+            <div class="step-item step-line">
+                <span class="step-num">Step 2</span>
+                <div class="step-title">LINE Developers コンソールでのプロバイダー権限追加</div>
+                <p style="font-size: 0.92rem; color: var(--text-sub);">
+                    1. <a href="https://developers.line.biz/" target="_blank" style="color: var(--primary); font-weight: bold;">LINE Developers コンソール</a> にログイン<br>
+                    2. プロバイダー「おの肛門科」（または該当プロバイダー）を選択<br>
+                    3. 「Roles（権限）」タブを開く<br>
+                    4. 「Invite member（メンバーを招待）」から、後任者または共有アカウントを<strong>「Admin（管理者）」</strong>として追加
+                </p>
+            </div>
+
+            <div class="step-item step-line">
+                <span class="step-num">Step 3</span>
+                <div class="step-title">退職・異動時の権限解除プロトコル</div>
+                <p style="font-size: 0.92rem; color: var(--text-sub);">
+                    新管理者が正常に管理画面にアクセスできることを確認した後、権限一覧から山本個人のアカウントを削除します。
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Action Plan / Roadmap -->
+    <div class="card">
+        <div class="card-header">
+            <h2 class="card-title"><span>📋</span> 4. 移行タイムラインとアクションプラン</h2>
+            <span class="badge badge-warn">ロードマップ</span>
+        </div>
+
+        <ul class="checklist">
+            <li>
+                <strong>【現在・検証フェーズ】</strong><br>
+                動作確認・システム開発を最優先し、現行の山本アカウントにてトンネルおよびWebhookの動作を完全確立する。（※現状）
+            </li>
+            <li class="critical">
+                <strong>【本番サーバー移行時（重要）】</strong><br>
+                専用の院内本番サーバーへシステムを移行する際、病院公式の共有Googleアカウント（または法人ドメインメール）を取得し、Cloudflareの管理権限を移行する。
+            </li>
+            <li class="critical">
+                <strong>【本番サーバー移行時（重要）】</strong><br>
+                LINE Official Account Manager および LINE Developers の管理者として、事務長または副管理者を1名以上「管理者」として追加する。
+            </li>
+            <li>
+                <strong>【本番稼働後 / 退職・異動時】</strong><br>
+                認証情報の引継ぎ完了を確認後、各サービスから山本個人のアカウントを削除し、法人の恒久体制へ完全移行する。
+            </li>
+        </ul>
+    </div>
+
+    <!-- Emergency Access Sheet -->
+    <div class="card">
+        <div class="card-header">
+            <h2 class="card-title"><span>🔐</span> 5. 認証情報保管ルール（セキュリティガイドライン）</h2>
+            <span class="badge badge-success">セキュリティ規程</span>
+        </div>
+        <p style="font-size: 0.93rem; color: var(--text-sub); margin-bottom: 1rem;">
+            退職時だけでなく、不測の事態（急病・災害等）に備え、以下の情報を院内のセキュリティ金庫またはパスワード管理台帳に厳重に保管することを推奨します。
+        </p>
+        <table>
+            <thead>
+                <tr>
+                    <th>項目</th>
+                    <th>保管内容</th>
+                    <th>保管場所（推奨）</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong>LINE チャネル認証情報</strong></td>
+                    <td>Channel ID、Channel Secret、Channel Access Token</td>
+                    <td>院内金庫（封書）/ 院内パスワードマネージャー</td>
+                </tr>
+                <tr>
+                    <td><strong>Cloudflare 接続トークン</strong></td>
+                    <td>トンネルトークン文字列、ログイン用共有ID/PW</td>
+                    <td>院内金庫（封書）/ システム管理台帳</td>
+                </tr>
+                <tr>
+                    <td><strong>PostgreSQL 接続情報</strong></td>
+                    <td>DB名、ユーザー名、パスワード、ポート番号</td>
+                    <td>院内サーバー内 `includes/db.php` および管理台帳</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+</div>
+
+<footer>
+    <p>医療法人小野会 院内かわら版システム | BCP＆システムガバナンス管理規定 | 2026年10月策定</p>
+</footer>
+
+</body>
+</html>
