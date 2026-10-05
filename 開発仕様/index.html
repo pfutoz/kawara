@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>院内かわら版 開発指針書 | 医療法人小野会</title>
+    <title>院内かわら版 開発指針書 ＆ 進捗レポート | 医療法人小野会</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&family=Outfit:wght@600;700&display=swap" rel="stylesheet">
@@ -14,7 +14,7 @@
             --primary-dark: #003d6b;
             --accent-alert: #dc3545;
             --accent-warn: #e67e22;
-            --accent-success: #28a745;
+            --accent-success: #16a34a;
             --accent-line: #06c755;
             --text-main: #2c3e50;
             --text-sub: #5a6b7c;
@@ -98,13 +98,10 @@
             align-items: center;
             gap: 6px;
             margin-top: 6px;
-            box-shadow: var(--shadow-sm);
+            box-shadow: 0 2px 6px rgba(0,0,0,0.1);
             transition: all 0.2s;
         }
-        .btn-print:hover {
-            background: #eef6fc;
-            transform: translateY(-1px);
-        }
+        .btn-print:hover { background: #f0f7ff; transform: translateY(-1px); }
 
         .container {
             max-width: 1060px;
@@ -116,92 +113,167 @@
             background: #ffffff;
             border: 1px solid var(--border);
             border-radius: var(--radius-md);
-            padding: 1rem 1.25rem;
+            padding: 1rem 1.5rem;
             margin-bottom: 2rem;
             box-shadow: var(--shadow-sm);
             display: flex;
             align-items: center;
+            gap: 1rem;
             flex-wrap: wrap;
-            gap: 0.8rem;
         }
         .toc-title {
-            font-size: 0.85rem;
             font-weight: bold;
             color: var(--primary);
-            display: flex;
-            align-items: center;
-            gap: 4px;
+            font-size: 0.9rem;
+            white-space: nowrap;
         }
         .toc-links {
             display: flex;
             flex-wrap: wrap;
-            gap: 0.5rem;
+            gap: 0.8rem;
+            font-size: 0.88rem;
         }
         .toc-links a {
-            font-size: 0.82rem;
-            text-decoration: none;
             color: var(--text-sub);
-            padding: 4px 10px;
-            border-radius: 6px;
-            background: #f1f5f9;
+            text-decoration: none;
+            padding: 2px 8px;
+            border-radius: 4px;
             transition: all 0.15s;
         }
         .toc-links a:hover {
             background: var(--primary-light);
             color: var(--primary);
+            font-weight: 500;
+        }
+
+        /* 進捗サマリーダッシュボード */
+        .progress-dashboard {
+            background: #ffffff;
+            border: 2px solid #bbf7d0;
+            border-radius: var(--radius-lg);
+            padding: 1.6rem;
+            margin-bottom: 2.2rem;
+            box-shadow: 0 4px 16px rgba(22, 163, 74, 0.08);
+        }
+        .pd-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 12px;
+            border-bottom: 2px solid #f1f5f9;
+            padding-bottom: 12px;
+            margin-bottom: 14px;
+        }
+        .pd-title {
+            font-size: 1.25rem;
+            font-weight: 900;
+            color: #15803d;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .badge-live-status {
+            background: #22c55e;
+            color: #fff;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.82rem;
+            font-weight: bold;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .pd-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+            gap: 12px;
+            margin-top: 12px;
+        }
+        .pd-card {
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: var(--radius-md);
+            padding: 14px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        .pd-card.highlight {
+            background: #f0fdf4;
+            border-color: #86efac;
+        }
+        .pd-card-tag {
+            font-size: 0.72rem;
+            font-weight: 900;
+            color: #15803d;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        .pd-card-title {
+            font-size: 0.95rem;
+            font-weight: 900;
+            color: #0f172a;
+        }
+        .pd-card-desc {
+            font-size: 0.82rem;
+            color: #475569;
+            line-height: 1.5;
         }
 
         .doc-section {
             background: var(--bg-card);
-            border: 1px solid var(--border);
             border-radius: var(--radius-lg);
-            padding: 2rem;
-            margin-bottom: 2rem;
+            padding: 2.2rem;
+            margin-bottom: 2.2rem;
             box-shadow: var(--shadow-sm);
+            border: 1px solid var(--border);
         }
         .section-header {
             display: flex;
             align-items: center;
             gap: 0.8rem;
-            margin-bottom: 1.5rem;
+            border-bottom: 2px solid var(--border);
             padding-bottom: 0.8rem;
-            border-bottom: 2px solid var(--primary-light);
+            margin-bottom: 1.5rem;
         }
         .section-num {
-            font-family: 'Outfit', sans-serif;
             background: var(--primary);
-            color: #fff;
-            width: 32px;
-            height: 32px;
-            border-radius: 8px;
+            color: #ffffff;
+            width: 34px;
+            height: 34px;
+            border-radius: 50%;
             display: flex;
             align-items: center;
             justify-content: center;
+            font-weight: 900;
+            font-family: 'Outfit', sans-serif;
             font-size: 1.1rem;
-            font-weight: bold;
+            flex-shrink: 0;
         }
         .section-header h2 {
-            font-size: 1.35rem;
-            color: var(--primary-dark);
+            font-size: 1.45rem;
             font-weight: 900;
+            color: var(--primary-dark);
+            letter-spacing: -0.01em;
         }
 
         .problem-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
             gap: 1.2rem;
-            margin: 1.2rem 0;
+            margin-top: 1.2rem;
         }
         .problem-card {
-            background: #fff8f8;
-            border: 1px solid #fed7d7;
+            background: #fff5f5;
             border-left: 4px solid var(--accent-alert);
-            border-radius: 8px;
-            padding: 1.1rem;
+            padding: 1.2rem;
+            border-radius: 0 var(--radius-md) var(--radius-md) 0;
+            box-shadow: var(--shadow-sm);
         }
         .problem-card h3 {
-            font-size: 0.98rem;
-            color: var(--accent-alert);
+            font-size: 1rem;
+            color: #900;
             margin-bottom: 0.5rem;
             display: flex;
             align-items: center;
@@ -213,45 +285,43 @@
             line-height: 1.6;
         }
 
-        /* BCP Banner */
         .bcp-banner {
-            background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%);
-            border: 2px solid #86efac;
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            color: #ffffff;
             border-radius: var(--radius-md);
-            padding: 1.25rem 1.5rem;
-            margin: 1.5rem 0;
+            padding: 1.5rem;
+            margin-top: 1.8rem;
             display: flex;
             gap: 1.2rem;
-            align-items: center;
+            align-items: flex-start;
+            box-shadow: 0 4px 14px rgba(16, 185, 129, 0.25);
         }
         .bcp-icon {
-            font-size: 2.4rem;
+            font-size: 2.2rem;
             line-height: 1;
         }
         .bcp-content h3 {
-            font-size: 1.05rem;
-            color: #166534;
-            font-weight: 900;
-            margin-bottom: 4px;
+            font-size: 1.15rem;
+            font-weight: bold;
+            margin-bottom: 0.4rem;
         }
         .bcp-content p {
-            font-size: 0.88rem;
-            color: #15803d;
+            font-size: 0.9rem;
+            opacity: 0.95;
             line-height: 1.6;
         }
 
         .callout-box {
-            background: linear-gradient(135deg, #eef7ff 0%, #e0effe 100%);
-            border: 1px solid #b8daff;
-            border-left: 6px solid var(--primary);
-            border-radius: var(--radius-md);
-            padding: 1.25rem 1.5rem;
+            background: var(--primary-light);
+            border-left: 5px solid var(--primary);
+            padding: 1.4rem;
+            border-radius: 0 var(--radius-md) var(--radius-md) 0;
             margin: 1.5rem 0;
         }
         .callout-title {
-            font-weight: 900;
-            font-size: 1.05rem;
+            font-weight: bold;
             color: var(--primary-dark);
+            font-size: 1.05rem;
             margin-bottom: 0.6rem;
             display: flex;
             align-items: center;
@@ -259,133 +329,139 @@
         }
         .principles-list {
             list-style: none;
+            padding: 0;
             display: flex;
             flex-direction: column;
             gap: 0.6rem;
         }
         .principles-list li {
-            display: flex;
-            align-items: flex-start;
-            gap: 8px;
             font-size: 0.92rem;
-            font-weight: 500;
-            color: #1e3a8a;
+            display: flex;
+            align-items: baseline;
+            gap: 8px;
+        }
+        .principles-list li span {
+            font-weight: bold;
+            color: var(--primary);
+            font-family: 'Outfit', sans-serif;
         }
 
         .feature-block {
-            background: #fafbfc;
-            border: 1px solid #e2e8f0;
+            border: 1px solid var(--border);
             border-radius: var(--radius-md);
-            padding: 1.4rem;
-            margin-bottom: 1.5rem;
-            transition: all 0.2s;
-        }
-        .feature-block:hover {
-            border-color: #cbd5e1;
+            padding: 1.6rem;
+            margin-bottom: 1.8rem;
+            background: #ffffff;
             box-shadow: var(--shadow-sm);
         }
         .feature-badge {
             display: inline-block;
             font-size: 0.75rem;
             font-weight: bold;
-            padding: 2px 10px;
-            border-radius: 12px;
-            margin-bottom: 0.5rem;
+            padding: 3px 10px;
+            border-radius: 20px;
+            margin-bottom: 0.6rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
         }
-        .badge-line { background: #e8f9ee; color: var(--accent-line); border: 1px solid #b2e8c4; }
-        .badge-paper { background: #fef3c7; color: #b45309; border: 1px solid #fde68a; }
-        .badge-poster { background: #fee2e2; color: #991b1b; border: 1px solid #fecaca; }
-        .badge-sys { background: #e0f2fe; color: #0369a1; border: 1px solid #bae6fd; }
+        .badge-line { background: #dcfce7; color: #166534; }
+        .badge-paper { background: #e0f2fe; color: #075985; }
+        .badge-poster { background: #fef3c7; color: #92400e; }
+        .badge-sys { background: #f3e8ff; color: #6b21a8; }
 
         .feature-block h3 {
-            font-size: 1.12rem;
+            font-size: 1.2rem;
             color: var(--text-main);
             margin-bottom: 0.6rem;
-            display: flex;
-            align-items: center;
-            gap: 6px;
+            font-weight: 700;
         }
         .feature-block p {
             font-size: 0.9rem;
             color: var(--text-sub);
-            margin-bottom: 0.8rem;
+            margin-bottom: 1rem;
         }
 
-        /* Mockup: LINE Flex Message with 1-Tap Reply */
         .flex-mockup-wrapper {
             display: flex;
-            gap: 1.5rem;
+            gap: 2rem;
             flex-wrap: wrap;
             align-items: flex-start;
-            margin-top: 1rem;
+            margin-top: 1.2rem;
         }
         .flex-mockup {
             width: 320px;
-            background: #ffffff;
-            border-radius: 16px;
-            border: 1px solid #e0e0e0;
-            box-shadow: 0 4px 16px rgba(0,0,0,0.1);
-            overflow: hidden;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #7494c0;
+            border-radius: 18px;
+            padding: 12px;
+            box-shadow: var(--shadow-md);
+            flex-shrink: 0;
         }
         .flex-header {
             background: #dc3545;
-            color: #ffffff;
+            color: #fff;
             padding: 10px 14px;
+            border-radius: 12px 12px 0 0;
             font-weight: bold;
-            font-size: 0.85rem;
-            display: flex;
-            align-items: center;
-            gap: 6px;
+            font-size: 0.92rem;
+            text-align: center;
+            letter-spacing: 0.02em;
         }
         .flex-body {
+            background: #ffffff;
             padding: 14px;
+            font-size: 0.85rem;
         }
         .flex-title {
-            font-size: 1rem;
             font-weight: bold;
-            color: #111;
+            font-size: 1rem;
+            color: #1e293b;
             margin-bottom: 10px;
-            line-height: 1.4;
+            border-bottom: 1px solid #f1f5f9;
+            padding-bottom: 6px;
         }
         .flex-row {
             display: flex;
-            font-size: 0.8rem;
             margin-bottom: 6px;
             line-height: 1.4;
         }
         .flex-lbl {
             width: 65px;
-            color: #888;
+            font-weight: bold;
+            color: #64748b;
+            font-size: 0.78rem;
             flex-shrink: 0;
         }
         .flex-val {
-            color: #333;
+            color: #334155;
+            flex: 1;
             font-weight: 500;
         }
         .flex-val.warn {
-            color: #dc3545;
+            color: #dc2626;
             font-weight: bold;
         }
         .flex-footer {
-            border-top: 1px solid #f0f0f0;
-            padding: 12px;
-            background: #fafafa;
+            background: #f8fafc;
+            border-radius: 0 0 12px 12px;
+            padding: 10px 12px 12px;
             display: flex;
             flex-direction: column;
             gap: 6px;
+            border-top: 1px solid #e2e8f0;
         }
         .flex-btn-main {
             background: #06c755;
-            color: #fff;
-            padding: 9px;
-            border-radius: 8px;
-            font-size: 0.88rem;
+            color: #ffffff;
+            border: none;
+            padding: 10px;
+            border-radius: 6px;
             font-weight: bold;
-            display: block;
+            font-size: 0.88rem;
+            cursor: pointer;
             text-align: center;
             text-decoration: none;
-            box-shadow: 0 2px 4px rgba(6,199,85,0.25);
+            box-shadow: 0 2px 4px rgba(6, 199, 85, 0.3);
+            display: block;
         }
         .flex-btn-sub-group {
             display: flex;
@@ -393,73 +469,89 @@
         }
         .flex-btn-sub {
             flex: 1;
-            padding: 6px;
+            padding: 7px 4px;
             border-radius: 6px;
             font-size: 0.78rem;
             font-weight: bold;
             text-align: center;
             text-decoration: none;
-            color: #fff;
+            border: 1px solid #cbd5e1;
+            background: #ffffff;
+            color: #475569;
         }
-        .btn-sub-question { background: #e67e22; }
-        .btn-sub-absence { background: #6c757d; }
+        .btn-sub-question { color: #d97706; border-color: #fcd34d; background: #fffbeb; }
+        .btn-sub-absence { color: #dc2626; border-color: #fca5a5; background: #fef2f2; }
 
         .timeline {
             position: relative;
-            padding-left: 28px;
-            margin: 1.5rem 0;
+            padding-left: 2rem;
+            margin-top: 1.5rem;
         }
         .timeline::before {
             content: '';
             position: absolute;
-            left: 10px;
-            top: 5px;
-            bottom: 5px;
+            left: 9px;
+            top: 10px;
+            bottom: 10px;
             width: 2px;
-            background: #cbd5e1;
+            background: var(--border);
         }
         .timeline-step {
             position: relative;
-            margin-bottom: 1.5rem;
-        }
-        .timeline-step:last-child {
-            margin-bottom: 0;
+            margin-bottom: 2rem;
         }
         .timeline-dot {
             position: absolute;
-            left: -28px;
-            top: 4px;
-            width: 22px;
-            height: 22px;
+            left: -2rem;
+            top: 2px;
+            width: 20px;
+            height: 20px;
             border-radius: 50%;
-            background: var(--primary);
-            color: #ffffff;
-            font-size: 0.72rem;
-            font-weight: bold;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            box-shadow: 0 0 0 3px #ffffff;
+            background: #ffffff;
+            border: 4px solid var(--primary);
+            box-sizing: border-box;
+            z-index: 1;
+        }
+        .timeline-step.completed .timeline-dot {
+            background: #16a34a;
+            border-color: #bbf7d0;
+        }
+        .timeline-step.current .timeline-dot {
+            background: #e67e22;
+            border-color: #fed7aa;
         }
         .timeline-content {
             background: #ffffff;
             border: 1px solid var(--border);
-            border-radius: 8px;
-            padding: 1rem 1.25rem;
+            border-radius: var(--radius-md);
+            padding: 1.2rem;
+            box-shadow: var(--shadow-sm);
         }
         .timeline-title {
             font-weight: bold;
             font-size: 0.98rem;
             color: var(--primary-dark);
-            margin-bottom: 4px;
+            margin-bottom: 6px;
             display: flex;
             align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
             gap: 6px;
         }
         .timeline-desc {
             font-size: 0.86rem;
             color: var(--text-sub);
+            line-height: 1.6;
         }
+        .badge-phase {
+            font-size: 0.72rem;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-weight: bold;
+        }
+        .phase-done { background: #dcfce7; color: #166534; }
+        .phase-wip { background: #ffedd5; color: #c2410c; }
+        .phase-todo { background: #f1f5f9; color: #64748b; }
 
         footer {
             text-align: center;
@@ -475,7 +567,7 @@
             .header-meta, .btn-print, .toc-bar { display: none !important; }
             .header-title h1 { color: #005a9c; }
             .container { max-width: 100%; margin: 0; padding: 0; }
-            .doc-section { box-shadow: none !important; border: 1px solid #ccc !important; page-break-inside: avoid; margin-bottom: 1.5rem !important; }
+            .doc-section, .progress-dashboard { box-shadow: none !important; border: 1px solid #ccc !important; page-break-inside: avoid; margin-bottom: 1.5rem !important; }
             .flex-mockup { box-shadow: none !important; border: 1px solid #999 !important; }
         }
     </style>
@@ -486,19 +578,64 @@
         <div class="header-inner">
             <div class="header-title">
                 <span class="header-tag">医療法人小野会 かわら版 業務改革計画</span>
-                <h1>📜 院内かわら版 開発指針書</h1>
+                <h1>📜 院内かわら版 開発指針書 ＆ 進捗レポート</h1>
                 <p>〜 BCP災害連絡網の大義名分 ✕ 1タップ意思表示 ✕ 不在日自律運用 〜</p>
             </div>
             <div class="header-meta">
                 <div><strong>作成者:</strong> 事務長（開発担当）</div>
-                <div><strong>策定日:</strong> 2026年10月（改定版）</div>
-                <div><strong>適用対象:</strong> 院内かわら版システム</div>
+                <div><strong>改定日:</strong> 2026年10月（最新実証済み）</div>
+                <div><strong>適用対象:</strong> 院内かわら版システム ＆ 職員ポータル</div>
                 <button type="button" class="btn-print" onclick="window.print()">🖨️ A4印刷する</button>
             </div>
         </div>
     </header>
 
     <div class="container">
+
+        <!-- 最新実装進捗ダッシュボード -->
+        <div class="progress-dashboard">
+            <div class="pd-header">
+                <div class="pd-title">
+                    ⚡ 現在の開発・実装進捗ステータス
+                </div>
+                <div class="badge-live-status">
+                    🟢 Phase 1 完了・LINE実証稼働中
+                </div>
+            </div>
+            <p style="font-size:0.88rem; color:#334155; margin-bottom:10px;">
+                LINE公式アカウント「<strong>おの肛門科</strong>（<code>@tmw3446q</code>）」との双方向Webhook連携、4桁コードによるスタッフ自動紐付け、および安否確認一斉配信のLINE実送受信テスト（HTTP 200）に成功しました。
+            </p>
+            <div class="pd-grid">
+                <div class="pd-card highlight">
+                    <span class="pd-card-tag">✅ 実装・実証完了</span>
+                    <div class="pd-card-title">LINE Messaging API 双方向基盤</div>
+                    <div class="pd-card-desc">
+                        長期アクセストークン・シークレット認証、Webhook（<code>api/line_webhook.php</code>）連携が完成。山本太事務長の実機LINEへのプッシュ配信・受信に成功。
+                    </div>
+                </div>
+                <div class="pd-card highlight">
+                    <span class="pd-card-tag">✅ 実装・実証完了</span>
+                    <div class="pd-card-title">3ステップ数字コード自動連携</div>
+                    <div class="pd-card-desc">
+                        QRコードスキャン後、画面の4桁数字をLINEトークへ送るだけで自動認証・DB即時紐付け（<code>line_link_codes</code>）。手動入力も併設。
+                    </div>
+                </div>
+                <div class="pd-card highlight">
+                    <span class="pd-card-tag">✅ 実装・実証完了</span>
+                    <div class="pd-card-title">安否確認連絡網（LINE一斉・個別送信）</div>
+                    <div class="pd-card-desc">
+                        <code>safety_contacts.php</code> に「💬 LINE安否連絡」モーダル、点呼発令時のLINE一斉配信、および職員カードからの個別送信ボタンを完備。
+                    </div>
+                </div>
+                <div class="pd-card highlight">
+                    <span class="pd-card-tag">✅ 実装・実証完了</span>
+                    <div class="pd-card-title">職員マスター管理画面（./stf/）</div>
+                    <div class="pd-card-desc">
+                        <code>stf/master_mente.php</code> を新設。JSON原本のCRUD、重複検査、自動タイムスタンプ退避（<code>stf/bak/</code>）、かわら版DB即時同期を実現。
+                    </div>
+                </div>
+            </div>
+        </div>
 
         <!-- 目次バー -->
         <div class="toc-bar">
@@ -507,8 +644,8 @@
                 <a href="#section1">1. 現場の課題とBCP戦略</a>
                 <a href="#section2">2. コア設計思想</a>
                 <a href="#section3">3. 4大中核機能（1タップ返答）</a>
-                <a href="#section4">4. 開発ロードマップ</a>
-                <a href="#section5">5. 後任引き継ぎ・保守</a>
+                <a href="#section4">4. 開発ロードマップ（進捗状況）</a>
+                <a href="#section5">5. 後任引き継ぎ・保守ガイド</a>
             </div>
         </div>
 
@@ -584,12 +721,12 @@
         <section class="doc-section" id="section3">
             <div class="section-header">
                 <div class="section-num">3</div>
-                <h2>4大中核機能の仕様</h2>
+                <h2>4大中核機能の仕様 ＆ 実装詳細</h2>
             </div>
 
             <!-- 機能1 -->
             <div class="feature-block">
-                <span class="feature-badge badge-line">中核機能 1</span>
+                <span class="feature-badge badge-line">中核機能 1（基盤稼働中）</span>
                 <h3>📱 LINE Flex Message ✕ 1タップ意思表示エンジン</h3>
                 <p>
                     PDF添付を完全撤廃。トーク画面にカード型UIが直接届き、スタッフはアプリから離れずに<strong>1タップで「了解」「質問あり」「不在」</strong>の返答を送信可能。
@@ -685,34 +822,44 @@
         <section class="doc-section" id="section4">
             <div class="section-header">
                 <div class="section-num">4</div>
-                <h2>開発・導入ロードマップ</h2>
+                <h2>開発・導入ロードマップ（最新実績）</h2>
             </div>
 
             <div class="timeline">
-                <div class="timeline-step">
-                    <div class="timeline-dot">1</div>
+                <div class="timeline-step completed">
+                    <div class="timeline-dot"></div>
                     <div class="timeline-content">
-                        <div class="timeline-title">Phase 1: BCP登録案内 ＆ LINE Flex Message（1タップ返答）基盤構築</div>
+                        <div class="timeline-title">
+                            <span>Phase 1: BCP登録案内 ＆ LINE連携基盤・安否確認一斉送信</span>
+                            <span class="badge-phase phase-done">✅ 完了・稼働中</span>
+                        </div>
                         <div class="timeline-desc">
-                            「災害安否確認連絡網」のQRコード登録フロー確立。<code>line_helper.php</code> を拡張し、1タップ意思表示付きFlex Message送信を実装。
+                            <strong>【実績】</strong>
+                            LINE公式アカウント「おの肛門科（<code>@tmw3446q</code>）」とMessaging API連携を完了。4桁コード送信によるスタッフ自動紐付け、<code>safety_contacts.php</code> での一斉・個別LINE安否連絡送信、および <code>stf/master_mente.php</code> の職員マスター管理システムを完全構築・実機テスト済。
+                        </div>
+                    </div>
+                </div>
+
+                <div class="timeline-step current">
+                    <div class="timeline-dot"></div>
+                    <div class="timeline-content">
+                        <div class="timeline-title">
+                            <span>Phase 2: 現場貼り出しポスター ＆ 不在日カバーまとめ印刷</span>
+                            <span class="badge-phase phase-wip">🚀 進行中</span>
+                        </div>
+                        <div class="timeline-desc">
+                            A4横特大ポスター印刷テンプレートの実装、水曜・金曜退勤前の不在期間（木曜・土日）まとめ伝達シート出力機能の整備。
                         </div>
                     </div>
                 </div>
 
                 <div class="timeline-step">
-                    <div class="timeline-dot">2</div>
+                    <div class="timeline-dot"></div>
                     <div class="timeline-content">
-                        <div class="timeline-title">Phase 2: 現場貼り出しポスター ＆ 不在日カバーまとめ印刷</div>
-                        <div class="timeline-desc">
-                            A4横特大ポスター印刷テンプレートの実装、水曜・金曜退勤前の不在期間まとめ伝達シート出力機能の整備。
+                        <div class="timeline-title">
+                            <span>Phase 3: 自動リマインド配信エンジン ＆ 返答集計ダッシュボード</span>
+                            <span class="badge-phase phase-todo">⏳ 予定</span>
                         </div>
-                    </div>
-                </div>
-
-                <div class="timeline-step">
-                    <div class="timeline-dot">3</div>
-                    <div class="timeline-content">
-                        <div class="timeline-title">Phase 3: 自動リマインド配信エンジン ＆ 返答集計ダッシュボード</div>
                         <div class="timeline-desc">
                             前日夕方・当日朝に自動でLINE通知を飛ばすバッチ処理の構築。「誰が了解したか」がひと目でわかる集計表示。
                         </div>
@@ -720,9 +867,12 @@
                 </div>
 
                 <div class="timeline-step">
-                    <div class="timeline-dot">4</div>
+                    <div class="timeline-dot"></div>
                     <div class="timeline-content">
-                        <div class="timeline-title">Phase 4: ネットワークプリンタ定時自動排紙 ＆ サイネージモード</div>
+                        <div class="timeline-title">
+                            <span>Phase 4: ネットワークプリンタ定時自動排紙 ＆ サイネージモード</span>
+                            <span class="badge-phase phase-todo">⏳ 予定</span>
+                        </div>
                         <div class="timeline-desc">
                             PowerShell連携による朝礼シートの自動排紙。ナースステーション用常時巡回表示画面（<code>signage.php</code>）の構築。
                         </div>
@@ -740,15 +890,25 @@
             <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:1.2rem; font-size:0.88rem; color:#333;">
                 <p><strong>■ 設定ファイルの集約先:</strong></p>
                 <ul style="padding-left:1.2rem; margin-bottom:1rem;">
-                    <li>LINEアクセストークン: <code>includes/line_helper.php</code></li>
-                    <li>データベース設定: 各PHP冒頭のPDO設定（将来的に <code>includes/db.php</code> に集約）</li>
+                    <li><strong>LINE Bot設定:</strong> <code>includes/line_helper.php</code>（ボットID: <code>@tmw3446q</code> おの肛門科、長期アクセストークン、チャネルシークレット）</li>
+                    <li><strong>LINE Webhook受信:</strong> <code>api/line_webhook.php</code>（4桁コード判定、自動友だち紐付け、自動あいさつ返答）</li>
+                    <li><strong>データベース設定:</strong> PostgreSQL <code>kawara</code>（各スクリプト冒頭のPDO設定）</li>
                 </ul>
+
                 <p><strong>■ 職員マスターの一元管理（STF連携アーキテクチャ）:</strong></p>
                 <ul style="padding-left:1.2rem; margin-bottom:1rem;">
-                    <li><strong>原本（信頼できる情報源）:</strong> <code>../stf/staff_data.json</code>（職員情報検索アプリ側）</li>
-                    <li><strong>運用ルール:</strong> スタッフのマスターメンテ（入職・退職・改姓・携帯番号変更等）はすべて <code>stf</code> 側で実施。</li>
-                    <li><strong>自動同期の仕組み:</strong> <code>stf/api.php</code> を介して、かわら版（<code>safety_contacts.php</code>）の「🔄 STF同期」ボタン1発で、全職員の最新情報（正確な氏名、カナ、携帯電話番号、役職）がかわら版DBへ即座に完全反映される。二重メンテの負担ゼロ。</li>
+                    <li><strong>原本（信頼できる単一の情報源）:</strong> <code>../stf/staff_data.json</code></li>
+                    <li><strong>マスター管理画面:</strong> <code>../stf/master_mente.php</code>（登録・編集・削除・自動バックアップ <code>stf/bak/</code>）</li>
+                    <li><strong>運用ルール:</strong> スタッフのマスターメンテナンス（入職・退職・改姓・携帯番号変更等）はすべて <code>stf</code> 側で実施。</li>
+                    <li><strong>自動同期の仕組み:</strong> かわら版（<code>safety_contacts.php</code>）の「🔄 STF同期」ボタン、または <code>stf/master_mente.php</code> の「🔄 かわら版へ即時同期」ボタン1発で、全職員情報が完全同期されます。</li>
                 </ul>
+
+                <p><strong>■ 災害緊急モード切替権限（暗証番号）:</strong></p>
+                <ul style="padding-left:1.2rem; margin-bottom:1rem;">
+                    <li>平時・訓練モード（嘘番号・住所非表示）と災害緊急モード（全個人情報開示）の切り替えには、特定権限者の暗証番号が必要です。</li>
+                    <li>権限者および暗証番号の設定・変更は、<code>admin_disaster_staff.php</code>（管理者画面）から実施します。</li>
+                </ul>
+
                 <p><strong>■ 後任の日常ルーティン（引き継ぎマニュアル要点）:</strong></p>
                 <ol style="padding-left:1.2rem; line-height:1.6;">
                     <li>業者から工事等の連絡を受けたら、かわら版で「設備・営繕」で投稿する。</li>
