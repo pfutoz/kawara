@@ -21,6 +21,12 @@ if (file_exists('includes/stf_sync.php')) {
 if (file_exists('includes/line_helper.php')) {
     require_once 'includes/line_helper.php';
 }
+$tunnel_status = function_exists('getLineTunnelStatus') ? getLineTunnelStatus() : [
+    'is_online'   => false,
+    'url'         => '',
+    'webhook_url' => '',
+    'checked_at'  => ''
+];
 
 // ログイン中であればユーザー情報を取得（未ログインでもOK）
 $current_staff_id = isset($_SESSION['staff_id']) ? (int)$_SESSION['staff_id'] : 0;
@@ -884,6 +890,59 @@ $all_staff_for_select = $pdo->query("SELECT staff_id, staff_name, dept_id, role,
         .line-badge.active { background: #e8f9ee; color: #06c755; border: 1px solid #b2e8c4; }
         .line-badge.inactive { background: #f1f5f9; color: #94a3b8; }
 
+        /* トンネルステータスバッジ（ヘッダー用） */
+        .btn-tunnel-status {
+            display: inline-flex;
+            align-items: center;
+            gap: 7px;
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 0.82rem;
+            font-weight: 700;
+            text-decoration: none;
+            cursor: pointer;
+            transition: all 0.2s;
+            border: 1px solid transparent;
+            font-family: inherit;
+        }
+        .btn-tunnel-status.online {
+            background: #dcfce7;
+            color: #15803d;
+            border-color: #86efac;
+            box-shadow: 0 1px 4px rgba(22, 163, 74, 0.2);
+        }
+        .btn-tunnel-status.online:hover {
+            background: #bbf7d0;
+            transform: translateY(-1px);
+        }
+        .btn-tunnel-status.offline {
+            background: rgba(255, 255, 255, 0.15);
+            color: #cbd5e1;
+            border-color: rgba(255, 255, 255, 0.25);
+        }
+        .btn-tunnel-status.offline:hover {
+            background: rgba(255, 255, 255, 0.25);
+        }
+        .pulse-dot {
+            width: 9px;
+            height: 9px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+        .pulse-dot.online {
+            background: #16a34a;
+            box-shadow: 0 0 0 0 rgba(22, 163, 74, 0.7);
+            animation: pulse-green 2s infinite;
+        }
+        .pulse-dot.offline {
+            background: #94a3b8;
+        }
+        @keyframes pulse-green {
+            0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(22, 163, 74, 0.7); }
+            70% { transform: scale(1.15); box-shadow: 0 0 0 7px rgba(22, 163, 74, 0); }
+            100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(22, 163, 74, 0); }
+        }
+
         .phone-link { color: var(--primary); text-decoration: none; font-weight: bold; }
         .phone-link:hover { text-decoration: underline; }
 
@@ -1236,6 +1295,10 @@ $all_staff_for_select = $pdo->query("SELECT staff_id, staff_name, dept_id, role,
                         🔄 STF同期
                     </button>
                 </form>
+                <button type="button" class="btn-tunnel-status <?= $tunnel_status['is_online'] ? 'online' : 'offline' ?>" onclick="openTunnelStatusModal()" title="クリックしてLINE新規受付トンネルの稼働状況を確認">
+                    <span class="pulse-dot <?= $tunnel_status['is_online'] ? 'online' : 'offline' ?>"></span>
+                    LINE新規受付: <?= $tunnel_status['is_online'] ? '🟢 稼働中' : '⚪ 停止中' ?>
+                </button>
                 <button type="button" class="btn-header" onclick="openLineSendModal()" style="background:#06c755; font-weight:bold;">💬 LINE安否連絡</button>
                 <button type="button" class="btn-header" onclick="openEventModal()" style="background:#b91c1c;">📢 点呼発令</button>
             </div>
@@ -1847,6 +1910,72 @@ $all_staff_for_select = $pdo->query("SELECT staff_id, staff_name, dept_id, role,
         </div>
     </div>
 
+    <!-- 🌐 LINE連携トンネル状況モーダル -->
+    <div id="tunnelStatusModal" class="modal">
+        <div class="modal-content" style="max-width:540px; border-radius:12px; box-shadow:0 8px 30px rgba(0,0,0,0.2);">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; border-bottom:1px solid #e2e8f0; padding-bottom:8px;">
+                <h3 style="margin:0; font-size:1.15rem; color:#0f172a; display:flex; align-items:center; gap:8px;">
+                    🌐 LINE新規連携トンネルの接続状況
+                </h3>
+                <button type="button" onclick="closeTunnelStatusModal()" style="background:none; border:none; font-size:1.3rem; cursor:pointer; color:#94a3b8;">✕</button>
+            </div>
+
+            <div style="padding:4px 0 12px 0;">
+                <?php if ($tunnel_status['is_online']): ?>
+                    <div style="background:#ecfdf5; border:1px solid #a7f3d0; border-radius:8px; padding:14px; margin-bottom:14px;">
+                        <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
+                            <span class="pulse-dot online"></span>
+                            <strong style="color:#065f46; font-size:1.05rem;">🟢 現在トンネルは「稼働中（ONLINE）」です</strong>
+                        </div>
+                        <p style="font-size:0.88rem; color:#047857; margin:0; line-height:1.6;">
+                            スタッフがLINE公式アカウント「おの肛門科」に<strong>4桁連携コードを送信すると、即座に自動紐付け</strong>されます。<br>
+                            ※ 新規登録テストやスタッフ登録会をそのまま実施いただけます。
+                        </p>
+                    </div>
+
+                    <?php if (!empty($tunnel_status['webhook_url'])): ?>
+                        <div style="margin-bottom:14px;">
+                            <label style="display:block; font-weight:bold; font-size:0.82rem; margin-bottom:4px; color:#334155;">現在の Webhook URL（LINE Developers登録用）</label>
+                            <div style="display:flex; gap:6px;">
+                                <input type="text" id="tunnelWebhookUrlInput" readonly value="<?= htmlspecialchars($tunnel_status['webhook_url']) ?>" style="flex:1; font-size:0.82rem; padding:8px 10px; border:1px solid #cbd5e1; border-radius:6px; background:#f8fafc; font-family:monospace; color:#0f172a;">
+                                <button type="button" onclick="copyTunnelWebhookUrl()" style="background:#0284c7; color:#fff; border:none; padding:8px 14px; border-radius:6px; font-weight:bold; font-size:0.82rem; cursor:pointer; white-space:nowrap;">📋 コピー</button>
+                            </div>
+                            <div id="copySuccessMsg" style="display:none; font-size:0.75rem; color:#16a34a; font-weight:bold; margin-top:4px;">✓ クリップボードにコピーしました！</div>
+                            <div style="font-size:0.75rem; color:#64748b; margin-top:6px; line-height:1.5;">
+                                ※ LINE Developersの「Messaging API設定」→「Webhook URL」に上記を貼り付けて「検証」してください。
+                            </div>
+                        </div>
+                    <?php endif; ?>
+
+                <?php else: ?>
+                    <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:14px; margin-bottom:14px;">
+                        <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
+                            <span class="pulse-dot offline"></span>
+                            <strong style="color:#475569; font-size:1.05rem;">⚪ 現在トンネルは「停止中（OFFLINE）」です</strong>
+                        </div>
+                        <p style="font-size:0.88rem; color:#475569; margin:0; line-height:1.6;">
+                            外部からのWebhook受信（4桁コードの新規自動紐付け）は現在停止しています。
+                        </p>
+                    </div>
+
+                    <div style="background:#eff6ff; border:1px solid #bfdbfe; border-radius:8px; padding:12px; margin-bottom:14px; font-size:0.86rem; color:#1e40af; line-height:1.6;">
+                        💡 <strong>重要（メッセージ送信は可能）:</strong><br>
+                        すでに連携済みのスタッフ（山本 太 様など）への安否連絡送信は、トンネル停止中でも<strong>何の問題もなく通常通り配信可能</strong>です。新規スタッフの登録を行う日のみトンネルを起動してください。
+                    </div>
+                <?php endif; ?>
+
+                <div style="background:#f1f5f9; border-radius:6px; padding:10px 12px; font-size:0.78rem; color:#475569;">
+                    <div><strong>判定時刻:</strong> <?= htmlspecialchars($tunnel_status['checked_at']) ?> （画面再読み込みで最新状態を再判定）</div>
+                    <div style="margin-top:2px;"><strong>判定方式:</strong> ローカルメトリクスポート（127.0.0.1:20241）超高速ヘルスチェック</div>
+                </div>
+            </div>
+
+            <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:12px; border-top:1px solid #f1f5f9; padding-top:10px;">
+                <button type="button" onclick="closeTunnelStatusModal()" style="background:#e2e8f0; border:none; padding:8px 18px; border-radius:6px; font-weight:bold; cursor:pointer; font-size:0.88rem;">閉じる</button>
+            </div>
+        </div>
+    </div>
+
     <!-- 📱 災害モード切替用 数字キータッチパッドモーダル（医師・管理者 認証） -->
     <div id="disasterPinModal" class="pin-modal-overlay">
         <div class="pin-card">
@@ -2090,6 +2219,36 @@ $all_staff_for_select = $pdo->query("SELECT staff_id, staff_name, dept_id, role,
             txt.value = "🛡️ 【医療法人小野会 安否確認訓練テスト】\n本日は避難・安否点呼の訓練日です。下記リンクより1秒生存報告の動作確認をお願いします：\n" + safetyUrl;
         } else if (type === 'urgent') {
             txt.value = "⚠️ 【医療法人小野会 緊急招集・連絡】\n急遽伝達事項があります。職員連絡網を確認し、指定の部署または対策本部へ出勤・連絡をお願いします：\n" + safetyUrl;
+        }
+    }
+
+    function openTunnelStatusModal() {
+        document.getElementById('tunnelStatusModal').classList.add('active');
+    }
+    function closeTunnelStatusModal() {
+        document.getElementById('tunnelStatusModal').classList.remove('active');
+        const msg = document.getElementById('copySuccessMsg');
+        if (msg) msg.style.display = 'none';
+    }
+    function copyTunnelWebhookUrl() {
+        const input = document.getElementById('tunnelWebhookUrlInput');
+        if (input) {
+            input.select();
+            input.setSelectionRange(0, 99999);
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(input.value).then(() => {
+                    const msg = document.getElementById('copySuccessMsg');
+                    if (msg) msg.style.display = 'block';
+                }).catch(() => {
+                    document.execCommand('copy');
+                    const msg = document.getElementById('copySuccessMsg');
+                    if (msg) msg.style.display = 'block';
+                });
+            } else {
+                document.execCommand('copy');
+                const msg = document.getElementById('copySuccessMsg');
+                if (msg) msg.style.display = 'block';
+            }
         }
     }
     </script>

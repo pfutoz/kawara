@@ -228,3 +228,45 @@ function unlinkStaffLine($pdo, $staff_id) {
     $stmt->execute([':sid' => (int)$staff_id]);
     return true;
 }
+
+/**
+ * Cloudflareトンネルの稼働状況およびURLを高速取得する
+ * 
+ * @return array ['is_online' => bool, 'url' => string, 'webhook_url' => string, 'checked_at' => string]
+ */
+function getLineTunnelStatus() {
+    $is_online = false;
+    $url = '';
+    
+    // cloudflaredのメトリクスポート（127.0.0.1:20241）をタイムアウト0.15秒で高速チェック
+    $fp = @fsockopen('127.0.0.1', 20241, $errno, $errstr, 0.15);
+    if ($fp) {
+        $is_online = true;
+        fclose($fp);
+    }
+
+    if ($is_online) {
+        // ログファイルから直近のtrycloudflare URLを探索
+        $possible_logs = [
+            'C:/Users/Owner/.gemini/antigravity-ide/brain/2a6cb00d-b8f4-4fcf-8abe-5c28581fc417/scratch/tunnel_quick.log',
+            'C:/Users/Owner/.gemini/antigravity-ide/brain/2a6cb00d-b8f4-4fcf-8abe-5c28581fc417/scratch/tunnel.log'
+        ];
+        foreach ($possible_logs as $log_path) {
+            if (file_exists($log_path)) {
+                $content = @file_get_contents($log_path);
+                if ($content && preg_match_all('/https:\/\/[a-z0-9\-]+\.trycloudflare\.com/', $content, $matches)) {
+                    $urls = $matches[0];
+                    $url = end($urls); // 最も最新のURLを取得
+                    break;
+                }
+            }
+        }
+    }
+
+    return [
+        'is_online'   => $is_online,
+        'url'         => $url,
+        'webhook_url' => $url ? $url . '/kawara/api/line_webhook.php' : '',
+        'checked_at'  => date('H:i:s')
+    ];
+}
