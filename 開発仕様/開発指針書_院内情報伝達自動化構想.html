@@ -1,0 +1,769 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>院内かわら版 開発指針書 | 医療法人小野会</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&family=Outfit:wght@600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #005a9c;
+            --primary-light: #e8f2f9;
+            --primary-dark: #003d6b;
+            --accent-alert: #dc3545;
+            --accent-warn: #e67e22;
+            --accent-success: #28a745;
+            --accent-line: #06c755;
+            --text-main: #2c3e50;
+            --text-sub: #5a6b7c;
+            --bg-body: #f8fafc;
+            --bg-card: #ffffff;
+            --border: #e2e8f0;
+            --shadow-sm: 0 1px 3px rgba(0,0,0,0.06);
+            --shadow-md: 0 4px 12px rgba(0,0,0,0.08);
+            --radius-md: 10px;
+            --radius-lg: 16px;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Noto Sans JP', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: var(--bg-body);
+            color: var(--text-main);
+            line-height: 1.7;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        header {
+            background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+            color: #ffffff;
+            padding: 2.5rem 1.5rem;
+            box-shadow: 0 4px 20px rgba(0, 90, 156, 0.25);
+            position: relative;
+        }
+        .header-inner {
+            max-width: 1060px;
+            margin: 0 auto;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 1.5rem;
+        }
+        .header-tag {
+            display: inline-block;
+            background: rgba(255, 255, 255, 0.2);
+            padding: 3px 12px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            letter-spacing: 0.05em;
+            margin-bottom: 0.5rem;
+        }
+        .header-title h1 {
+            font-size: 1.8rem;
+            font-weight: 900;
+            letter-spacing: -0.02em;
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+        }
+        .header-title p {
+            font-size: 0.95rem;
+            opacity: 0.9;
+            margin-top: 0.3rem;
+        }
+        .header-meta {
+            background: rgba(255, 255, 255, 0.15);
+            backdrop-filter: blur(10px);
+            padding: 0.8rem 1.2rem;
+            border-radius: var(--radius-md);
+            font-size: 0.85rem;
+            border: 1px solid rgba(255,255,255,0.2);
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .btn-print {
+            background: #ffffff;
+            color: var(--primary);
+            border: none;
+            padding: 8px 16px;
+            border-radius: 6px;
+            font-weight: bold;
+            font-size: 0.88rem;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            margin-top: 6px;
+            box-shadow: var(--shadow-sm);
+            transition: all 0.2s;
+        }
+        .btn-print:hover {
+            background: #eef6fc;
+            transform: translateY(-1px);
+        }
+
+        .container {
+            max-width: 1060px;
+            margin: 2rem auto;
+            padding: 0 1.5rem;
+        }
+
+        .toc-bar {
+            background: #ffffff;
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            padding: 1rem 1.25rem;
+            margin-bottom: 2rem;
+            box-shadow: var(--shadow-sm);
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 0.8rem;
+        }
+        .toc-title {
+            font-size: 0.85rem;
+            font-weight: bold;
+            color: var(--primary);
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .toc-links {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+        }
+        .toc-links a {
+            font-size: 0.82rem;
+            text-decoration: none;
+            color: var(--text-sub);
+            padding: 4px 10px;
+            border-radius: 6px;
+            background: #f1f5f9;
+            transition: all 0.15s;
+        }
+        .toc-links a:hover {
+            background: var(--primary-light);
+            color: var(--primary);
+        }
+
+        .doc-section {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-lg);
+            padding: 2rem;
+            margin-bottom: 2rem;
+            box-shadow: var(--shadow-sm);
+        }
+        .section-header {
+            display: flex;
+            align-items: center;
+            gap: 0.8rem;
+            margin-bottom: 1.5rem;
+            padding-bottom: 0.8rem;
+            border-bottom: 2px solid var(--primary-light);
+        }
+        .section-num {
+            font-family: 'Outfit', sans-serif;
+            background: var(--primary);
+            color: #fff;
+            width: 32px;
+            height: 32px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.1rem;
+            font-weight: bold;
+        }
+        .section-header h2 {
+            font-size: 1.35rem;
+            color: var(--primary-dark);
+            font-weight: 900;
+        }
+
+        .problem-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 1.2rem;
+            margin: 1.2rem 0;
+        }
+        .problem-card {
+            background: #fff8f8;
+            border: 1px solid #fed7d7;
+            border-left: 4px solid var(--accent-alert);
+            border-radius: 8px;
+            padding: 1.1rem;
+        }
+        .problem-card h3 {
+            font-size: 0.98rem;
+            color: var(--accent-alert);
+            margin-bottom: 0.5rem;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .problem-card p {
+            font-size: 0.88rem;
+            color: #4a5568;
+            line-height: 1.6;
+        }
+
+        /* BCP Banner */
+        .bcp-banner {
+            background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%);
+            border: 2px solid #86efac;
+            border-radius: var(--radius-md);
+            padding: 1.25rem 1.5rem;
+            margin: 1.5rem 0;
+            display: flex;
+            gap: 1.2rem;
+            align-items: center;
+        }
+        .bcp-icon {
+            font-size: 2.4rem;
+            line-height: 1;
+        }
+        .bcp-content h3 {
+            font-size: 1.05rem;
+            color: #166534;
+            font-weight: 900;
+            margin-bottom: 4px;
+        }
+        .bcp-content p {
+            font-size: 0.88rem;
+            color: #15803d;
+            line-height: 1.6;
+        }
+
+        .callout-box {
+            background: linear-gradient(135deg, #eef7ff 0%, #e0effe 100%);
+            border: 1px solid #b8daff;
+            border-left: 6px solid var(--primary);
+            border-radius: var(--radius-md);
+            padding: 1.25rem 1.5rem;
+            margin: 1.5rem 0;
+        }
+        .callout-title {
+            font-weight: 900;
+            font-size: 1.05rem;
+            color: var(--primary-dark);
+            margin-bottom: 0.6rem;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .principles-list {
+            list-style: none;
+            display: flex;
+            flex-direction: column;
+            gap: 0.6rem;
+        }
+        .principles-list li {
+            display: flex;
+            align-items: flex-start;
+            gap: 8px;
+            font-size: 0.92rem;
+            font-weight: 500;
+            color: #1e3a8a;
+        }
+
+        .feature-block {
+            background: #fafbfc;
+            border: 1px solid #e2e8f0;
+            border-radius: var(--radius-md);
+            padding: 1.4rem;
+            margin-bottom: 1.5rem;
+            transition: all 0.2s;
+        }
+        .feature-block:hover {
+            border-color: #cbd5e1;
+            box-shadow: var(--shadow-sm);
+        }
+        .feature-badge {
+            display: inline-block;
+            font-size: 0.75rem;
+            font-weight: bold;
+            padding: 2px 10px;
+            border-radius: 12px;
+            margin-bottom: 0.5rem;
+        }
+        .badge-line { background: #e8f9ee; color: var(--accent-line); border: 1px solid #b2e8c4; }
+        .badge-paper { background: #fef3c7; color: #b45309; border: 1px solid #fde68a; }
+        .badge-poster { background: #fee2e2; color: #991b1b; border: 1px solid #fecaca; }
+        .badge-sys { background: #e0f2fe; color: #0369a1; border: 1px solid #bae6fd; }
+
+        .feature-block h3 {
+            font-size: 1.12rem;
+            color: var(--text-main);
+            margin-bottom: 0.6rem;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .feature-block p {
+            font-size: 0.9rem;
+            color: var(--text-sub);
+            margin-bottom: 0.8rem;
+        }
+
+        /* Mockup: LINE Flex Message with 1-Tap Reply */
+        .flex-mockup-wrapper {
+            display: flex;
+            gap: 1.5rem;
+            flex-wrap: wrap;
+            align-items: flex-start;
+            margin-top: 1rem;
+        }
+        .flex-mockup {
+            width: 320px;
+            background: #ffffff;
+            border-radius: 16px;
+            border: 1px solid #e0e0e0;
+            box-shadow: 0 4px 16px rgba(0,0,0,0.1);
+            overflow: hidden;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        }
+        .flex-header {
+            background: #dc3545;
+            color: #ffffff;
+            padding: 10px 14px;
+            font-weight: bold;
+            font-size: 0.85rem;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .flex-body {
+            padding: 14px;
+        }
+        .flex-title {
+            font-size: 1rem;
+            font-weight: bold;
+            color: #111;
+            margin-bottom: 10px;
+            line-height: 1.4;
+        }
+        .flex-row {
+            display: flex;
+            font-size: 0.8rem;
+            margin-bottom: 6px;
+            line-height: 1.4;
+        }
+        .flex-lbl {
+            width: 65px;
+            color: #888;
+            flex-shrink: 0;
+        }
+        .flex-val {
+            color: #333;
+            font-weight: 500;
+        }
+        .flex-val.warn {
+            color: #dc3545;
+            font-weight: bold;
+        }
+        .flex-footer {
+            border-top: 1px solid #f0f0f0;
+            padding: 12px;
+            background: #fafafa;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        .flex-btn-main {
+            background: #06c755;
+            color: #fff;
+            padding: 9px;
+            border-radius: 8px;
+            font-size: 0.88rem;
+            font-weight: bold;
+            display: block;
+            text-align: center;
+            text-decoration: none;
+            box-shadow: 0 2px 4px rgba(6,199,85,0.25);
+        }
+        .flex-btn-sub-group {
+            display: flex;
+            gap: 6px;
+        }
+        .flex-btn-sub {
+            flex: 1;
+            padding: 6px;
+            border-radius: 6px;
+            font-size: 0.78rem;
+            font-weight: bold;
+            text-align: center;
+            text-decoration: none;
+            color: #fff;
+        }
+        .btn-sub-question { background: #e67e22; }
+        .btn-sub-absence { background: #6c757d; }
+
+        .timeline {
+            position: relative;
+            padding-left: 28px;
+            margin: 1.5rem 0;
+        }
+        .timeline::before {
+            content: '';
+            position: absolute;
+            left: 10px;
+            top: 5px;
+            bottom: 5px;
+            width: 2px;
+            background: #cbd5e1;
+        }
+        .timeline-step {
+            position: relative;
+            margin-bottom: 1.5rem;
+        }
+        .timeline-step:last-child {
+            margin-bottom: 0;
+        }
+        .timeline-dot {
+            position: absolute;
+            left: -28px;
+            top: 4px;
+            width: 22px;
+            height: 22px;
+            border-radius: 50%;
+            background: var(--primary);
+            color: #ffffff;
+            font-size: 0.72rem;
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 0 0 3px #ffffff;
+        }
+        .timeline-content {
+            background: #ffffff;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1rem 1.25rem;
+        }
+        .timeline-title {
+            font-weight: bold;
+            font-size: 0.98rem;
+            color: var(--primary-dark);
+            margin-bottom: 4px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .timeline-desc {
+            font-size: 0.86rem;
+            color: var(--text-sub);
+        }
+
+        footer {
+            text-align: center;
+            padding: 2.5rem 1rem;
+            color: #888;
+            font-size: 0.85rem;
+            border-top: 1px solid #e2e8f0;
+        }
+
+        @media print {
+            body { background: #fff; color: #000; font-size: 11pt; }
+            header { background: #fff !important; color: #000 !important; box-shadow: none !important; padding: 0 0 1.5rem 0 !important; border-bottom: 2px solid #005a9c; }
+            .header-meta, .btn-print, .toc-bar { display: none !important; }
+            .header-title h1 { color: #005a9c; }
+            .container { max-width: 100%; margin: 0; padding: 0; }
+            .doc-section { box-shadow: none !important; border: 1px solid #ccc !important; page-break-inside: avoid; margin-bottom: 1.5rem !important; }
+            .flex-mockup { box-shadow: none !important; border: 1px solid #999 !important; }
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <div class="header-inner">
+            <div class="header-title">
+                <span class="header-tag">医療法人小野会 かわら版 業務改革計画</span>
+                <h1>📜 院内かわら版 開発指針書</h1>
+                <p>〜 BCP災害連絡網の大義名分 ✕ 1タップ意思表示 ✕ 不在日自律運用 〜</p>
+            </div>
+            <div class="header-meta">
+                <div><strong>作成者:</strong> 事務長（開発担当）</div>
+                <div><strong>策定日:</strong> 2026年10月（改定版）</div>
+                <div><strong>適用対象:</strong> 院内かわら版システム</div>
+                <button type="button" class="btn-print" onclick="window.print()">🖨️ A4印刷する</button>
+            </div>
+        </div>
+    </header>
+
+    <div class="container">
+
+        <!-- 目次バー -->
+        <div class="toc-bar">
+            <div class="toc-title">📑 目次ジャンプ:</div>
+            <div class="toc-links">
+                <a href="#section1">1. 現場の課題とBCP戦略</a>
+                <a href="#section2">2. コア設計思想</a>
+                <a href="#section3">3. 4大中核機能（1タップ返答）</a>
+                <a href="#section4">4. 開発ロードマップ</a>
+                <a href="#section5">5. 後任引き継ぎ・保守</a>
+            </div>
+        </div>
+
+        <!-- 第1章：現場の構造的課題とBCP登録戦略 -->
+        <section class="doc-section" id="section1">
+            <div class="section-header">
+                <div class="section-num">1</div>
+                <h2>策定の背景・構造的課題 ＆ BCP登録戦略</h2>
+            </div>
+            <p style="font-size:0.95rem; color:#4a5568; margin-bottom:1rem;">
+                従来の「紙・口頭・用務員的業務」を前任から丸抱えした結果、事務長個人があらゆる情報伝達の手動ルーターとなり、現場の運用と心労に深刻な歪みを生じさせている。
+            </p>
+
+            <div class="problem-grid">
+                <div class="problem-card">
+                    <h3>⏰ 勤務体系の深刻なギャップ</h3>
+                    <p>
+                        <strong>事務長（週4日: 月火水金） ✕ 施設（365日24時間稼働）</strong><br>
+                        事務長不在となる木・土・日に連絡が麻痺し、前日夕方に出勤者を狂ったように探して回る負担とうっかり忘れの恐怖が常態化している。
+                    </p>
+                </div>
+                <div class="problem-card">
+                    <h3>👀 「既読＝理解」ではない問題</h3>
+                    <p>
+                        LINEの既読マークがついただけでは「本当に理解しているか」「立ち会えるのか」は分からない。<strong>ワンタップで「了解」「質問あり」と意思表示を返せる仕組み</strong>が不可欠。
+                    </p>
+                </div>
+                <div class="problem-card">
+                    <h3>💻 共有PCを開かない現場</h3>
+                    <p>
+                        詰所や各部署にPCはあるが、電子カルテ等の専用業務以外で自らブラウザを開いて「かわら版」を見るスタッフは皆無（事務員すら見ない）。「見に来させる」設計は完全に破綻。
+                    </p>
+                </div>
+                <div class="problem-card">
+                    <h3>🔧 雑多な用務員的業務の集中</h3>
+                    <p>
+                        ウォシュレット故障、電球切れ、換気扇交換、水回り工事など、マルチチャネル（LINE、紙メモ、口頭、内線、外線）で事務長へ丸投げされる体制がしみついている。
+                    </p>
+                </div>
+            </div>
+
+            <!-- BCP登録大義名分バナー -->
+            <div class="bcp-banner">
+                <div class="bcp-icon">🛡️</div>
+                <div class="bcp-content">
+                    <h3>【突破口】LINE登録の大義名分：「災害時緊急安否確認・BCP連絡網の整備」</h3>
+                    <p>
+                        「普段の業務連絡のためにLINEを登録して」と頼むとプライベート侵害の反発が生じるが、<strong>「医療機関としてのBCP（事業継続計画）・震災安否確認連絡網の義務化」</strong>という公的名目を掲げることで、全職種・全スタッフが正当な手続きとして100%抵抗なく登録に応じる体制を作る。
+                    </p>
+                </div>
+            </div>
+        </section>
+
+        <!-- 第2章：コア設計思想 -->
+        <section class="doc-section" id="section2">
+            <div class="section-header">
+                <div class="section-num">2</div>
+                <h2>システム設計思想（コアコンセプト）</h2>
+            </div>
+            
+            <div class="callout-box">
+                <div class="callout-title">💡 4大ブレイクスルー原則</div>
+                <ul class="principles-list">
+                    <li><span>1.</span> <strong>「見に来させる（プル型）」を完全放棄し、「勝手に目に入る（プッシュ型・環境型）」に転換する</strong></li>
+                    <li><span>2.</span> <strong>「ファイルを開かせる（PDF等）」を廃止し、「トーク画面を開いた瞬間に1秒で伝わる（Flex）」にする</strong></li>
+                    <li><span>3.</span> <strong>「既読待ち」を廃止し、「1タップで了解・質問が返せる双方向アクション」を組み込む</strong></li>
+                    <li><span>4.</span> <strong>「過剰なアプリ開発」を避け、「Windows標準機能・軽量スクリプト」でスマートに解く</strong></li>
+                </ul>
+            </div>
+        </section>
+
+        <!-- 第3章：中核機能の仕様 -->
+        <section class="doc-section" id="section3">
+            <div class="section-header">
+                <div class="section-num">3</div>
+                <h2>4大中核機能の仕様</h2>
+            </div>
+
+            <!-- 機能1 -->
+            <div class="feature-block">
+                <span class="feature-badge badge-line">中核機能 1</span>
+                <h3>📱 LINE Flex Message ✕ 1タップ意思表示エンジン</h3>
+                <p>
+                    PDF添付を完全撤廃。トーク画面にカード型UIが直接届き、スタッフはアプリから離れずに<strong>1タップで「了解」「質問あり」「不在」</strong>の返答を送信可能。
+                </p>
+
+                <div class="flex-mockup-wrapper">
+                    <!-- モックアップ -->
+                    <div class="flex-mockup">
+                        <div class="flex-header">
+                            🚨【設備工事・断水のお知らせ】
+                        </div>
+                        <div class="flex-body">
+                            <div class="flex-title">新館2F マイトイレ 換気扇交換</div>
+                            <div class="flex-row">
+                                <div class="flex-lbl">🗓️ 日時</div>
+                                <div class="flex-val">8月20日(木) 13:30〜</div>
+                            </div>
+                            <div class="flex-row">
+                                <div class="flex-lbl">📍 場所</div>
+                                <div class="flex-val">新館2F マイトイレ</div>
+                            </div>
+                            <div class="flex-row">
+                                <div class="flex-lbl">⚠️ 影響</div>
+                                <div class="flex-val warn">工事中、使用不可</div>
+                            </div>
+                            <div class="flex-row">
+                                <div class="flex-lbl">👷 業者</div>
+                                <div class="flex-val">〇〇設備 (立会: 事務長)</div>
+                            </div>
+                            <div class="flex-row">
+                                <div class="flex-lbl">👥 対象</div>
+                                <div class="flex-val">看護部 / 事務部</div>
+                            </div>
+                        </div>
+                        <div class="flex-footer">
+                            <a href="#" class="flex-btn-main">👍 了解しました・対応します</a>
+                            <div class="flex-btn-sub-group">
+                                <a href="#" class="flex-btn-sub btn-sub-question">❓ 質問・確認あり</a>
+                                <a href="#" class="flex-btn-sub btn-sub-absence">⚠️ 不在・対応不可</a>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div style="flex:1; min-width:280px; font-size:0.88rem; color:#4a5568; line-height:1.6;">
+                        <h4 style="color:#005a9c; margin-bottom:6px;">✨ 1タップ意思表示で解決すること</h4>
+                        <ul style="padding-left:1.2rem; margin-bottom:12px;">
+                            <li><strong>「誰が了解したか」がかわら版側で即座に一覧化:</strong> 単なる「既読」ではなく「了解」が何名いるかが事務長の管理画面に反映されるため、前日に出勤者を探して確認する手間がゼロに。</li>
+                            <li><strong>災害安否確認モードへの転用:</strong> 地震などの緊急時には、ボタンが自動的に「🟢 無事・出勤可」「🟡 軽傷・自宅待機」「🔴 被災・出勤不可」に切り替わり、全職員の安否確認が一瞬で集計可能。</li>
+                            <li><strong>個人ID・グループ双方に対応:</strong> 個人のLINE宛てにも、部署のグループLINE宛てにも同様に送信可能。</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 機能2 -->
+            <div class="feature-block">
+                <span class="feature-badge badge-paper">中核機能 2</span>
+                <h3>📄 事務長不在日（木・土日）完全カバーまとめ印刷</h3>
+                <p>
+                    事務長が退勤する前日（水曜夕方・金曜夕方）に、不在期間の予定を自動で束ねた「朝礼・回覧伝達シート」を1クリック出力。
+                </p>
+                <ul style="padding-left:1.2rem; font-size:0.88rem; color:#4a5568;">
+                    <li><strong>水曜夕方:</strong> 翌木曜日（不在日）の全予定・来院業者・重要伝達を一括集約。</li>
+                    <li><strong>金曜夕方:</strong> 土・日・翌月曜（不在週末）の全予定を一覧化。</li>
+                    <li><strong>現場引き継ぎサイン欄:</strong> 日直や現場リーダーの「受領印」「朝礼伝達済チェック」マス目を自動印字し、伝達責任を現場へ委譲。</li>
+                </ul>
+            </div>
+
+            <!-- 機能3 -->
+            <div class="feature-block">
+                <span class="feature-badge badge-poster">中核機能 3</span>
+                <h3>🖨️ 設備修理・工事用「現場貼り出し特大ポスター（A4）」自動生成</h3>
+                <p>
+                    「ウォシュレット故障」「換気扇交換」「水回り工事」などを登録した際、該当箇所のドアや詰所の白板に貼るA4横のポスターをボタン1発で出力。
+                </p>
+                <div style="background:#fff; border:1px dashed #cbd5e1; border-radius:6px; padding:10px 14px; font-size:0.85rem; color:#333;">
+                    <strong>例:</strong> 【⚠️ 工事・点検のお知らせ】8/20(木) 13:30〜 / 新館2F マイトイレ / ※工事中使用禁止 / 業者: 〇〇設備<br>
+                    ⇒ 当日事務長が不在でも、現場スタッフ・患者・業者が迷わず自立して対応可能。
+                </div>
+            </div>
+
+            <!-- 機能4 -->
+            <div class="feature-block">
+                <span class="feature-badge badge-sys">中核機能 4</span>
+                <h3>⚙️ Windows標準スクリプトによる自動印刷（PowerShell連携）</h3>
+                <p>
+                    重厚なWindows専用アプリを開発することなく、OS標準のPowerShellスクリプト＋タスクスケジューラで特定ネットワークプリンタへ定時サイレント排紙。
+                </p>
+            </div>
+        </section>
+
+        <!-- 第4章：開発ロードマップ -->
+        <section class="doc-section" id="section4">
+            <div class="section-header">
+                <div class="section-num">4</div>
+                <h2>開発・導入ロードマップ</h2>
+            </div>
+
+            <div class="timeline">
+                <div class="timeline-step">
+                    <div class="timeline-dot">1</div>
+                    <div class="timeline-content">
+                        <div class="timeline-title">Phase 1: BCP登録案内 ＆ LINE Flex Message（1タップ返答）基盤構築</div>
+                        <div class="timeline-desc">
+                            「災害安否確認連絡網」のQRコード登録フロー確立。<code>line_helper.php</code> を拡張し、1タップ意思表示付きFlex Message送信を実装。
+                        </div>
+                    </div>
+                </div>
+
+                <div class="timeline-step">
+                    <div class="timeline-dot">2</div>
+                    <div class="timeline-content">
+                        <div class="timeline-title">Phase 2: 現場貼り出しポスター ＆ 不在日カバーまとめ印刷</div>
+                        <div class="timeline-desc">
+                            A4横特大ポスター印刷テンプレートの実装、水曜・金曜退勤前の不在期間まとめ伝達シート出力機能の整備。
+                        </div>
+                    </div>
+                </div>
+
+                <div class="timeline-step">
+                    <div class="timeline-dot">3</div>
+                    <div class="timeline-content">
+                        <div class="timeline-title">Phase 3: 自動リマインド配信エンジン ＆ 返答集計ダッシュボード</div>
+                        <div class="timeline-desc">
+                            前日夕方・当日朝に自動でLINE通知を飛ばすバッチ処理の構築。「誰が了解したか」がひと目でわかる集計表示。
+                        </div>
+                    </div>
+                </div>
+
+                <div class="timeline-step">
+                    <div class="timeline-dot">4</div>
+                    <div class="timeline-content">
+                        <div class="timeline-title">Phase 4: ネットワークプリンタ定時自動排紙 ＆ サイネージモード</div>
+                        <div class="timeline-desc">
+                            PowerShell連携による朝礼シートの自動排紙。ナースステーション用常時巡回表示画面（<code>signage.php</code>）の構築。
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 第5章：後任引き継ぎ・保守 -->
+        <section class="doc-section" id="section5">
+            <div class="section-header">
+                <div class="section-num">5</div>
+                <h2>後任引き継ぎ・保守ガイドライン</h2>
+            </div>
+            <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:1.2rem; font-size:0.88rem; color:#333;">
+                <p><strong>■ 設定ファイルの集約先:</strong></p>
+                <ul style="padding-left:1.2rem; margin-bottom:1rem;">
+                    <li>LINEアクセストークン: <code>includes/line_helper.php</code></li>
+                    <li>データベース設定: 各PHP冒頭のPDO設定（将来的に <code>includes/db.php</code> に集約）</li>
+                </ul>
+                <p><strong>■ 職員マスターの一元管理（STF連携アーキテクチャ）:</strong></p>
+                <ul style="padding-left:1.2rem; margin-bottom:1rem;">
+                    <li><strong>原本（信頼できる情報源）:</strong> <code>../stf/staff_data.json</code>（職員情報検索アプリ側）</li>
+                    <li><strong>運用ルール:</strong> スタッフのマスターメンテ（入職・退職・改姓・携帯番号変更等）はすべて <code>stf</code> 側で実施。</li>
+                    <li><strong>自動同期の仕組み:</strong> <code>stf/api.php</code> を介して、かわら版（<code>safety_contacts.php</code>）の「🔄 STF同期」ボタン1発で、全職員の最新情報（正確な氏名、カナ、携帯電話番号、役職）がかわら版DBへ即座に完全反映される。二重メンテの負担ゼロ。</li>
+                </ul>
+                <p><strong>■ 後任の日常ルーティン（引き継ぎマニュアル要点）:</strong></p>
+                <ol style="padding-left:1.2rem; line-height:1.6;">
+                    <li>業者から工事等の連絡を受けたら、かわら版で「設備・営繕」で投稿する。</li>
+                    <li>「ポスター印刷」ボタンを押し、出てきたA4紙を該当箇所のドアに貼る。</li>
+                    <li>不在日（水曜夕方・金曜夕方）は「不在まとめ印刷」ボタンを押し、当番者・日直に手渡す。</li>
+                    <li>LINEには自動で1タップ返答ボタン付きカードが届き、了解状況はシステムで確認できるため個別電話は不要。</li>
+                </ol>
+            </div>
+        </section>
+
+    </div>
+
+    <footer>
+        医療法人小野会 院内かわら版プロジェクト | 開発仕様ドキュメント（2026年10月改定）
+    </footer>
+
+</body>
+</html>

@@ -1,0 +1,14 @@
+# Logs
+logs/*.log
+
+# Temporary files
+uploads/tmp/*
+!uploads/tmp/.gitkeep
+*.tmp
+
+# OS / Editor files
+Thumbs.db
+Desktop.ini
+.DS_Store
+.vscode/
+.idea/
