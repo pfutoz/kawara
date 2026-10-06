@@ -10,10 +10,11 @@ if (session_status() === PHP_SESSION_NONE) {
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-cache, no-store, must-revalidate');
 
-$current_staff_id = isset($_SESSION['staff_id']) ? (int)$_SESSION['staff_id'] : 0;
-if ($current_staff_id <= 0) {
-    http_response_code(401);
-    echo json_encode(['success' => false, 'error' => 'ログインが必要です。']);
+// 対象スタッフIDの取得（リクエストパラメータ優先、なければセッション）
+$target_staff_id = isset($_REQUEST['staff_id']) ? (int)$_REQUEST['staff_id'] : (isset($_SESSION['staff_id']) ? (int)$_SESSION['staff_id'] : 0);
+if ($target_staff_id <= 0) {
+    http_response_code(400);
+    echo json_encode(['success' => false, 'error' => '対象スタッフが指定されていません。']);
     exit;
 }
 
@@ -36,7 +37,7 @@ $action = $_GET['action'] ?? $_POST['action'] ?? 'status';
 // A. 連携状態チェック & 設定情報取得
 if ($action === 'status') {
     $stmt = $pdo->prepare("SELECT staff_id, staff_name, role, line_user_id FROM staff WHERE staff_id = :sid AND (is_deleted IS NOT TRUE)");
-    $stmt->execute([':sid' => $current_staff_id]);
+    $stmt->execute([':sid' => $target_staff_id]);
     $st = $stmt->fetch();
 
     if (!$st) {
@@ -64,7 +65,7 @@ if ($action === 'status') {
         WHERE staff_id = :sid AND expires_at > NOW() AND is_used = FALSE 
         ORDER BY code_id DESC LIMIT 1
     ");
-    $stmt_code->execute([':sid' => $current_staff_id]);
+    $stmt_code->execute([':sid' => $target_staff_id]);
     $active_code = $stmt_code->fetch();
 
     $bot_id = defined('LINE_BOT_BASIC_ID') ? LINE_BOT_BASIC_ID : '@tmw3446q';
@@ -72,7 +73,7 @@ if ($action === 'status') {
 
     echo json_encode([
         'success'           => true,
-        'staff_id'          => $current_staff_id,
+        'staff_id'          => $target_staff_id,
         'staff_name'        => $st['staff_name'],
         'role'              => $st['role'],
         'is_linked'         => $is_linked,
@@ -88,7 +89,7 @@ if ($action === 'status') {
 
 // B. 新しいワンタイム連携コードの発行
 if ($action === 'generate_code') {
-    $code_data = generateLineLinkCode($pdo, $current_staff_id);
+    $code_data = generateLineLinkCode($pdo, $target_staff_id);
     
     $bot_id = defined('LINE_BOT_BASIC_ID') ? LINE_BOT_BASIC_ID : '@tmw3446q';
     $bot_url = 'https://line.me/R/ti/p/' . urlencode($bot_id);
@@ -113,7 +114,7 @@ if ($action === 'manual_link') {
     }
 
     $pdo->prepare("UPDATE staff SET line_user_id = :uid, updated_at = NOW() WHERE staff_id = :sid")
-        ->execute([':uid' => $input_id, ':sid' => $current_staff_id]);
+        ->execute([':uid' => $input_id, ':sid' => $target_staff_id]);
 
     echo json_encode([
         'success'          => true,
@@ -125,7 +126,7 @@ if ($action === 'manual_link') {
 
 // D. 連携解除
 if ($action === 'unlink') {
-    unlinkStaffLine($pdo, $current_staff_id);
+    unlinkStaffLine($pdo, $target_staff_id);
     echo json_encode([
         'success' => true,
         'message' => 'LINE連携を解除しました。'

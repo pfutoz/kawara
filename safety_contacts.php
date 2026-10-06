@@ -943,6 +943,130 @@ $all_staff_for_select = $pdo->query("SELECT staff_id, staff_name, dept_id, role,
             100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(22, 163, 74, 0); }
         }
 
+        /* 📱 スタッフLINE連携モーダル用スタイル */
+        .line-modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0, 0, 0, 0.6);
+            backdrop-filter: blur(4px);
+            z-index: 10001;
+            align-items: center;
+            justify-content: center;
+            padding: 16px;
+        }
+        .line-modal-overlay.active { display: flex; }
+        .line-modal-card {
+            background: #ffffff;
+            width: 100%;
+            max-width: 480px;
+            border-radius: 16px;
+            box-shadow: 0 12px 35px rgba(0,0,0,0.25);
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            max-height: 90vh;
+        }
+        .line-modal-header {
+            background: #06c755;
+            color: #ffffff;
+            padding: 14px 18px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .line-modal-header h3 {
+            margin: 0;
+            font-size: 1.05rem;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .line-modal-close {
+            background: none;
+            border: none;
+            color: #fff;
+            font-size: 1.5rem;
+            cursor: pointer;
+            line-height: 1;
+            padding: 0 4px;
+            opacity: 0.85;
+        }
+        .line-modal-close:hover { opacity: 1; }
+        .line-modal-body {
+            padding: 18px 20px;
+            overflow-y: auto;
+        }
+        .line-step-box {
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 10px;
+            padding: 12px 14px;
+            margin-bottom: 12px;
+        }
+        .line-step-num {
+            display: inline-block;
+            background: #06c755;
+            color: #fff;
+            font-size: 0.72rem;
+            font-weight: 800;
+            padding: 2px 7px;
+            border-radius: 10px;
+            margin-right: 5px;
+        }
+        .line-step-title {
+            font-size: 0.88rem;
+            font-weight: 800;
+            color: #1e293b;
+        }
+        .link-code-digit {
+            font-family: 'Outfit', monospace;
+            font-size: 2.2rem;
+            font-weight: 900;
+            letter-spacing: 10px;
+            color: #065f46;
+            background: #ecfdf5;
+            border: 2px dashed #06c755;
+            border-radius: 8px;
+            padding: 8px 14px;
+            text-align: center;
+            margin: 10px 0;
+        }
+        .btn-copy-code {
+            background: #ffffff;
+            border: 1px solid #cbd5e1;
+            color: #475569;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 0.76rem;
+            font-weight: bold;
+            cursor: pointer;
+        }
+        .btn-copy-code:hover { background: #f1f5f9; color: #1e293b; }
+        .line-waiting-box {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 0.8rem;
+            color: #059669;
+            background: #f0fdf4;
+            padding: 8px 12px;
+            border-radius: 6px;
+            margin-top: 8px;
+            border: 1px solid #bbf7d0;
+        }
+        .line-spinner {
+            width: 16px;
+            height: 16px;
+            border: 2.5px solid #86efac;
+            border-top-color: #059669;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
         .phone-link { color: var(--primary); text-decoration: none; font-weight: bold; }
         .phone-link:hover { text-decoration: underline; }
 
@@ -1597,9 +1721,9 @@ $all_staff_for_select = $pdo->query("SELECT staff_id, staff_name, dept_id, role,
 
                     <!-- カードフッター -->
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-top:auto; padding-top:10px; border-top:1px solid #f1f5f9; font-size:0.78rem;">
-                        <span class="line-badge <?= $has_line ? 'active' : 'inactive' ?>">
-                            LINE: <?= $has_line ? '登録済' : '未登録' ?>
-                        </span>
+                        <button type="button" class="line-badge <?= $has_line ? 'active' : 'inactive' ?>" onclick="openStaffLineModal(<?= (int)$st['staff_id'] ?>, '<?= htmlspecialchars(addslashes($st['staff_name'])) ?>', <?= $has_line ? 'true' : 'false' ?>)" title="クリックしてこの職員のLINE連携QR・4桁コードを発行・確認" style="border:none; cursor:pointer; font-family:inherit;">
+                            LINE: <?= $has_line ? '🟢 登録済' : '📱 未登録' ?>
+                        </button>
                         <button type="button" onclick='openEditContactModal(<?= json_encode($st) ?>)' style="background:#f1f5f9; border:1px solid #cbd5e1; padding:4px 10px; border-radius:4px; color:#005a9c; cursor:pointer; font-weight:bold; font-size:0.8rem;">
                             ✏️ 連絡先編集
                         </button>
@@ -1735,7 +1859,7 @@ $all_staff_for_select = $pdo->query("SELECT staff_id, staff_name, dept_id, role,
                                         💬 済
                                     </button>
                                 <?php else: ?>
-                                    <span class="line-badge inactive">未</span>
+                                    <button type="button" onclick="openStaffLineModal(<?= (int)$st['staff_id'] ?>, '<?= htmlspecialchars(addslashes($st['staff_name'])) ?>', false)" class="line-badge inactive" style="cursor:pointer; border:none; font-family:inherit;" title="クリックしてこの職員のLINE連携QR・4桁コードを発行">📱 未</button>
                                 <?php endif; ?>
                             </td>
                             <td>
@@ -1964,6 +2088,30 @@ $all_staff_for_select = $pdo->query("SELECT staff_id, staff_name, dept_id, role,
                     </div>
                 <?php endif; ?>
 
+                <!-- 📱 スタッフ4桁コード発行への直通ナビゲーション -->
+                <div style="background:#f0fdf4; border:1px solid #bbf7d0; border-radius:8px; padding:12px; margin-bottom:14px;">
+                    <div style="font-weight:bold; font-size:0.88rem; color:#166534; margin-bottom:4px; display:flex; align-items:center; gap:6px;">
+                        <span>📱 職員のスマホを今すぐLINE連携する</span>
+                    </div>
+                    <div style="font-size:0.8rem; color:#15803d; margin-bottom:10px;">
+                        一覧の各職員の<strong>「📱 LINE未登録」</strong>ボタンをクリックするか、下の職員選択から直接QRコードと4桁コードを発行できます。
+                    </div>
+                    <div style="display:flex; gap:8px;">
+                        <select id="quickStaffSelect" style="flex:1; font-size:0.85rem; padding:7px; border:1px solid #86efac; border-radius:6px; background:#fff;">
+                            <option value="">-- LINE連携する職員を選択 --</option>
+                            <?php foreach ($all_staff as $st): ?>
+                                <?php $is_l = !empty(trim($st['line_user_id'] ?? '')); ?>
+                                <option value="<?= $st['staff_id'] ?>" data-name="<?= htmlspecialchars($st['staff_name']) ?>" data-linked="<?= $is_l ? '1' : '0' ?>">
+                                    <?= $is_l ? '🟢' : '⚪' ?> <?= htmlspecialchars($st['staff_name']) ?> 様 (<?= htmlspecialchars($st['role']) ?>) <?= $is_l ? '【連携済】' : '【未連携】' ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                        <button type="button" onclick="startQuickStaffLineLink()" style="background:#06c755; color:#fff; border:none; padding:7px 16px; border-radius:6px; font-weight:bold; font-size:0.82rem; cursor:pointer; white-space:nowrap;">
+                            👉 コード発行
+                        </button>
+                    </div>
+                </div>
+
                 <div style="background:#f1f5f9; border-radius:6px; padding:10px 12px; font-size:0.78rem; color:#475569;">
                     <div><strong>判定時刻:</strong> <?= htmlspecialchars($tunnel_status['checked_at']) ?> （画面再読み込みで最新状態を再判定）</div>
                     <div style="margin-top:2px;"><strong>判定方式:</strong> ローカルメトリクスポート（127.0.0.1:20241）超高速ヘルスチェック</div>
@@ -1972,6 +2120,105 @@ $all_staff_for_select = $pdo->query("SELECT staff_id, staff_name, dept_id, role,
 
             <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:12px; border-top:1px solid #f1f5f9; padding-top:10px;">
                 <button type="button" onclick="closeTunnelStatusModal()" style="background:#e2e8f0; border:none; padding:8px 18px; border-radius:6px; font-weight:bold; cursor:pointer; font-size:0.88rem;">閉じる</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 📱 スタッフ専用 LINE連携QR ＆ 4桁コード発行モーダル -->
+    <div id="staffLineLinkModal" class="line-modal-overlay" onclick="if(event.target===this) closeStaffLineModal();">
+        <div class="line-modal-card">
+            <div class="line-modal-header">
+                <h3>📱 公式LINE 連携設定</h3>
+                <button type="button" class="line-modal-close" onclick="closeStaffLineModal()">&times;</button>
+            </div>
+            
+            <div class="line-modal-body">
+                <!-- 対象スタッフ表示 -->
+                <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:14px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:10px 14px;">
+                    <div>
+                        <div style="font-size:0.75rem; color:#64748b; font-weight:bold;">対象職員</div>
+                        <div style="font-size:1.15rem; font-weight:900; color:#0f172a;" id="sLinkStaffName">-</div>
+                    </div>
+                    <div id="sLinkStatusBadge" style="font-size:0.78rem; font-weight:bold; padding:4px 10px; border-radius:12px; background:#f1f5f9; color:#64748b;">
+                        状態確認中...
+                    </div>
+                </div>
+
+                <!-- 未連携時のステップ案内 -->
+                <div id="sLinkStepArea">
+                    <!-- Step 1: 友だち追加 -->
+                    <div class="line-step-box">
+                        <span class="line-step-num">Step 1</span>
+                        <span class="line-step-title">公式LINEを友だち追加</span>
+                        <div style="display:flex; align-items:center; gap:16px; margin-top:8px;">
+                            <img id="sLineQrImg" src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=https%3A%2F%2Fline.me%2FR%2Fti%2Fp%2F%40tmw3446q" alt="LINE友だち追加QR" style="width:90px; height:90px; border-radius:8px; border:1px solid #e2e8f0; background:#fff; padding:4px;">
+                            <div style="font-size:0.82rem; color:#475569; line-height:1.5;">
+                                対象スタッフのスマホの<strong>LINEカメラでこのQRを読み取り</strong>、「おの肛門科」を友だち追加してください。<br>
+                                <a id="sBtnAddFriend" href="https://line.me/R/ti/p/%40tmw3446q" target="_blank" rel="noopener" style="color:#06c755; font-weight:bold; text-decoration:none; display:inline-block; margin-top:4px;">
+                                    💬 スマホから直接追加リンク →
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Step 2: 4桁コード送信 -->
+                    <div class="line-step-box">
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <div>
+                                <span class="line-step-num">Step 2</span>
+                                <span class="line-step-title">トーク画面でこの4桁コードを送信</span>
+                            </div>
+                            <button type="button" class="btn-copy-code" onclick="copyStaffLinkCode()">📋 コピー</button>
+                        </div>
+
+                        <div class="link-code-digit" id="sLinkCodeDigit">----</div>
+
+                        <div style="display:flex; justify-content:space-between; align-items:center; font-size:0.78rem; color:#64748b;">
+                            <span>有効期限: <strong id="sLinkCountdown" style="color:#dc2626;">--分--秒</strong></span>
+                            <button type="button" onclick="regenerateStaffLinkCode()" style="background:none; border:none; color:#0284c7; text-decoration:underline; cursor:pointer; font-size:0.78rem;">
+                                🔄 再発行
+                            </button>
+                        </div>
+
+                        <div class="line-waiting-box">
+                            <div class="line-spinner"></div>
+                            <span>スマホからの送信を待機中...（送信されると自動で完了します）</span>
+                        </div>
+                    </div>
+
+                    <!-- テスト用シミュレーション -->
+                    <div style="margin-top:14px; padding-top:10px; border-top:1px dashed #cbd5e1; text-align:center;">
+                        <button type="button" onclick="simulateStaffLineLink()" style="background:#f8fafc; border:1px solid #cbd5e1; color:#64748b; font-size:0.75rem; padding:4px 10px; border-radius:4px; cursor:pointer;">
+                            ⚡ スマホがない場合の動作確認用（模擬LINE IDで即時テスト連携）
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 連携済み時の表示エリア -->
+                <div id="sLinkCompleteArea" style="display:none; text-align:center; padding:16px 0;">
+                    <div style="font-size:3rem; margin-bottom:8px;">🎉</div>
+                    <h4 style="margin:0 0 6px 0; color:#065f46; font-size:1.15rem;">LINE公式アカウントと連携完了！</h4>
+                    <p style="font-size:0.85rem; color:#475569; margin:0 0 14px 0; line-height:1.6;">
+                        有事のBCP安否確認や一斉点呼メッセージが、<br>
+                        このスタッフのLINEへ確実に届くようになりました。
+                    </p>
+                    <div style="background:#f1f5f9; border-radius:8px; padding:10px; font-size:0.8rem; color:#334155; margin-bottom:16px; word-break:break-all;">
+                        <strong>登録LINE User ID:</strong> <span id="sLinkMaskedId" style="font-family:monospace;">-</span>
+                    </div>
+                    <div style="display:flex; justify-content:center; gap:10px;">
+                        <button type="button" onclick="openSingleLineModalFromLink()" style="background:#06c755; color:#fff; border:none; padding:8px 16px; border-radius:6px; font-weight:bold; font-size:0.85rem; cursor:pointer;">
+                            💬 テストメッセージを送信してみる
+                        </button>
+                        <button type="button" onclick="unlinkStaffLineDirect()" style="background:#fef2f2; border:1px solid #fecdd3; color:#dc2626; padding:8px 14px; border-radius:6px; font-size:0.82rem; cursor:pointer;">
+                            連携解除
+                        </button>
+                    </div>
+                </div>
+
+            </div>
+
+            <div style="background:#f8fafc; padding:12px 18px; border-top:1px solid #e2e8f0; display:flex; justify-content:flex-end;">
+                <button type="button" onclick="closeStaffLineModal()" style="background:#e2e8f0; border:none; padding:8px 18px; border-radius:6px; font-weight:bold; font-size:0.85rem; cursor:pointer; color:#334155;">閉じる</button>
             </div>
         </div>
     </div>
@@ -2250,6 +2497,207 @@ $all_staff_for_select = $pdo->query("SELECT staff_id, staff_name, dept_id, role,
                 if (msg) msg.style.display = 'block';
             }
         }
+    }
+
+    // 📱 スタッフ専用LINE連携モーダル制御
+    let currentLinkingStaffId = 0;
+    let currentLinkingStaffName = '';
+    let staffPollingTimer = null;
+    let staffCountdownTimer = null;
+    let staffRemainingSec = 0;
+
+    function openStaffLineModal(staffId, staffName, isLinked) {
+        currentLinkingStaffId = staffId;
+        currentLinkingStaffName = staffName;
+        document.getElementById('sLinkStaffName').textContent = staffName + ' 様';
+        document.getElementById('staffLineLinkModal').classList.add('active');
+        refreshStaffLineStatus(true);
+    }
+
+    function closeStaffLineModal() {
+        document.getElementById('staffLineLinkModal').classList.remove('active');
+        stopStaffPolling();
+        stopStaffCountdown();
+    }
+
+    async function refreshStaffLineStatus(autoGenerate = false) {
+        if (!currentLinkingStaffId) return;
+        try {
+            const res = await fetch('api/line_link_status.php?action=status&staff_id=' + currentLinkingStaffId, { cache: 'no-cache' });
+            const data = await res.json();
+            if (!data.success) {
+                alert('ステータス取得エラー: ' + (data.error || '不明なエラー'));
+                return;
+            }
+
+            const badge = document.getElementById('sLinkStatusBadge');
+            const stepArea = document.getElementById('sLinkStepArea');
+            const compArea = document.getElementById('sLinkCompleteArea');
+
+            if (data.is_linked) {
+                badge.style.background = '#dcfce7';
+                badge.style.color = '#15803d';
+                badge.textContent = '🟢 連携完了';
+                stepArea.style.display = 'none';
+                compArea.style.display = 'block';
+                document.getElementById('sLinkMaskedId').textContent = data.line_user_id_mask || data.raw_line_user_id;
+                stopStaffPolling();
+                stopStaffCountdown();
+            } else {
+                badge.style.background = '#fee2e2';
+                badge.style.color = '#b91c1c';
+                badge.textContent = '📱 未連携';
+                stepArea.style.display = 'block';
+                compArea.style.display = 'none';
+
+                if (data.active_code && data.remaining_sec > 0) {
+                    setStaffLinkCode(data.active_code, data.remaining_sec);
+                    startStaffPolling();
+                } else if (autoGenerate) {
+                    generateNewStaffLinkCode();
+                }
+            }
+        } catch (e) {
+            console.error(e);
+        }
+    }
+
+    async function generateNewStaffLinkCode() {
+        if (!currentLinkingStaffId) return;
+        try {
+            const res = await fetch('api/line_link_status.php?action=generate_code&staff_id=' + currentLinkingStaffId, { cache: 'no-cache' });
+            const data = await res.json();
+            if (data.success && data.link_code) {
+                setStaffLinkCode(data.link_code, data.remaining_sec || 1200);
+                startStaffPolling();
+            } else {
+                alert('連携コードの発行に失敗しました。');
+            }
+        } catch (e) {
+            console.error(e);
+        }
+    }
+
+    function regenerateStaffLinkCode() {
+        generateNewStaffLinkCode();
+    }
+
+    function setStaffLinkCode(code, sec) {
+        document.getElementById('sLinkCodeDigit').textContent = code;
+        staffRemainingSec = sec;
+        startStaffCountdown();
+    }
+
+    function startStaffCountdown() {
+        stopStaffCountdown();
+        updateStaffCountdownText();
+        staffCountdownTimer = setInterval(() => {
+            staffRemainingSec--;
+            if (staffRemainingSec <= 0) {
+                stopStaffCountdown();
+                document.getElementById('sLinkCodeDigit').textContent = '期限切れ';
+                document.getElementById('sLinkCountdown').textContent = '0分0秒';
+                return;
+            }
+            updateStaffCountdownText();
+        }, 1000);
+    }
+
+    function updateStaffCountdownText() {
+        const m = Math.floor(staffRemainingSec / 60);
+        const s = staffRemainingSec % 60;
+        document.getElementById('sLinkCountdown').textContent = m + '分' + (s < 10 ? '0' : '') + s + '秒';
+    }
+
+    function stopStaffCountdown() {
+        if (staffCountdownTimer) clearInterval(staffCountdownTimer);
+        staffCountdownTimer = null;
+    }
+
+    function startStaffPolling() {
+        stopStaffPolling();
+        staffPollingTimer = setInterval(async () => {
+            if (!currentLinkingStaffId) return;
+            try {
+                const res = await fetch('api/line_link_status.php?action=status&staff_id=' + currentLinkingStaffId, { cache: 'no-cache' });
+                const data = await res.json();
+                if (data.success && data.is_linked) {
+                    refreshStaffLineStatus(false);
+                }
+            } catch (e) {}
+        }, 2500); // 2.5秒ごとに自動チェック
+    }
+
+    function stopStaffPolling() {
+        if (staffPollingTimer) clearInterval(staffPollingTimer);
+        staffPollingTimer = null;
+    }
+
+    function copyStaffLinkCode() {
+        const code = document.getElementById('sLinkCodeDigit').textContent.trim();
+        if (code && code !== '----' && code !== '期限切れ') {
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(code).then(() => {
+                    alert('連携コード【' + code + '】をコピーしました！');
+                }).catch(() => {
+                    alert('連携コード: ' + code);
+                });
+            } else {
+                alert('連携コード: ' + code);
+            }
+        }
+    }
+
+    async function simulateStaffLineLink() {
+        if (!currentLinkingStaffId) return;
+        if (!confirm(currentLinkingStaffName + ' 様をテスト用模擬LINE IDで即座に連携しますか？\n（PC上での動作確認テストを行えます）')) return;
+        try {
+            const fd = new FormData();
+            fd.append('action', 'manual_link');
+            fd.append('staff_id', currentLinkingStaffId);
+            const res = await fetch('api/line_link_status.php', { method: 'POST', body: fd });
+            const data = await res.json();
+            if (data.success) {
+                refreshStaffLineStatus(false);
+            } else {
+                alert('登録エラー: ' + (data.error || ''));
+            }
+        } catch (e) {
+            console.error(e);
+        }
+    }
+
+    async function unlinkStaffLineDirect() {
+        if (!currentLinkingStaffId) return;
+        if (!confirm(currentLinkingStaffName + ' 様のLINE連携を解除しますか？')) return;
+        try {
+            const res = await fetch('api/line_link_status.php?action=unlink&staff_id=' + currentLinkingStaffId, { cache: 'no-cache' });
+            const data = await res.json();
+            if (data.success) {
+                refreshStaffLineStatus(true);
+            }
+        } catch (e) {
+            console.error(e);
+        }
+    }
+
+    function openSingleLineModalFromLink() {
+        closeStaffLineModal();
+        openSingleLineModal(currentLinkingStaffId, currentLinkingStaffName);
+    }
+
+    function startQuickStaffLineLink() {
+        const sel = document.getElementById('quickStaffSelect');
+        if (!sel || !sel.value) {
+            alert('連携コードを発行する職員を選択してください。');
+            return;
+        }
+        const opt = sel.options[sel.selectedIndex];
+        const sId = parseInt(sel.value);
+        const sName = opt.getAttribute('data-name');
+        const isL = opt.getAttribute('data-linked') === '1';
+        closeTunnelStatusModal();
+        openStaffLineModal(sId, sName, isL);
     }
     </script>
 </body>
