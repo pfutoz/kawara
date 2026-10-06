@@ -641,9 +641,23 @@
                 </div>
                 <div class="pd-card highlight">
                     <span class="pd-card-tag">✅ 実装・実証完了</span>
-                    <div class="pd-card-title">職員マスター管理画面（./stf/）</div>
+                    <div class="pd-card-title">職員マスター管理 ＆ 新規自動INSERT</div>
                     <div class="pd-card-desc">
-                        <code>stf/master_mente.php</code> を新設。JSON原本のCRUD、重複検査、自動タイムスタンプ退避（<code>stf/bak/</code>）、かわら版DB即時同期を実現。
+                        <code>stf/master_mente.php</code> 新設。JSON原本のCRUD・退避に加え、STFで新規追加された職員（「肛門科スマホ」等）の部署・五十音行自動判定＆DB即時同期を実現。
+                    </div>
+                </div>
+                <div class="pd-card highlight">
+                    <span class="pd-card-tag">✅ 実装・実証完了</span>
+                    <div class="pd-card-title">トンネル状態監視 ＆ 直接LINEコード発行</div>
+                    <div class="pd-card-desc">
+                        <code>safety_contacts.php</code> ヘッダーに「🟢 稼働中 / ⚪ 停止中」リアルタイム監視バッジ、および各職員カードから直接QR・4桁コードを発行できるモーダルを新設。
+                    </div>
+                </div>
+                <div class="pd-card highlight">
+                    <span class="pd-card-tag">✅ 規定・文書化完了</span>
+                    <div class="pd-card-title">属人化リスク対策 ＆ 引継ぎ規定書</div>
+                    <div class="pd-card-desc">
+                        Cloudflare（<code>pfuto07@gmail.com</code>）およびLINE Business個人紐付けの退職・有事リスク分析と、法人共有アカウントへの移行プロトコル（<code>懸念事項.html</code>）を策定。
                     </div>
                 </div>
             </div>
@@ -847,7 +861,7 @@
                         </div>
                         <div class="timeline-desc">
                             <strong>【実績】</strong>
-                            LINE公式アカウント「おの肛門科（<code>@tmw3446q</code>）」とMessaging API連携を完了。4桁コード送信によるスタッフ自動紐付け、<code>safety_contacts.php</code> での一斉・個別LINE安否連絡送信、および <code>stf/master_mente.php</code> の職員マスター管理システムを完全構築・実機テスト済。
+                            LINE公式アカウント「おの肛門科（<code>@tmw3446q</code>）」とMessaging API連携を完了。4桁コード送信によるスタッフ自動紐付け、<code>safety_contacts.php</code> での一斉・個別LINE安否連絡送信、<code>stf/master_mente.php</code> の職員マスター管理システム（新規職員の自動INSERT・部署自動マッピング）、安否連絡網での直接LINEコード発行モーダル、およびトンネルリアルタイム監視バッジを完全構築・実機テスト済。
                         </div>
                     </div>
                 </div>
@@ -1018,12 +1032,26 @@
                 <h3 style="color:#005a9c; margin-bottom:0.8rem; font-size:1.05rem; display:flex; align-items:center; gap:6px;">
                     📋 4. 後任の日常ルーティン（引き継ぎマニュアル要点）
                 </h3>
-                <ol style="padding-left:1.2rem; line-height:1.6;">
+                <ol style="padding-left:1.2rem; line-height:1.6; margin-bottom:1.4rem;">
                     <li>業者から工事等の連絡を受けたら、かわら版で「設備・営繕」で投稿する。</li>
                     <li>「ポスター印刷」ボタンを押し、出てきたA4紙を該当箇所のドアに貼る。</li>
                     <li>不在日（水曜夕方・金曜夕方）は「不在まとめ印刷」ボタンを押し、当番者・日直に手渡す。</li>
                     <li>有事・避難訓練時は、<code>safety_contacts.php</code> の「💬 LINE安否連絡」または「📢 点呼発令」から一斉送信を行う。職員からの生存報告は自動集計されるため、電話確認の手間がゼロになります。</li>
                 </ol>
+
+                <h3 style="color:#dc2626; margin-bottom:0.8rem; font-size:1.05rem; display:flex; align-items:center; gap:6px;">
+                    ⚠️ 5. アカウント管理の属人化リスク ＆ 組織共有プロトコル
+                </h3>
+                <div style="background:#fff1f2; border:1px solid #fecdd3; border-radius:6px; padding:12px; line-height:1.6;">
+                    <p style="margin-bottom:8px; font-weight:bold; color:#991b1b;">
+                        担当者（山本）の個人Googleアカウント・個人LINEへの依存を解消するための重要引継ぎ項目です：
+                    </p>
+                    <ul style="padding-left:1.2rem; margin-bottom:10px; font-size:0.86rem; color:#7f1d1d;">
+                        <li><strong>Cloudflare（<code>pfuto07@gmail.com</code>）:</strong> 本番移行時または退職時に、病院公式アドレス（例: <code>it-admin@onokai.or.jp</code>）を Super Administrator として招待し、個人アカウントを管理から外します。</li>
+                        <li><strong>LINE公式アカウント（おの肛門科）:</strong> LINE Official Account Manager（<code>manager.line.biz</code>）および LINE Developers で、副管理者（院長・事務長等）を複数名登録して権限を分散します。</li>
+                        <li><strong>詳細手順書:</strong> 画面上部のバナーまたは <a href="懸念事項.html" style="color:#dc2626; font-weight:bold; text-decoration:underline;">📄 懸念事項.html</a> に完全な移行手順と認証情報保管ルールをまとめています。</li>
+                    </ul>
+                </div>
             </div>
         </section>
 
