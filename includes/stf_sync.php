@@ -26,11 +26,14 @@ function syncStaffFromSTF($pdo) {
         return ['success' => false, 'message' => 'STFの職員データが取得できませんでした。', 'updated' => 0];
     }
 
-    // 2. カラム確認と追加
+    // 2. カラム確認と追加・自動採番シーケンス整備
     $pdo->exec("
         ALTER TABLE staff ADD COLUMN IF NOT EXISTS staff_code VARCHAR(20);
         ALTER TABLE staff ADD COLUMN IF NOT EXISTS phone_number VARCHAR(30);
         ALTER TABLE staff ADD COLUMN IF NOT EXISTS ext_number VARCHAR(20);
+        CREATE SEQUENCE IF NOT EXISTS staff_staff_id_seq;
+        SELECT setval('staff_staff_id_seq', (SELECT COALESCE(MAX(staff_id), 0) FROM staff));
+        ALTER TABLE staff ALTER COLUMN staff_id SET DEFAULT nextval('staff_staff_id_seq');
     ");
 
     // 3. 既存のkawaraスタッフ一覧取得
@@ -75,6 +78,7 @@ function syncStaffFromSTF($pdo) {
                     address      = COALESCE(NULLIF(:addr, ''), address),
                     postal_code  = COALESCE(NULLIF(:post, ''), postal_code),
                     role         = :role,
+                    is_deleted   = FALSE,
                     updated_at   = NOW()
                     WHERE staff_id = :id");
                 $u_stmt->execute([
@@ -94,9 +98,93 @@ function syncStaffFromSTF($pdo) {
         }
     }
 
+    // 4. STFにあってkawaraに未登録の新規職員を自動INSERT
+    $inserted = 0;
+    foreach ($stf_list as $stf) {
+        $stf_code = (string)($stf['staff_code'] ?? '');
+        if (empty($stf_code) || in_array($stf_code, array_map('strval', $matched_stf_codes))) {
+            continue;
+        }
+
+        $st_name = trim($stf['name'] ?? '');
+        if (empty($st_name)) continue;
+
+        // 部署（dept_id）の自動マッピング
+        $group    = $stf['job_group'] ?? '';
+        $dept_str = $stf['department'] ?? '';
+        $title    = $stf['job_title'] ?? '';
+        $combined = $group . ' ' . $dept_str . ' ' . $title;
+
+        $dept_id = 5; // デフォルト: 事務・受付
+        if (mb_strpos($combined, '医') !== false || mb_strpos($combined, 'ドクター') !== false) {
+            $dept_id = 2; // 医師
+        } elseif (mb_strpos($combined, '補助') !== false) {
+            $dept_id = 4; // 補助看
+        } elseif (mb_strpos($combined, '看') !== false) {
+            $dept_id = 3; // 看護師
+        } elseif (mb_strpos($combined, '薬') !== false) {
+            $dept_id = 6; // 薬剤師
+        } elseif (mb_strpos($combined, '厨') !== false || mb_strpos($combined, '栄養') !== false || mb_strpos($combined, '調理') !== false) {
+            $dept_id = 7; // 厨房
+        }
+
+        $st_kana    = mb_convert_kana($stf['name_kana'] ?? '', 'KV', 'UTF-8');
+        $mobile     = $stf['mobile_no'] ?: '';
+        $home_phone = $stf['phone_no'] ?: '';
+        $address    = $stf['address'] ?? '';
+        $postal     = $stf['postal_code'] ?? '';
+        $st_role    = $stf['job_title'] ?: ($stf['job_group'] ?: '職員');
+        $st_short   = mb_substr($st_name, 0, 1, 'UTF-8');
+
+        // 五十音行の判定
+        $kana_row = '他';
+        if (!empty($st_kana)) {
+            $first = mb_substr($st_kana, 0, 1, 'UTF-8');
+            if (preg_match('/^[アイウエオヴ]/u', $first)) $kana_row = 'ア';
+            elseif (preg_match('/^[カキクケコガギグゲゴ]/u', $first)) $kana_row = 'カ';
+            elseif (preg_match('/^[サシスセソザジズゼゾ]/u', $first)) $kana_row = 'サ';
+            elseif (preg_match('/^[タチツテトダヂヅデド]/u', $first)) $kana_row = 'タ';
+            elseif (preg_match('/^[ナニヌネノ]/u', $first)) $kana_row = 'ナ';
+            elseif (preg_match('/^[ハヒフヘホバビブベボパピプペポ]/u', $first)) $kana_row = 'ハ';
+            elseif (preg_match('/^[マミムメモ]/u', $first)) $kana_row = 'マ';
+            elseif (preg_match('/^[ヤユヨ]/u', $first)) $kana_row = 'ヤ';
+            elseif (preg_match('/^[ラリルレロ]/u', $first)) $kana_row = 'ラ';
+            elseif (preg_match('/^[ワヲン]/u', $first)) $kana_row = 'ワ';
+        }
+
+        // INSERT
+        $ins = $pdo->prepare("INSERT INTO staff (
+            staff_code, staff_name, short_icon, kana, kana_row, dept_id, role, phone_number, home_phone, postal_code, address, is_deleted, updated_at
+        ) VALUES (
+            :code, :name, :icon, :kana, :row, :dept, :role, :phone, :hphone, :post, :addr, FALSE, NOW()
+        )");
+        $ins->execute([
+            ':code'   => $stf_code,
+            ':name'   => $st_name,
+            ':icon'   => $st_short,
+            ':kana'   => $st_kana,
+            ':row'    => $kana_row,
+            ':dept'   => $dept_id,
+            ':role'   => $st_role,
+            ':phone'  => $mobile,
+            ':hphone' => $home_phone,
+            ':post'   => $postal,
+            ':addr'   => $address
+        ]);
+        $inserted++;
+        $matched_stf_codes[] = $stf_code;
+    }
+
+    $msg = "STF（職員情報検索）から {$updated} 名の職員情報を同期しました。";
+    if ($inserted > 0) {
+        $msg .= " （新規職員 {$inserted} 名を追加登録）";
+    }
+
     return [
-        'success' => true,
-        'message' => "STF（職員情報検索）から {$updated} 名の職員情報（氏名・カナ・携帯番号・役職）を同期しました。",
-        'updated' => $updated
+        'success'  => true,
+        'message'  => $msg,
+        'updated'  => $updated,
+        'inserted' => $inserted
     ];
 }
+
