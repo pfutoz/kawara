@@ -124,16 +124,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     if ($action === 'create_safety_event') {
         $event_title    = trim($_POST['event_title'] ?? '【緊急点呼】一斉安否確認');
         $event_desc     = trim($_POST['event_desc'] ?? '');
-        $is_disaster_ev = isset($_POST['is_disaster_mode']) && $_POST['is_disaster_mode'] === '1';
+        $chosen_mode    = trim($_POST['event_safety_mode'] ?? (isset($_POST['is_disaster_mode']) && $_POST['is_disaster_mode'] === '1' ? 'disaster' : 'drill'));
+        if (!in_array($chosen_mode, ['normal', 'drill', 'disaster'])) {
+            $chosen_mode = 'drill';
+        }
+        $is_disaster_ev = ($chosen_mode === 'disaster');
 
         // 過去のイベントをクローズ
         $pdo->exec("UPDATE safety_events SET is_active = FALSE, closed_at = NOW() WHERE is_active = TRUE");
 
-        $stmt = $pdo->prepare("INSERT INTO safety_events (title, description, is_active, is_disaster_mode, created_by, created_at) VALUES (:title, :desc, TRUE, :dm, :cb, NOW())");
+        $stmt = $pdo->prepare("INSERT INTO safety_events (title, description, is_active, is_disaster_mode, safety_mode, created_by, created_at) VALUES (:title, :desc, TRUE, :dm, :sm, :cb, NOW())");
         $stmt->execute([
             ':title' => $event_title,
             ':desc'  => $event_desc,
             ':dm'    => $is_disaster_ev ? 'true' : 'false',
+            ':sm'    => $chosen_mode,
             ':cb'    => $current_staff_id > 0 ? $current_staff_id : null
         ]);
 
@@ -156,7 +161,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             }
         }
 
-        $mode_text = $is_disaster_ev ? '【🚨災害時緊急モード（個人情報全開示）】' : '【🛡️訓練・平時モード】';
+        $mode_labels = [
+            'disaster' => '【🚨災害時緊急モード（個人情報全開示）】',
+            'drill'    => '【🛡️訓練モード（かわら版バナー表示）】',
+            'normal'   => '【🌿平常モード（日常運用・バナー非表示）】'
+        ];
+        $mode_text = $mode_labels[$chosen_mode] ?? '【🛡️訓練モード】';
         $line_text = $line_broadcast_sent > 0 ? " （💬 LINE一斉送信: {$line_broadcast_sent}名）" : "";
         $_SESSION['notice_msg'] = "🚨 新しい安否確認・生存点呼「{$event_title}」{$mode_text}を発令しました！{$line_text}全職員に報告を促してください。";
         header("Location: safety_contacts.php");
@@ -206,10 +216,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         exit;
     }
 
-    // 🚨 災害時緊急モード（個人情報全開示）と平時・訓練モード（嘘電話番号・マスキング）の切り替え
+    // 🚨 災害時緊急モード（個人情報全開示）、🛡️ 訓練モード、🌿 平常モード の切り替え
     if ($action === 'toggle_disaster_mode') {
-        $target_mode = isset($_POST['target_mode']) && $_POST['target_mode'] === '1';
-        $auth_pin    = trim($_POST['auth_pin'] ?? '');
+        $raw_mode = trim($_POST['target_mode'] ?? '0');
+        $auth_pin = trim($_POST['auth_pin'] ?? '');
+
+        if ($raw_mode === '1' || $raw_mode === 'disaster') {
+            $new_mode = 'disaster';
+            $is_disaster_mode_val = true;
+        } elseif ($raw_mode === 'drill') {
+            $new_mode = 'drill';
+            $is_disaster_mode_val = false;
+        } else {
+            $new_mode = 'normal';
+            $is_disaster_mode_val = false;
+        }
 
         // 権限チェック：
         // 1. ログイン中のユーザーが権限者（山本太・医師など）であるか
@@ -232,7 +253,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         }
 
         if (!$can_toggle_now) {
-            $_SESSION['notice_msg'] = "❌ <b>【権限エラー】</b> 災害緊急モードの切替は、原則「医師」または「管理者（事務長・山本）」のみ実行可能です。暗証番号が正しくありません。";
+            $_SESSION['notice_msg'] = "❌ <b>【権限エラー】</b> モードの切替は、原則「医師」または「管理者（事務長・山本）」のみ実行可能です。暗証番号が正しくありません。";
             $dept_param = isset($_GET['dept']) ? '?dept=' . (int)$_GET['dept'] : '';
             header("Location: safety_contacts.php" . $dept_param);
             exit;
@@ -241,18 +262,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         // アクティブイベントの存在確認＆更新
         $cur_ev = $pdo->query("SELECT event_id FROM safety_events WHERE is_active = TRUE ORDER BY event_id DESC LIMIT 1")->fetch();
         if ($cur_ev) {
-            $pdo->prepare("UPDATE safety_events SET is_disaster_mode = :m WHERE event_id = :id")
-                ->execute([':m' => $target_mode ? 'true' : 'false', ':id' => $cur_ev['event_id']]);
+            $pdo->prepare("UPDATE safety_events SET is_disaster_mode = :m, safety_mode = :sm WHERE event_id = :id")
+                ->execute([':m' => $is_disaster_mode_val ? 'true' : 'false', ':sm' => $new_mode, ':id' => $cur_ev['event_id']]);
         } else {
-            $pdo->prepare("INSERT INTO safety_events (title, description, is_active, is_disaster_mode, created_at) VALUES ('【緊急運用】BCP安否確認', '自動設定イベント', TRUE, :m, NOW())")
-                ->execute([':m' => $target_mode ? 'true' : 'false']);
+            $pdo->prepare("INSERT INTO safety_events (title, description, is_active, is_disaster_mode, safety_mode, created_at) VALUES ('【日常運用】BCP安否確認', '自動設定イベント', TRUE, :m, :sm, NOW())")
+                ->execute([':m' => $is_disaster_mode_val ? 'true' : 'false', ':sm' => $new_mode]);
         }
         
         $op_text = $operator_name ? " （認証操作者: {$operator_name}）" : "";
-        if ($target_mode) {
-            $_SESSION['notice_msg'] = "🚨 <b>【災害時緊急モード発令】</b> 人命救助・緊急安否確認のため、全職員の個人情報（携帯・自宅電話・住所）を全開示しました。自宅固定電話（🏠家に電話）や地図確認が可能です。{$op_text}";
+        if ($new_mode === 'disaster') {
+            $_SESSION['notice_msg'] = "🚨 <b>【災害時緊急モード発令】</b> 人命救助・緊急安否確認のため、全職員の個人情報（携帯・自宅電話・住所）を全開示しました。かわら版に緊急報告バナーが表示されます。{$op_text}";
+        } elseif ($new_mode === 'drill') {
+            $_SESSION['notice_msg'] = "🛡️ <b>【訓練モードへ切替】</b> 安否確認の点呼訓練を実施します。かわら版に訓練報告バナーが表示されます（個人情報は保護されます）。{$op_text}";
         } else {
-            $_SESSION['notice_msg'] = "🛡️ <b>【訓練・平時モードへ復帰】</b> 個人情報保護のため、電話番号を訓練用ダミー（嘘電話番号）、住所を非表示に戻しました。{$op_text}";
+            $_SESSION['notice_msg'] = "🌿 <b>【平常モードへ復帰】</b> 日常運用に戻しました。かわら版の安否確認催促バナーは非表示になります。{$op_text}";
         }
         $dept_param = isset($_GET['dept']) ? '?dept=' . (int)$_GET['dept'] : '';
         header("Location: safety_contacts.php" . $dept_param);
@@ -263,9 +286,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 $notice_msg = $_SESSION['notice_msg'] ?? '';
 unset($_SESSION['notice_msg']);
 
-// 4. 現在アクティブな安否確認イベント ＆ 災害緊急モード判定
+// 4. 現在アクティブな安否確認イベント ＆ モード判定
 $active_event = $pdo->query("SELECT * FROM safety_events WHERE is_active = TRUE ORDER BY event_id DESC LIMIT 1")->fetch();
-$is_disaster_mode = (bool)($active_event['is_disaster_mode'] ?? false);
+$safety_mode = $active_event['safety_mode'] ?? (!empty($active_event['is_disaster_mode']) ? 'disaster' : 'normal');
+$is_disaster_mode = ($safety_mode === 'disaster' || !empty($active_event['is_disaster_mode']));
 
 // 📱 電話番号の表示判定（災害時：本物＆ワンタップ架電 / 訓練時：嘘電話番号＆架電防止）
 if (!function_exists('get_phone_info')) {
@@ -1383,20 +1407,30 @@ $all_staff_for_select = $pdo->query("SELECT staff_id, staff_name, dept_id, role,
         <div class="header-container">
             <div class="header-title">
                 <?php if ($is_disaster_mode): ?>
-                    <h1 style="color:#fef08a;">🚨 【災害緊急モード発令中】 職員連絡網・人命安否確認 <span>医療法人小野会</span></h1>
+                    <h1 style="color:#fef08a;">🚨 【災害緊急モード発令中】 職員連絡網・人命安否確認</h1>
                 <?php else: ?>
-                    <h1>🛡️ 職員連絡網・BCP安否生存確認 <span>医療法人小野会</span></h1>
+                    <h1>🛡️ 職員連絡網・BCP安否確認</h1>
                 <?php endif; ?>
             </div>
             <div class="header-actions">
-                <!-- 🚨 災害時緊急モード ⇔ 🛡️ 訓練・平時モード 切替ボタン（権限判定・テンキー認証対応） -->
-                <?php if ($is_disaster_mode): ?>
-                    <button type="button" class="btn-header" style="background:#16a34a; border:2px solid #bbf7d0; font-weight:900;" onclick="handleToggleDisasterMode(0, <?= $is_can_toggle ? 'true' : 'false' ?>)" title="個人情報保護状態へ戻す">
-                        🛡️ 訓練・平時モードへ戻す
+                <!-- 🚨 災害時緊急 / 🛡️ 訓練 / 🌿 平常 3モード切替ボタン -->
+                <?php if ($safety_mode === 'disaster'): ?>
+                    <button type="button" class="btn-header" style="background:#16a34a; border:2px solid #bbf7d0; font-weight:900;" onclick="handleToggleDisasterMode('normal', <?= $is_can_toggle ? 'true' : 'false' ?>)" title="平常モードへ戻す">
+                        🌿 平常モードへ戻す
                     </button>
-                <?php else: ?>
-                    <button type="button" class="btn-header" style="background:#dc2626; border:2px solid #fecaca; font-weight:900;" onclick="handleToggleDisasterMode(1, <?= $is_can_toggle ? 'true' : 'false' ?>)" title="全個人情報を開示して自宅架電可能にする">
-                        🚨 災害時緊急モード発令
+                <?php elseif ($safety_mode === 'drill'): ?>
+                    <button type="button" class="btn-header" style="background:#15803d; border:2px solid #bbf7d0; font-weight:bold;" onclick="handleToggleDisasterMode('normal', <?= $is_can_toggle ? 'true' : 'false' ?>)" title="平常モードへ戻す">
+                        🌿 訓練終了（平常へ）
+                    </button>
+                    <button type="button" class="btn-header" style="background:#dc2626; border:2px solid #fecaca; font-weight:900;" onclick="handleToggleDisasterMode('disaster', <?= $is_can_toggle ? 'true' : 'false' ?>)" title="全個人情報を開示して自宅架電可能にする">
+                        🚨 災害緊急モード
+                    </button>
+                <?php else: /* normal */ ?>
+                    <button type="button" class="btn-header" style="background:#f59e0b; border:2px solid #fde68a; color:#78350f; font-weight:bold;" onclick="handleToggleDisasterMode('drill', <?= $is_can_toggle ? 'true' : 'false' ?>)" title="訓練モードに切り替えてかわら版にバナーを表示">
+                        🛡️ 訓練モード開始
+                    </button>
+                    <button type="button" class="btn-header" style="background:#dc2626; border:2px solid #fecaca; font-weight:900;" onclick="handleToggleDisasterMode('disaster', <?= $is_can_toggle ? 'true' : 'false' ?>)" title="全個人情報を開示して自宅架電可能にする">
+                        🚨 災害緊急モード
                     </button>
                 <?php endif; ?>
 
@@ -1441,8 +1475,8 @@ $all_staff_for_select = $pdo->query("SELECT staff_id, staff_name, dept_id, role,
             <div class="alert-notice"><?= $notice_msg ?></div>
         <?php endif; ?>
 
-        <!-- モード案内バナー（災害時 vs 訓練時） -->
-        <?php if ($is_disaster_mode): ?>
+        <!-- モード案内バナー（災害時 vs 訓練時 vs 平常時） -->
+        <?php if ($safety_mode === 'disaster'): ?>
             <div class="banner-disaster">
                 <div class="banner-disaster-title">
                     🚨 【災害時緊急モード発令中】 全職員の個人情報を全開示しています
@@ -1452,17 +1486,31 @@ $all_staff_for_select = $pdo->query("SELECT staff_id, staff_name, dept_id, role,
                     連絡がつかない職員の自宅へ直接電話（「<strong>🏠 家に電話</strong>」ボタン）や、地図（「<strong>🗺️ 地図・ルート</strong>」ボタン）での安否確認・駆けつけを行ってください。
                 </div>
             </div>
-        <?php else: ?>
-            <div class="banner-training">
+        <?php elseif ($safety_mode === 'drill'): ?>
+            <div class="banner-training" style="border-left-color:#e67e22; background:#fffbf0;">
                 <div class="banner-training-flex">
                     <div>
-                        <span class="badge-training">🛡️ 訓練・平時モード（個人情報保護中）</span>
+                        <span class="badge-training" style="background:#fef3c7; color:#b45309; border-color:#fde68a;">🛡️ 訓練モード実施中（かわら版に安否報告バナー表示中）</span>
                         <span class="banner-training-text">
-                            電話番号は<strong>嘘電話番号（訓練ダミー）</strong>、住所は<strong>非表示マスキング</strong>されています。（誤架電防止のため架電不可）
+                            電話番号は<strong>嘘電話番号（訓練ダミー）</strong>、住所は<strong>非表示マスキング</strong>されています。
                         </span>
                     </div>
                     <div class="banner-training-note">
-                        ※ 本物の災害発生時は右上の「<strong>🚨 災害時緊急モード発令</strong>」を押すことで、全職員の自宅電話・住所が一斉開示されます。
+                        ※ かわら版トップに「安否訓練が未報告です」バナーが表示されています。訓練終了時は「🌿 訓練終了（平常へ）」を押してください。
+                    </div>
+                </div>
+            </div>
+        <?php else: /* normal */ ?>
+            <div class="banner-training">
+                <div class="banner-training-flex">
+                    <div>
+                        <span class="badge-training" style="background:#ecfdf5; color:#065f46; border-color:#a7f3d0;">🌿 平常運用モード（日常連絡・個人情報保護）</span>
+                        <span class="banner-training-text">
+                            電話番号は<strong>訓練用ダミー（誤架電防止）</strong>、住所は<strong>非表示</strong>です。かわら版の安否確認催促バナーは非表示になっています。
+                        </span>
+                    </div>
+                    <div class="banner-training-note">
+                        ※ 有事の際は右上の「<strong>🚨 災害時緊急モード</strong>」を押すと全開示されます。点呼訓練の際は「<strong>🛡️ 訓練モード開始</strong>」を押してください。
                     </div>
                 </div>
             </div>
@@ -1941,13 +1989,21 @@ $all_staff_for_select = $pdo->query("SELECT staff_id, staff_name, dept_id, role,
                     <textarea name="event_desc" class="select-large" style="font-size:0.85rem; padding:6px 10px; border-width:1px; height:60px;" placeholder="全職員は速やかに生存状況と出勤可否を報告してください。"></textarea>
                 </div>
 
-                <div style="margin-bottom:14px; background:#fef2f2; border:1.5px solid #fecaca; padding:10px; border-radius:6px;">
-                    <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-weight:bold; color:#b91c1c; font-size:0.88rem;">
-                        <input type="checkbox" name="is_disaster_mode" value="1" style="width:18px; height:18px;">
-                        🚨 【本物の災害時】緊急モードとして発令（個人情報を全開示）
-                    </label>
-                    <div style="font-size:0.75rem; color:#7f1d1d; margin-top:4px; margin-left:26px;">
-                        ※ チェックを入れると、全職員の自宅電話番号・携帯電話・自宅住所が即座に開示されます。（訓練の場合はチェックを外してください）
+                <div style="margin-bottom:14px; background:#f8fafc; border:1.5px solid #cbd5e1; padding:10px; border-radius:6px;">
+                    <label style="display:block; font-weight:bold; font-size:0.84rem; margin-bottom:6px; color:#1e293b;">モード種別の選択</label>
+                    <div style="display:flex; flex-direction:column; gap:6px;">
+                        <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:0.85rem; font-weight:bold; color:#b45309;">
+                            <input type="radio" name="event_safety_mode" value="drill" checked style="width:16px; height:16px;">
+                            🛡️ 訓練モード（かわら版に安否報告バナーを表示、個人情報は保護）
+                        </label>
+                        <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:0.85rem; font-weight:bold; color:#dc2626;">
+                            <input type="radio" name="event_safety_mode" value="disaster" style="width:16px; height:16px;">
+                            🚨 【本物の災害時】緊急モード（全個人情報を即座に開示）
+                        </label>
+                        <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:0.85rem; font-weight:bold; color:#166534;">
+                            <input type="radio" name="event_safety_mode" value="normal" style="width:16px; height:16px;">
+                            🌿 平常モード（日常点呼、かわら版の催促バナーは非表示）
+                        </label>
                     </div>
                 </div>
 
@@ -2314,15 +2370,20 @@ $all_staff_for_select = $pdo->query("SELECT staff_id, staff_name, dept_id, role,
         alert("🛡️ 現在は【訓練・平時モード】です。\n\n個人情報保護のため、電話番号は誤架電防止用の【嘘電話番号（ダミー）】を表示しており、架電できません。\n\n本当の災害時には、画面上部の「🚨 災害時緊急モード発令」を押すことで、全職員の本物の携帯・自宅固定電話番号・住所が開示され、【家に電話】ができるようになります。");
     }
 
-    let pendingTargetMode = 0;
+    let pendingTargetMode = 'normal';
     let disasterPin = '';
 
     function handleToggleDisasterMode(targetMode, isAuthorized) {
         pendingTargetMode = targetMode;
         if (isAuthorized) {
-            const confirmMsg = targetMode === 1
-                ? '🚨【緊急確認】本当に災害が発生しましたか？\n\n発令すると全職員の【自宅固定電話・住所・携帯電話】が完全開示され、自宅架電（🏠家に電話）や駆けつけ確認が可能になります。'
-                : '🛡️【確認】訓練・平時モードへ復帰しますか？\n\n個人情報保護のため、電話番号・住所がマスキング（嘘電話番号／非表示）に戻ります。';
+            let confirmMsg = '';
+            if (targetMode === 'disaster' || targetMode === 1) {
+                confirmMsg = '🚨【緊急確認】本当に災害が発生しましたか？\n\n発令すると全職員の【自宅固定電話・住所・携帯電話】が完全開示され、かわら版にも緊急安否確認バナーが表示されます。';
+            } else if (targetMode === 'drill') {
+                confirmMsg = '🛡️【確認】訓練モードを開始しますか？\n\nかわら版トップに安否確認訓練の報告バナーが表示されます（個人情報は保護されます）。';
+            } else {
+                confirmMsg = '🌿【確認】平常モードに戻しますか？\n\n個人情報保護状態を維持し、かわら版の安否確認催促バナーが非表示になります。';
+            }
             if (confirm(confirmMsg)) {
                 document.getElementById('toggleTargetMode').value = targetMode;
                 document.getElementById('toggleAuthPin').value = '';
@@ -2340,13 +2401,17 @@ $all_staff_for_select = $pdo->query("SELECT staff_id, staff_name, dept_id, role,
 
         const titleEl = document.getElementById('dPinTitle');
         const submitBtn = document.getElementById('btnDisasterSubmit');
-        if (targetMode === 1) {
+        if (targetMode === 'disaster' || targetMode === 1) {
             titleEl.innerHTML = '🚨 災害時緊急モード発令';
             submitBtn.textContent = '🚨 発令する（全開示） ⏎';
             submitBtn.style.background = '#dc2626';
+        } else if (targetMode === 'drill') {
+            titleEl.innerHTML = '🛡️ 訓練モード切替';
+            submitBtn.textContent = '🛡️ 訓練モードへ切替 ⏎';
+            submitBtn.style.background = '#f59e0b';
         } else {
-            titleEl.innerHTML = '🛡️ 訓練モード復帰';
-            submitBtn.textContent = '🛡️ 訓練モードに戻す ⏎';
+            titleEl.innerHTML = '🌿 平常モード復帰';
+            submitBtn.textContent = '🌿 平常モードに戻す ⏎';
             submitBtn.style.background = '#16a34a';
         }
         document.getElementById('disasterPinModal').classList.add('active');

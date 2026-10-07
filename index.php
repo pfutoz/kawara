@@ -23,11 +23,17 @@ $is_admin = (bool)($login_user['is_admin'] ?? false);
 $has_line_id = !empty(trim($login_user['line_user_id'] ?? ''));
 
 
-// 本日の生存確認・安否報告チェック
-$today_start = date('Y-m-d 00:00:00');
-$stmt_safety = $pdo->prepare("SELECT COUNT(*) FROM safety_checks WHERE staff_id = :id AND reported_at >= :today");
-$stmt_safety->execute([':id' => $current_staff_id, ':today' => $today_start]);
-$my_safety_reported_today = ($stmt_safety->fetchColumn() > 0);
+// 本日の生存確認・安否報告チェック ＆ BCPモード判定
+$active_safety_event = $pdo->query("SELECT * FROM safety_events WHERE is_active = TRUE ORDER BY event_id DESC LIMIT 1")->fetch();
+$safety_mode = $active_safety_event['safety_mode'] ?? (!empty($active_safety_event['is_disaster_mode']) ? 'disaster' : 'normal');
+
+$my_safety_reported_today = false;
+if ($safety_mode !== 'normal') {
+    $today_start = date('Y-m-d 00:00:00');
+    $stmt_safety = $pdo->prepare("SELECT COUNT(*) FROM safety_checks WHERE staff_id = :id AND reported_at >= :today");
+    $stmt_safety->execute([':id' => $current_staff_id, ':today' => $today_start]);
+    $my_safety_reported_today = ($stmt_safety->fetchColumn() > 0);
+}
 
 // POST処理（コメント追加・既読・未読戻し）
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action_type'])) {
@@ -277,7 +283,7 @@ usort($posts, function($a, $b) use ($date_filter) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>院内かわら版 | 医療法人小野会</title>
+    <title>院内かわら版</title>
     <style>
         :root {
             --primary-color: #005a9c;
@@ -640,6 +646,82 @@ usort($posts, function($a, $b) use ($date_filter) {
             animation: spin 0.8s linear infinite;
         }
         @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* 📱 スマホ最適化 ＆ 超コンパクト化スタイル */
+        .header-menu-select {
+            display: none;
+            background: rgba(255, 255, 255, 0.22);
+            color: #ffffff;
+            border: 1px solid rgba(255, 255, 255, 0.45);
+            padding: 4px 8px;
+            border-radius: 5px;
+            font-size: 0.8rem;
+            font-weight: bold;
+            outline: none;
+            cursor: pointer;
+        }
+        .header-menu-select option {
+            color: #1e293b;
+            background: #ffffff;
+        }
+
+        .filter-select-group {
+            display: none;
+            gap: 6px;
+            width: 100%;
+        }
+        .filter-select {
+            flex: 1;
+            padding: 6px 8px;
+            border: 1px solid #cbd5e1;
+            border-radius: 6px;
+            font-size: 0.82rem;
+            background: #ffffff;
+            color: #334155;
+            font-weight: 600;
+            outline: none;
+            cursor: pointer;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+        }
+
+        .post-date-tag {
+            font-size: 0.74rem;
+            color: #888;
+            white-space: nowrap;
+            margin-left: auto;
+            padding-left: 6px;
+            flex-shrink: 0;
+            align-self: flex-start;
+        }
+
+        @media (max-width: 768px) {
+            header { padding: 0.5rem 0.8rem !important; }
+            .header-container { gap: 6px !important; }
+            .header-title h1 { font-size: 1.05rem !important; }
+            .header-right { gap: 6px !important; }
+            .desktop-only { display: none !important; }
+            .header-menu-select { display: inline-block !important; }
+            .user-info { font-size: 0.78rem !important; padding: 3px 6px !important; }
+            .btn-line-header { font-size: 0.72rem !important; padding: 3px 6px !important; }
+            
+            main { margin: 0.6rem auto !important; padding: 0 0.5rem !important; }
+            .filter-section { padding: 8px 10px !important; margin-bottom: 0.8rem !important; gap: 8px !important; }
+            .toolbar-group { gap: 6px !important; }
+            .btn-create { padding: 5px 12px !important; font-size: 0.82rem !important; }
+            .btn-toggle-compact { padding: 5px 10px !important; font-size: 0.78rem !important; }
+            .btn-print-top { display: none !important; }
+            
+            .desktop-filter-pills { display: none !important; }
+            .filter-select-group { display: flex !important; }
+
+            .post-card { padding: 10px 12px !important; }
+            .post-title { font-size: 1.05rem !important; }
+            .post-meta { font-size: 0.76rem !important; gap: 8px !important; margin-bottom: 6px !important; }
+        }
+
+        @media (max-width: 480px) {
+            .post-date-label { display: none !important; }
+        }
     </style>
 </head>
 <body>
@@ -647,25 +729,38 @@ usort($posts, function($a, $b) use ($date_filter) {
     <header>
         <div class="header-container">
             <div class="header-title">
-                <h1>📜 院内かわら版 <span>医療法人小野会</span></h1>
+                <h1>📜 院内かわら版</h1>
             </div>
             <div class="header-right">
                 <a href="login.php?switch_user=1" class="user-info" title="クリックしてユーザーを切り替え">
-                    👤 <span style="font-weight:bold;"><?= htmlspecialchars($login_user['staff_name']) ?></span> (<?= htmlspecialchars($login_user['role']) ?>)
+                    👤 <span style="font-weight:bold;"><?= htmlspecialchars($login_user['staff_name']) ?></span>
                     <span style="font-size:0.7rem; background:rgba(255,255,255,0.3); padding:1px 5px; border-radius:3px; margin-left:2px;">切替</span>
                 </a>
                 <button type="button" class="btn-line-header <?= $has_line_id ? 'is-linked' : 'is-unlinked' ?>" id="headerLineBtn" onclick="openLineLinkModal()" title="LINE連携設定">
-                    <?= $has_line_id ? '🟢 LINE連携済' : '📱 LINE未登録' ?>
+                    <?= $has_line_id ? '🟢 LINE済' : '📱 LINE未' ?>
                 </button>
-                <div class="header-actions">
+
+                <!-- 📱 スマホ用 メニューリストBOX -->
+                <select class="header-menu-select" onchange="handleHeaderMenu(this)">
+                    <option value="">☰ メニュー ▼</option>
                     <?php if ($is_admin || $current_staff_id === 15 || mb_strpos($login_user['role'] ?? '', '事務') !== false): ?>
-                        <a href="jimucho_dashboard.php" class="btn-header" style="background:#0284c7; font-weight:bold;">👔 事務長業務</a>
+                        <option value="jimucho_dashboard.php">👔 事務長モード</option>
+                    <?php endif; ?>
+                    <option value="safety_contacts.php">🛡️ 連絡網・安否</option>
+                    <option value="/index.php">🏠 院内ポータル</option>
+                    <option value="help.php">❓ 使い方</option>
+                    <?php if ($is_admin): ?><option value="master_mente.php">⚙️ メンテ</option><?php endif; ?>
+                </select>
+
+                <!-- 💻 PC用 ヘッダーボタン群 -->
+                <div class="header-actions desktop-only">
+                    <?php if ($is_admin || $current_staff_id === 15 || mb_strpos($login_user['role'] ?? '', '事務') !== false): ?>
+                        <a href="jimucho_dashboard.php" class="btn-header" style="background:#0284c7; font-weight:bold;">👔 事務長モード</a>
                     <?php endif; ?>
                     <a href="safety_contacts.php" class="btn-header" style="background:#28a745;">🛡️ 連絡網・安否</a>
                     <a href="/index.php" class="btn-header">ポータル</a>
                     <a href="help.php" class="btn-header" style="background:#17a2b8;" target="_blank">❓ 使い方</a>
                     <?php if ($is_admin): ?><a href="master_mente.php" class="btn-header" style="background:#e67e22;">⚙️ メンテ</a><?php endif; ?>
-                    <a href="login.php?switch_user=1" class="btn-header" style="background:#e74c3c;">切替</a>
                 </div>
             </div>
         </div>
@@ -691,27 +786,40 @@ usort($posts, function($a, $b) use ($date_filter) {
             </div>
         <?php endif; ?>
 
-        <?php if (!$my_safety_reported_today): ?>
-            <div style="background:#fff8ee; border:1px solid #fde68a; border-left:5px solid #e67e22; padding:8px 14px; border-radius:6px; margin-bottom:1rem; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
-                <span style="font-size:0.85rem; color:#b45309; font-weight:bold;">
-                    🛡️ 本日の生存チェック（BCP安否確認）がまだ報告されていません
-                </span>
-                <a href="safety_contacts.php" style="background:#28a745; color:#fff; font-size:0.78rem; font-weight:bold; padding:4px 10px; border-radius:4px; text-decoration:none;">
-                    1クリックで報告する →
-                </a>
-            </div>
+        <!-- 🛡️ BCP安否確認バナー（平常モード時は非表示、訓練・災害時のみ表示） -->
+        <?php if ($safety_mode !== 'normal' && !$my_safety_reported_today): ?>
+            <?php if ($safety_mode === 'disaster'): ?>
+                <div style="background:#fef2f2; border:1px solid #fecaca; border-left:5px solid #dc2626; padding:8px 12px; border-radius:6px; margin-bottom:0.8rem; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+                    <span style="font-size:0.84rem; color:#b91c1c; font-weight:bold;">
+                        🚨 【災害時緊急モード】生存報告（BCP安否確認）が未報告です
+                    </span>
+                    <a href="safety_contacts.php" style="background:#dc2626; color:#fff; font-size:0.78rem; font-weight:bold; padding:4px 10px; border-radius:4px; text-decoration:none; white-space:nowrap;">
+                        1クリック報告 →
+                    </a>
+                </div>
+            <?php else: /* drill (訓練モード) */ ?>
+                <div style="background:#fff8ee; border:1px solid #fde68a; border-left:5px solid #e67e22; padding:8px 12px; border-radius:6px; margin-bottom:0.8rem; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+                    <span style="font-size:0.84rem; color:#b45309; font-weight:bold;">
+                        🛡️ 【安否訓練中】本日の生存チェックが未報告です
+                    </span>
+                    <a href="safety_contacts.php" style="background:#28a745; color:#fff; font-size:0.78rem; font-weight:bold; padding:4px 10px; border-radius:4px; text-decoration:none; white-space:nowrap;">
+                        1クリック報告 →
+                    </a>
+                </div>
+            <?php endif; ?>
         <?php endif; ?>
 
+        <!-- フィルター・ツールバーセクション（超コンパクト化） -->
         <div class="filter-section">
             <div class="toolbar-group">
-                <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-                    <a href="create_post.php" class="btn-create">✏️ お知らせを新規投稿</a>
+                <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
+                    <a href="create_post.php" class="btn-create">✏️ 新規投稿</a>
                     
                     <button type="button" id="compactToggleBtn" class="btn-toggle-compact" onclick="toggleCompactMode()">
-                        📄 1行コンパクト表示
+                        📄 1行表示
                     </button>
 
-                    <button type="button" class="btn-toggle-compact" onclick="window.print()" style="background:#6c757d; border-color:#5a6268;">
+                    <button type="button" class="btn-toggle-compact btn-print-top" onclick="window.print()" style="background:#6c757d; border-color:#5a6268;">
                         🖨️ 一覧印刷
                     </button>
 
@@ -723,19 +831,10 @@ usort($posts, function($a, $b) use ($date_filter) {
                         return 'index.php' . (!empty($p) ? '?' . http_build_query($p) : '');
                     };
                     ?>
-
-                    <?php if ($date_filter === 'past'): ?>
-                        <a href="<?= $build_url('all', $selected_cat) ?>" class="btn-toggle-compact" style="background:#495057; border-color:#343a40; text-decoration:none;">
-                            🔙 通常一覧に戻る
-                        </a>
-                    <?php else: ?>
-                        <a href="<?= $build_url('past', $selected_cat) ?>" class="btn-toggle-compact" style="background:#5c636a; border-color:#4e555b; text-decoration:none;">
-                            📁 過去の投稿を見る
-                        </a>
-                    <?php endif; ?>
                 </div>
 
-                <div class="date-filter-group">
+                <!-- 💻 PC用 期間フィルター -->
+                <div class="date-filter-group desktop-filter-pills">
                     <a href="<?= $build_url('all', $selected_cat) ?>" class="btn-date <?= $date_filter === 'all' ? 'active' : '' ?>">全期間</a>
                     <a href="<?= $build_url('today', $selected_cat) ?>" class="btn-date <?= $date_filter === 'today' ? 'active' : '' ?>">今日</a>
                     <a href="<?= $build_url('tomorrow', $selected_cat) ?>" class="btn-date <?= $date_filter === 'tomorrow' ? 'active' : '' ?>">明日</a>
@@ -743,12 +842,36 @@ usort($posts, function($a, $b) use ($date_filter) {
                     <a href="<?= $build_url('this_month', $selected_cat) ?>" class="btn-date <?= $date_filter === 'this_month' ? 'active' : '' ?>">今月</a>
                     <a href="<?= $build_url('next_month', $selected_cat) ?>" class="btn-date <?= $date_filter === 'next_month' ? 'active' : '' ?>">来月</a>
                     <span style="color:#ced4da; margin:0 2px;">|</span>
-                    <a href="<?= $build_url('past', $selected_cat) ?>" class="btn-date <?= $date_filter === 'past' ? 'active' : '' ?>" style="<?= $date_filter === 'past' ? 'background:#5c636a; color:#fff;' : '' ?>">📁 過去の投稿</a>
-                    <a href="<?= $build_url('all_history', $selected_cat) ?>" class="btn-date <?= $date_filter === 'all_history' ? 'active' : '' ?>" style="<?= $date_filter === 'all_history' ? 'background:#17a2b8; color:#fff;' : '' ?>">🌐 全履歴(過去含む)</a>
+                    <a href="<?= $build_url('past', $selected_cat) ?>" class="btn-date <?= $date_filter === 'past' ? 'active' : '' ?>" style="<?= $date_filter === 'past' ? 'background:#5c636a; color:#fff;' : '' ?>">📁 過去分</a>
+                    <a href="<?= $build_url('all_history', $selected_cat) ?>" class="btn-date <?= $date_filter === 'all_history' ? 'active' : '' ?>" style="<?= $date_filter === 'all_history' ? 'background:#17a2b8; color:#fff;' : '' ?>">🌐 全履歴</a>
                 </div>
             </div>
 
-            <div class="cat-tabs">
+            <!-- 📱 スマホ用 期間＆カテゴリ 2列ドロップダウン（超コンパクト！） -->
+            <div class="filter-select-group">
+                <select class="filter-select" onchange="if(this.value) location.href=this.value;">
+                    <option value="<?= $build_url('all', $selected_cat) ?>" <?= $date_filter === 'all' ? 'selected' : '' ?>>📅 期間: 全期間</option>
+                    <option value="<?= $build_url('today', $selected_cat) ?>" <?= $date_filter === 'today' ? 'selected' : '' ?>>📅 期間: 今日</option>
+                    <option value="<?= $build_url('tomorrow', $selected_cat) ?>" <?= $date_filter === 'tomorrow' ? 'selected' : '' ?>>📅 期間: 明日</option>
+                    <option value="<?= $build_url('plus7', $selected_cat) ?>" <?= $date_filter === 'plus7' ? 'selected' : '' ?>>📅 期間: 直近+7日</option>
+                    <option value="<?= $build_url('this_month', $selected_cat) ?>" <?= $date_filter === 'this_month' ? 'selected' : '' ?>>📅 期間: 今月</option>
+                    <option value="<?= $build_url('next_month', $selected_cat) ?>" <?= $date_filter === 'next_month' ? 'selected' : '' ?>>📅 期間: 来月</option>
+                    <option value="<?= $build_url('past', $selected_cat) ?>" <?= $date_filter === 'past' ? 'selected' : '' ?>>📁 期間: 過去の投稿</option>
+                    <option value="<?= $build_url('all_history', $selected_cat) ?>" <?= $date_filter === 'all_history' ? 'selected' : '' ?>>🌐 期間: 全履歴(過去含)</option>
+                </select>
+
+                <select class="filter-select" onchange="if(this.value) location.href=this.value;">
+                    <option value="<?= $build_url($date_filter, 0) ?>" <?= $selected_cat === 0 ? 'selected' : '' ?>>🏷️ カテゴリ: 全て</option>
+                    <?php foreach ($categories as $cat): ?>
+                        <option value="<?= $build_url($date_filter, $cat['category_id']) ?>" <?= $selected_cat == $cat['category_id'] ? 'selected' : '' ?>>
+                            <?= $cat['icon_emoji'] ?> <?= htmlspecialchars($cat['category_name']) ?>
+                        </option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+
+            <!-- 💻 PC用 カテゴリタブ -->
+            <div class="cat-tabs desktop-filter-pills">
                 <a href="<?= $build_url($date_filter, 0) ?>" class="cat-tab <?= $selected_cat === 0 ? 'active' : '' ?>">全て</a>
                 <?php foreach ($categories as $cat): ?>
                     <a href="<?= $build_url($date_filter, $cat['category_id']) ?>" class="cat-tab <?= $selected_cat == $cat['category_id'] ? 'active' : '' ?>">
@@ -831,7 +954,7 @@ usort($posts, function($a, $b) use ($date_filter) {
                                     <?= $p['icon_emoji'] ?> <?= htmlspecialchars($p['category_name'] ?? '一般') ?>
                                 </span>
                             </div>
-                            <span style="font-size: 0.78rem; color: #999;">投稿: <?= date('Y/m/d H:i', strtotime($p['created_at'])) ?></span>
+                            <span class="post-date-tag"><span class="post-date-label">投稿: </span><?= date('n/j H:i', strtotime($p['created_at'])) ?></span>
                         </div>
 
                         <div class="post-title-wrapper">
@@ -1326,6 +1449,15 @@ async function simulateTestLink() {
         alert('テスト用LINE IDで連携しました！');
         refreshLineStatus();
     }
+}
+function handleHeaderMenu(sel) {
+    if (!sel || !sel.value) return;
+    if (sel.value === 'help.php' || sel.value.startsWith('http')) {
+        window.open(sel.value, '_blank');
+    } else {
+        window.location.href = sel.value;
+    }
+    sel.value = '';
 }
 </script>
 

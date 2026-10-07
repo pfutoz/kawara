@@ -232,8 +232,8 @@ if (isset($_GET['action']) && $_GET['action'] === 'get_post_detail') {
     exit;
 }
 
-// 4. カレンダー日付パラメータ＆表示モード
-$view_mode = (isset($_GET['view']) && $_GET['view'] === 'week') ? 'week' : 'month';
+// 4. カレンダー日付パラメータ＆表示モード（デフォルトは週表示）
+$view_mode = (isset($_GET['view']) && $_GET['view'] === 'month') ? 'month' : 'week';
 
 $year  = isset($_GET['year']) ? (int)$_GET['year'] : (int)date('Y');
 $month = isset($_GET['month']) ? (int)$_GET['month'] : (int)date('n');
@@ -548,7 +548,7 @@ if ($focus_post_id > 0) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>👔 事務長業務ダッシュボード - 医療法人小野会 かわら版</title>
+    <title>👔 事務長モード - かわら版</title>
     <style>
         :root {
             --primary: #0284c7;
@@ -1507,6 +1507,22 @@ if ($focus_post_id > 0) {
             gap: 10px;
             animation: slide-in 0.3s ease;
         }
+        /* 📱 スマホ最適化レスポンシブスタイル */
+        @media (max-width: 768px) {
+            .top-navbar { padding: 8px 12px !important; }
+            .brand-title { font-size: 0.98rem !important; }
+            .nav-actions { gap: 6px !important; font-size: 0.78rem !important; }
+            .nav-actions span { font-size: 0.78rem !important; }
+            .btn-switch-timeline { padding: 5px 10px !important; font-size: 0.78rem !important; }
+            .view-switcher { display: none !important; } /* スマホでは歴月切り替え不要 */
+            .quick-toolbar { padding: 6px 10px !important; overflow-x: auto !important; flex-wrap: nowrap !important; -webkit-overflow-scrolling: touch; }
+            .quick-toolbar .tool-btn { white-space: nowrap !important; font-size: 0.76rem !important; padding: 5px 10px !important; }
+            .status-alert-bar { padding: 8px 12px !important; font-size: 0.82rem !important; flex-direction: column; align-items: flex-start; gap: 4px; }
+            .week-view-wrapper { padding: 8px 6px !important; }
+            .week-navbar { flex-direction: column !important; align-items: flex-start !important; gap: 6px !important; padding: 10px !important; }
+            .week-grid-7cols { display: flex !important; flex-direction: column !important; gap: 10px !important; }
+            .week-day-col { min-height: auto !important; }
+        }
         @keyframes slide-in {
             from { transform: translateX(100%); opacity: 0; }
             to { transform: translateX(0); opacity: 1; }
@@ -1515,18 +1531,17 @@ if ($focus_post_id > 0) {
 </head>
 <body>
 
-<!-- 1. トップナビバー -->
+<!-- 1. トップナビバー（コンパクト化・氏名のみ） -->
 <div class="top-navbar">
-    <div class="nav-brand">
-        <span class="brand-badge">医療法人小野会</span>
-        <span class="brand-title">👔 事務長業務ダッシュボード</span>
+    <div class="nav-brand" style="gap:8px;">
+        <span class="brand-title" style="font-size:1.05rem; font-weight:900;">👔 事務長モード</span>
     </div>
     <div class="nav-actions">
-        <span style="font-size:0.88rem; color:#cbd5e1;">
-            ログイン: <b><?= htmlspecialchars($current_user['staff_name']) ?></b> (<?= htmlspecialchars($current_user['role']) ?>)
+        <span style="font-size:0.84rem; color:#cbd5e1;">
+            👤 <b><?= htmlspecialchars($current_user['staff_name']) ?></b>
         </span>
-        <a href="index.php" class="btn-switch-timeline">
-            📜 かわら版一覧へ戻る
+        <a href="index.php" class="btn-switch-timeline" style="padding:5px 12px; font-size:0.8rem;">
+            📜 かわら版
         </a>
     </div>
 </div>
