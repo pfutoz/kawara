@@ -582,9 +582,9 @@
                 <p>〜 BCP災害連絡網の大義名分 ✕ 1タップ意思表示 ✕ 不在日自律運用 〜</p>
             </div>
             <div class="header-meta">
-                <div><strong>作成者:</strong> 事務長（開発担当）</div>
-                <div><strong>改定日:</strong> 2026年10月（最新実証済み）</div>
-                <div><strong>適用対象:</strong> 院内かわら版システム ＆ 職員ポータル</div>
+                <div><strong>作成者:</strong> 事務長（山本太）/ 開発担当</div>
+                <div><strong>改定日:</strong> 2026年10月7日（本番安定稼働反映版）</div>
+                <div><strong>適用対象:</strong> 院内システム（本番サーバー 192.168.1.16 完全同期）</div>
                 <button type="button" class="btn-print" onclick="window.print()">🖨️ A4印刷する</button>
             </div>
         </div>
@@ -611,53 +611,53 @@
                     ⚡ 現在の開発・実装進捗ステータス
                 </div>
                 <div class="badge-live-status">
-                    🟢 Phase 1 完了・LINE実証稼働中
+                    🟢 Phase 1〜4 本番稼働中（192.168.1.16完全同期）
                 </div>
             </div>
             <p style="font-size:0.88rem; color:#334155; margin-bottom:10px;">
-                LINE公式アカウント「<strong>おの肛門科</strong>（<code>@tmw3446q</code>）」との双方向Webhook連携、4桁コードによるスタッフ自動紐付け、および安否確認一斉配信のLINE実送受信テスト（HTTP 200）に成功しました。
+                LINE Messaging API 双方向連携、現場貼り出しポスター印刷、不在日カバーまとめ印刷、事務長統制ダッシュボード、および院内ネットワークプリンタ自動排紙システム（PowerShell ✕ SumatraPDF）の全中核機能が実装完了し、本番サーバー（<code>192.168.1.16</code>）にて実機検証・安定稼働中です。
             </p>
             <div class="pd-grid">
                 <div class="pd-card highlight">
-                    <span class="pd-card-tag">✅ 実装・実証完了</span>
-                    <div class="pd-card-title">LINE Messaging API 双方向基盤</div>
+                    <span class="pd-card-tag">✅ 本番稼働中</span>
+                    <div class="pd-card-title">事務長統制ダッシュボード（jimucho_dashboard.php）</div>
                     <div class="pd-card-desc">
-                        長期アクセストークン・シークレット認証、Webhook（<code>api/line_webhook.php</code>）連携が完成。山本太事務長の実機LINEへのプッシュ配信・受信に成功。
+                        事務長（山本太）専用のリアルタイム統制画面。カレンダー連動、部署別既読・未読リアルタイム集計、未読者へのLINEリマインド直接送信、不在予定・ポスター印刷の一括操作を集約。
                     </div>
                 </div>
                 <div class="pd-card highlight">
-                    <span class="pd-card-tag">✅ 実装・実証完了</span>
-                    <div class="pd-card-title">3ステップ数字コード自動連携</div>
+                    <span class="pd-card-tag">✅ 本番稼働中</span>
+                    <div class="pd-card-title">院内プリンタ自動排紙 ＆ フェイルオーバー</div>
                     <div class="pd-card-desc">
-                        QRコードスキャン後、画面の4桁数字をLINEトークへ送るだけで自動認証・DB即時紐付け（<code>line_link_codes</code>）。手動入力も併設。
+                        <code>scripts/print_dispatcher.ps1</code> ✕ SumatraPDF連携。Primaryプリンタの死活監視・エラー検知、障害時のFallbackプリンタ自動迂回、Base64コマンドによる安全なサイレント印刷を実現。
                     </div>
                 </div>
                 <div class="pd-card highlight">
-                    <span class="pd-card-tag">✅ 実装・実証完了</span>
-                    <div class="pd-card-title">安否確認連絡網（LINE一斉・個別送信）</div>
+                    <span class="pd-card-tag">✅ 本番稼働中</span>
+                    <div class="pd-card-title">現場貼り出しポスター印刷（部署別統一）</div>
                     <div class="pd-card-desc">
-                        <code>safety_contacts.php</code> に「💬 LINE安否連絡」モーダル、点呼発令時のLINE一斉配信、および職員カードからの個別送信ボタンを完備。
+                        <code>print_dept_poster.php</code> 新設・<code>print_post.php</code> 統合。A4縦最適化レイアウト、部署別ヘッダーバッジ（【医局 掲示用】【看護部 掲示用】等）印字に対応。
                     </div>
                 </div>
                 <div class="pd-card highlight">
-                    <span class="pd-card-tag">✅ 実装・実証完了</span>
-                    <div class="pd-card-title">職員マスター管理 ＆ 新規自動INSERT</div>
+                    <span class="pd-card-tag">✅ 本番稼働中</span>
+                    <div class="pd-card-title">不在期間カバーまとめ印刷（print_absence_summary.php）</div>
                     <div class="pd-card-desc">
-                        <code>stf/master_mente.php</code> 新設。JSON原本のCRUD・退避に加え、STFで新規追加された職員（「肛門科スマホ」等）の部署・五十音行自動判定＆DB即時同期を実現。
+                        水曜夕方（翌木曜不在分）や金曜夕方（土・日・月曜不在分）の予定・不在者・重要伝達をA4横で一括集約。現場引き継ぎサイン欄を自動印字。
                     </div>
                 </div>
                 <div class="pd-card highlight">
-                    <span class="pd-card-tag">✅ 実装・実証完了</span>
-                    <div class="pd-card-title">トンネル状態監視 ＆ 直接LINEコード発行</div>
+                    <span class="pd-card-tag">✅ 本番稼働中</span>
+                    <div class="pd-card-title">研修・イベント等のマルチ日程スケジュール</div>
                     <div class="pd-card-desc">
-                        <code>safety_contacts.php</code> ヘッダーに「🟢 稼働中 / ⚪ 停止中」リアルタイム監視バッジ、および各職員カードから直接QR・4桁コードを発行できるモーダルを新設。
+                        複数回に分かれる講習・点検（第1回、第2回…）の個別日時・場所・メモを一元管理（<code>event_schedules</code> JSON対応）。一覧・詳細・ポスターへ完全連動。
                     </div>
                 </div>
                 <div class="pd-card highlight">
-                    <span class="pd-card-tag">✅ 規定・文書化完了</span>
-                    <div class="pd-card-title">属人化リスク対策 ＆ 引継ぎ規定書</div>
+                    <span class="pd-card-tag">✅ 本番稼働中</span>
+                    <div class="pd-card-title">LINE Messaging API 双方向基盤 ＆ 安否確認</div>
                     <div class="pd-card-desc">
-                        Cloudflare（<code>pfuto07@gmail.com</code>）およびLINE Business個人紐付けの退職・有事リスク分析と、法人共有アカウントへの移行プロトコル（<code>懸念事項.html</code>）を策定。
+                        公式LINE「おの肛門科」連携。4桁コード自動紐付け、安否確認一斉・個別LINE送信、トンネルリアルタイム監視、職員マスター（STF）自動同期を完備。
                     </div>
                 </div>
             </div>
@@ -809,38 +809,61 @@
 
             <!-- 機能2 -->
             <div class="feature-block">
-                <span class="feature-badge badge-paper">中核機能 2</span>
-                <h3>📄 事務長不在日（木・土日）完全カバーまとめ印刷</h3>
+                <span class="feature-badge badge-paper">中核機能 2（本番稼働中）</span>
+                <h3>📄 事務長不在日（木・土日）完全カバーまとめ印刷（print_absence_summary.php）</h3>
                 <p>
                     事務長が退勤する前日（水曜夕方・金曜夕方）に、不在期間の予定を自動で束ねた「朝礼・回覧伝達シート」を1クリック出力。
                 </p>
                 <ul style="padding-left:1.2rem; font-size:0.88rem; color:#4a5568;">
-                    <li><strong>水曜夕方:</strong> 翌木曜日（不在日）の全予定・来院業者・重要伝達を一括集約。</li>
+                    <li><strong>水曜夕方:</strong> 翌木曜日（不在日）の全予定・来院業者・重要伝達をA4横で一括集約。</li>
                     <li><strong>金曜夕方:</strong> 土・日・翌月曜（不在週末）の全予定を一覧化。</li>
                     <li><strong>現場引き継ぎサイン欄:</strong> 日直や現場リーダーの「受領印」「朝礼伝達済チェック」マス目を自動印字し、伝達責任を現場へ委譲。</li>
+                    <li><strong>部署別抽出:</strong> 全館共通だけでなく、各部署（看護部・医局・受付・リハ等）の指定日予定に絞り込んだ出力が可能。</li>
                 </ul>
             </div>
 
             <!-- 機能3 -->
             <div class="feature-block">
-                <span class="feature-badge badge-poster">中核機能 3</span>
-                <h3>🖨️ 設備修理・工事用「現場貼り出し特大ポスター（A4）」自動生成</h3>
+                <span class="feature-badge badge-poster">中核機能 3（本番稼働中）</span>
+                <h3>🖨️ 現場貼り出し用ポスター印刷（print_dept_poster.php / print_post.php 統一）</h3>
                 <p>
-                    「ウォシュレット故障」「換気扇交換」「水回り工事」などを登録した際、該当箇所のドアや詰所の白板に貼るA4横のポスターをボタン1発で出力。
+                    設備修理・点検・重要伝達など、現場のドアや詰所の掲示板に貼り出すA4縦ポスターをボタン1発で出力。
                 </p>
-                <div style="background:#fff; border:1px dashed #cbd5e1; border-radius:6px; padding:10px 14px; font-size:0.85rem; color:#333;">
-                    <strong>例:</strong> 【⚠️ 工事・点検のお知らせ】8/20(木) 13:30〜 / 新館2F マイトイレ / ※工事中使用禁止 / 業者: 〇〇設備<br>
-                    ⇒ 当日事務長が不在でも、現場スタッフ・患者・業者が迷わず自立して対応可能。
-                </div>
+                <ul style="padding-left:1.2rem; font-size:0.88rem; color:#4a5568;">
+                    <li><strong>部署別ヘッダーバッジ印字:</strong> 【医局 掲示用】【看護部 掲示用】【院内掲示用】など、対象部署がひと目でわかるヘッダーを自動生成。</li>
+                    <li><strong>A4縦1枚ジャストフィット:</strong> CSSの <code>@page { size: A4 portrait; }</code> とレイアウト自動調整により、添付画像を含めA4縦1枚に美しく収まります。</li>
+                    <li><strong>複数日程対応:</strong> 複数回にわたる研修や点検の日程・場所・メモも表形式で整理印字。</li>
+                </ul>
             </div>
 
             <!-- 機能4 -->
             <div class="feature-block">
-                <span class="feature-badge badge-sys">中核機能 4</span>
-                <h3>⚙️ Windows標準スクリプトによる自動印刷（PowerShell連携）</h3>
+                <span class="feature-badge badge-sys">中核機能 4（本番稼働中）</span>
+                <h3>⚙️ Windows標準PowerShell ✕ SumatraPDF による自動印刷 ＆ 障害自動迂回</h3>
                 <p>
-                    重厚なWindows専用アプリを開発することなく、OS標準のPowerShellスクリプト＋タスクスケジューラで特定ネットワークプリンタへ定時サイレント排紙。
+                    重厚な専用常駐ソフトを開発することなく、OS標準のPowerShellスクリプト＋SumatraPDFで特定ネットワークプリンタへサイレント排紙。
                 </p>
+                <ul style="padding-left:1.2rem; font-size:0.88rem; color:#4a5568;">
+                    <li><strong>高精度PDFレンダリング:</strong> Edge headlessモードで指定URLをA4 PDFへ完全描画変換。</li>
+                    <li><strong>プリンタ死活監視 ＆ 自動フェイルオーバー:</strong> <code>Get-Printer</code> でPrimaryプリンタの状態（オフライン・エラー・スプール詰まり）を検知し、異常時は瞬時にFallback（予備）プリンタへ自動迂回して排紙。</li>
+                    <li><strong>Base64 EncodedCommand:</strong> 日本語や特殊記号、引数のクォート崩れを完全防御し、PHPの <code>shell_exec</code> から安定実行。</li>
+                    <li><strong>機器マッピング管理（api/printers_api.php）:</strong> Windows上の実プリンタを自動取得し、部署（医局・ナースステーション・事務部等）ごとのプリンタ・トレイ・用紙向きをWeb画面から自在に設定。</li>
+                </ul>
+            </div>
+
+            <!-- 機能5 -->
+            <div class="feature-block">
+                <span class="feature-badge badge-line">中核機能 5（本番稼働中）</span>
+                <h3>📊 事務長専用ダッシュボード（jimucho_dashboard.php）＆ マルチ日程管理</h3>
+                <p>
+                    事務長（山本太）専用のリアルタイム統制コンソール。不在日の前日準備、部署別既読・了解状況の監視、未読者へのリマインド送信を一元化。
+                </p>
+                <ul style="padding-left:1.2rem; font-size:0.88rem; color:#4a5568;">
+                    <li><strong>カレンダー連動（includes/calendar_helper_jimucho.php）:</strong> 祝日・木曜休診・週末を自動判別し、直近の不在日とその対象伝達を一覧表示。</li>
+                    <li><strong>部署別既読・未読リアルタイム集計:</strong> 各記事について「医局: 5/6名 既読」「看護部: 12/15名 既読」を可視化し、未読者をワンクリックで特定。</li>
+                    <li><strong>未読者へのLINEリマインド直接送信:</strong> 重要な伝達をまだ読んでいない職員に対し、画面から直接LINEプッシュリマインドを送信可能。</li>
+                    <li><strong>複数回開催（マルチスケジュール）対応:</strong> 1つの伝達に対して「第1回 〇月〇日、第2回 〇月〇日…」と複数日程を登録でき、一覧・詳細・ポスター・ダッシュボードすべてに連動。</li>
+                </ul>
             </div>
         </section>
 
@@ -866,15 +889,44 @@
                     </div>
                 </div>
 
-                <div class="timeline-step current">
+                <div class="timeline-step completed">
                     <div class="timeline-dot"></div>
                     <div class="timeline-content">
                         <div class="timeline-title">
                             <span>Phase 2: 現場貼り出しポスター ＆ 不在日カバーまとめ印刷</span>
-                            <span class="badge-phase phase-wip">🚀 進行中</span>
+                            <span class="badge-phase phase-done">✅ 完了・稼働中</span>
                         </div>
                         <div class="timeline-desc">
-                            A4横特大ポスター印刷テンプレートの実装、水曜・金曜退勤前の不在期間（木曜・土日）まとめ伝達シート出力機能の整備。
+                            <strong>【実績】</strong>
+                            <code>print_dept_poster.php</code> の新規作成および <code>print_post.php</code> の統一化。部署別ヘッダーバッジ付きA4縦ポスター出力、水曜・金曜夕方の不在期間（木曜・土日）まとめ伝達シート出力（<code>print_absence_summary.php</code>）、複数回研修対応のマルチ日程管理（<code>event_schedules</code>）を完全実装し本番稼働。
+                        </div>
+                    </div>
+                </div>
+
+                <div class="timeline-step completed">
+                    <div class="timeline-dot"></div>
+                    <div class="timeline-content">
+                        <div class="timeline-title">
+                            <span>Phase 3: 返答集計ダッシュボード ＆ 既読統制・LINEリマインド</span>
+                            <span class="badge-phase phase-done">✅ 完了・稼働中</span>
+                        </div>
+                        <div class="timeline-desc">
+                            <strong>【実績】</strong>
+                            事務長専用統制画面 <code>jimucho_dashboard.php</code> を構築。院内カレンダー連動による不在期間予定自動抽出、部署別既読・未読リアルタイム集計、未読職員へのワンクリックLINEリマインド配信、印刷ステータス統合管理を完全実装。
+                        </div>
+                    </div>
+                </div>
+
+                <div class="timeline-step completed">
+                    <div class="timeline-dot"></div>
+                    <div class="timeline-content">
+                        <div class="timeline-title">
+                            <span>Phase 4: ネットワークプリンタ定時自動排紙 ＆ フェイルオーバー</span>
+                            <span class="badge-phase phase-done">✅ 完了・稼働中</span>
+                        </div>
+                        <div class="timeline-desc">
+                            <strong>【実績】</strong>
+                            PowerShell ✕ SumatraPDF 連携スクリプト（<code>scripts/print_dispatcher.ps1</code>）、排紙ディスパッチAPI（<code>api/print_api.php</code>）、機器マッピング管理（<code>api/printers_api.php</code>）を実装。Primaryプリンタの障害検知とFallbackプリンタへの自動迂回印刷を実機にて検証・稼働中。
                         </div>
                     </div>
                 </div>
@@ -883,24 +935,11 @@
                     <div class="timeline-dot"></div>
                     <div class="timeline-content">
                         <div class="timeline-title">
-                            <span>Phase 3: 自動リマインド配信エンジン ＆ 返答集計ダッシュボード</span>
-                            <span class="badge-phase phase-todo">⏳ 予定</span>
+                            <span>Phase 5: ナースステーション用サイネージ巡回モード ＆ 定時無人運用</span>
+                            <span class="badge-phase phase-todo">⏳ 計画・展開中</span>
                         </div>
                         <div class="timeline-desc">
-                            前日夕方・当日朝に自動でLINE通知を飛ばすバッチ処理の構築。「誰が了解したか」がひと目でわかる集計表示。
-                        </div>
-                    </div>
-                </div>
-
-                <div class="timeline-step">
-                    <div class="timeline-dot"></div>
-                    <div class="timeline-content">
-                        <div class="timeline-title">
-                            <span>Phase 4: ネットワークプリンタ定時自動排紙 ＆ サイネージモード</span>
-                            <span class="badge-phase phase-todo">⏳ 予定</span>
-                        </div>
-                        <div class="timeline-desc">
-                            PowerShell連携による朝礼シートの自動排紙。ナースステーション用常時巡回表示画面（<code>signage.php</code>）の構築。
+                            詰所常設モニター用の自動スライド巡回表示画面（<code>signage.php</code>）の設置、およびWindowsタスクスケジューラによる定時無人自動排紙の運用定着。
                         </div>
                     </div>
                 </div>
@@ -1017,11 +1056,19 @@
                 </div>
 
                 <h3 style="color:#005a9c; margin-bottom:0.8rem; font-size:1.05rem; display:flex; align-items:center; gap:6px;">
-                    📁 3. 設定ファイルの集約先 ＆ 職員マスター保守
+                    📁 3. 設定ファイル・中核プログラムの集約先 ＆ マスター保守
                 </h3>
                 <ul style="padding-left:1.2rem; margin-bottom:1rem; line-height:1.6;">
                     <li><strong>LINE Bot設定:</strong> <code>includes/line_helper.php</code>（ボットID: <code>@tmw3446q</code> おの肛門科、長期アクセストークン、チャネルシークレット、SSL通信オプション）</li>
                     <li><strong>LINE Webhook受信:</strong> <code>api/line_webhook.php</code>（署名照合、4桁コード判定、自動友だち紐付け、自動返信）</li>
+                    <li><strong>事務長統制ダッシュボード:</strong> <code>jimucho_dashboard.php</code>（アクセス権限: 山本太事務長 <code>staff_id=15</code> または システム管理者 <code>is_admin=true</code>）</li>
+                    <li><strong>カレンダー・不在日判定ヘルパー:</strong> <code>includes/calendar_helper_jimucho.php</code>（木曜休診・祝日・週末の不在期間自動算出）</li>
+                    <li><strong>現場掲示用ポスター印刷:</strong> <code>print_dept_poster.php</code>（<code>print_post.php</code> より統一呼び出し、A4縦最適化）</li>
+                    <li><strong>不在期間まとめ伝達シート:</strong> <code>print_absence_summary.php</code>（A4横、現場引き継ぎサイン欄付）</li>
+                    <li><strong>プリンタ自動排紙スクリプト:</strong> <code>scripts/print_dispatcher.ps1</code>（Edge headless PDF化、SumatraPDFサイレント排紙、障害時自動フェイルオーバー）</li>
+                    <li><strong>サイレント印刷エンジン:</strong> <code>scripts/bin/SumatraPDF.exe</code> ＆ <code>SumatraPDF-settings.txt</code></li>
+                    <li><strong>印刷ディスパッチAPI:</strong> <code>api/print_api.php</code>（PowerShell Base64 EncodedCommand 安全実行）</li>
+                    <li><strong>プリンタ機器設定API:</strong> <code>api/printers_api.php</code>（Windows実プリンタ検出 <code>Get-Printer</code> ＆ <code>department_printers</code> テーブル管理）</li>
                     <li><strong>データベース設定:</strong> PostgreSQL <code>kawara</code>（各スクリプト冒頭のPDO設定）</li>
                     <li><strong>職員マスター原本（Single Source of Truth）:</strong> <code>../stf/staff_data.json</code></li>
                     <li><strong>職員マスター管理画面:</strong> <code>../stf/master_mente.php</code>（登録・編集・削除・自動タイムスタンプバックアップ <code>stf/bak/</code>・アトミック保存）</li>
@@ -1033,9 +1080,11 @@
                     📋 4. 後任の日常ルーティン（引き継ぎマニュアル要点）
                 </h3>
                 <ol style="padding-left:1.2rem; line-height:1.6; margin-bottom:1.4rem;">
-                    <li>業者から工事等の連絡を受けたら、かわら版で「設備・営繕」で投稿する。</li>
-                    <li>「ポスター印刷」ボタンを押し、出てきたA4紙を該当箇所のドアに貼る。</li>
-                    <li>不在日（水曜夕方・金曜夕方）は「不在まとめ印刷」ボタンを押し、当番者・日直に手渡す。</li>
+                    <li>業者から工事等の連絡を受けたら、かわら版で「設備・営繕」で投稿する。研修や点検が複数回ある場合は「マルチ日程」欄に追加する。</li>
+                    <li>「ポスター印刷」ボタンを押し、出てきたA4縦ポスターを該当箇所のドアや詰所の白板に貼る（自動排紙ボタンからの遠隔出力も可能）。</li>
+                    <li>不在日（水曜夕方・金曜夕方）は、事務長ダッシュボード（<code>jimucho_dashboard.php</code>）または「不在まとめ印刷」ボタンを押し、当番者・日直に手渡す。</li>
+                    <li>事務長ダッシュボードで各伝達の部署別既読・未読を確認し、急ぎの案件は未読者へ「LINEリマインド」を一括送信する。</li>
+                    <li>プリンタ機器構成が変更された場合は、プリンタ設定画面（<code>api/printers_api.php</code> 連携）から各部署のPrimary／Fallback（予備）プリンタを更新する。</li>
                     <li>有事・避難訓練時は、<code>safety_contacts.php</code> の「💬 LINE安否連絡」または「📢 点呼発令」から一斉送信を行う。職員からの生存報告は自動集計されるため、電話確認の手間がゼロになります。</li>
                 </ol>
 
