@@ -4,6 +4,8 @@ logs/*.log
 # Temporary files
 uploads/tmp/*
 !uploads/tmp/.gitkeep
+uploads/temp_print/*
+!uploads/temp_print/.gitkeep
 *.tmp
 
 # OS / Editor files

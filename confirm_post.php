@@ -100,6 +100,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'save') {
             }
         }
 
+        $event_schedules = $_POST['event_schedules'] ?? '[]';
+        if (empty($event_schedules) || $event_schedules === 'null') {
+            $event_schedules = '[]';
+        }
+
         $author_id = 15; // 山本さん
         $author_dept = '事務';
 
@@ -107,12 +112,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'save') {
             $sql = "UPDATE posts SET
                         title = :title, content = :content, category_id = :category_id,
                         target_datetime = :target_datetime, target_end_datetime = :target_end_datetime,
+                        event_schedules = :event_schedules,
                         display_until = :display_until, is_pinned = :is_pinned, updated_at = NOW()
                     WHERE post_id = :post_id";
             $stmt = $pdo->prepare($sql);
             $stmt->execute([
                 ':title' => $title, ':content' => $content, ':category_id' => $category_id,
                 ':target_datetime' => $target_datetime, ':target_end_datetime' => $target_end_datetime,
+                ':event_schedules' => $event_schedules,
                 ':display_until' => $display_until, ':is_pinned' => $is_pinned, ':post_id' => $post_id
             ]);
 
@@ -120,13 +127,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'save') {
             $pdo->prepare("DELETE FROM post_target_staff WHERE post_id = :post_id")->execute([':post_id' => $post_id]);
         } else {
             $sql = "INSERT INTO posts 
-                (title, content, category_id, target_datetime, target_end_datetime, display_until, is_pinned, author_id, author_dept, created_at, updated_at)
-                VALUES (:title, :content, :category_id, :target_datetime, :target_end_datetime, :display_until, :is_pinned, :author_id, :author_dept, NOW(), NOW())
+                (title, content, category_id, target_datetime, target_end_datetime, event_schedules, display_until, is_pinned, author_id, author_dept, created_at, updated_at)
+                VALUES (:title, :content, :category_id, :target_datetime, :target_end_datetime, :event_schedules, :display_until, :is_pinned, :author_id, :author_dept, NOW(), NOW())
                 RETURNING post_id";
             $stmt = $pdo->prepare($sql);
             $stmt->execute([
                 ':title' => $title, ':content' => $content, ':category_id' => $category_id,
                 ':target_datetime' => $target_datetime, ':target_end_datetime' => $target_end_datetime,
+                ':event_schedules' => $event_schedules,
                 ':display_until' => $display_until, ':is_pinned' => $is_pinned,
                 ':author_id' => $author_id, ':author_dept' => $author_dept
             ]);
@@ -312,6 +320,45 @@ $btn_class = ($mode === 'delete') ? 'btn-delete-submit' : 'btn-save';
         <?php endif; ?>
     <?php endif; ?>
 
+    <!-- 📝 修正モード：変更箇所ハイライトサマリー -->
+    <?php
+    $diff_items = [];
+    if ($mode === 'update' && $post_id > 0) {
+        $stmt_orig = $pdo->prepare("SELECT * FROM posts WHERE post_id = :id");
+        $stmt_orig->execute([':id' => $post_id]);
+        $orig_post = $stmt_orig->fetch();
+
+        if ($orig_post) {
+            $cur_title = trim($_POST['title'] ?? '');
+            if ($cur_title !== trim($orig_post['title'] ?? '')) {
+                $diff_items[] = '<b>件名</b>: 「' . htmlspecialchars($orig_post['title']) . '」 ➔ 「' . htmlspecialchars($cur_title) . '」';
+            }
+            if ((int)($_POST['category_id'] ?? 1) !== (int)$orig_post['category_id']) {
+                $diff_items[] = '<b>カテゴリー</b>が変更されました';
+            }
+            if (trim($_POST['content'] ?? '') !== trim($orig_post['content'] ?? '')) {
+                $diff_items[] = '<b>お知らせ本文</b>が修正されました';
+            }
+            if (($_POST['event_schedules'] ?? '') !== ($orig_post['event_schedules'] ?? '')) {
+                $diff_items[] = '<b>イベント日程・時間帯・場所</b>が更新されました';
+            }
+        }
+    }
+    ?>
+
+    <?php if ($mode === 'update' && !empty($diff_items)): ?>
+        <div style="background:#fffbeb; border:2px solid #f59e0b; border-radius:8px; padding:12px 18px; margin-bottom:18px;">
+            <div style="font-weight:bold; color:#92400e; font-size:0.95rem; margin-bottom:6px;">
+                📝 修正された箇所（変更点ハイライト）:
+            </div>
+            <ul style="color:#78350f; font-size:0.88rem; padding-left:20px; line-height:1.5;">
+                <?php foreach ($diff_items as $di): ?>
+                    <li><?= $di ?></li>
+                <?php endforeach; ?>
+            </ul>
+        </div>
+    <?php endif; ?>
+
     <table class="confirm-table">
         <tr>
             <th>区分・カテゴリ</th>
@@ -331,22 +378,42 @@ $btn_class = ($mode === 'delete') ? 'btn-delete-submit' : 'btn-save';
             <td><?= implode(', ', array_map('htmlspecialchars', $target_names)) ?: '指定なし' ?></td>
         </tr>
         <tr>
-            <th>イベント日時</th>
+            <th>イベント日程・場所</th>
             <td>
                 <?php
-                $is_all_day = isset($_POST['is_all_day']) && $_POST['is_all_day'] === '1';
-                $ev_date = $_POST['event_date'] ?? '';
-                $ev_end  = $_POST['event_end_date'] ?? '';
-                if ($ev_date) {
-                    if ($is_all_day) {
-                        echo htmlspecialchars($ev_date) . ($ev_end && $ev_end !== $ev_date ? ' 〜 ' . htmlspecialchars($ev_end) : '') . ' (終日)';
-                    } else {
-                        echo htmlspecialchars($ev_date) . ' ' . htmlspecialchars($_POST['start_time']) . ' 〜 ' . htmlspecialchars($_POST['end_time']);
-                    }
-                } else {
-                    echo '指定なし';
+                $schedules_decoded = [];
+                if (!empty($_POST['event_schedules'])) {
+                    $schedules_decoded = json_decode($_POST['event_schedules'], true) ?: [];
                 }
-                ?>
+
+                if (!empty($schedules_decoded)): ?>
+                    <div style="display:flex; flex-direction:column; gap:6px;">
+                        <?php foreach ($schedules_decoded as $idx => $sch): 
+                            $time_disp = !empty($sch['is_all_day']) ? '終日' : htmlspecialchars($sch['start_time'] ?? '') . ' 〜 ' . htmlspecialchars($sch['end_time'] ?? '');
+                            $loc_disp  = !empty($sch['location']) ? '（場所: ' . htmlspecialchars($sch['location']) . '）' : '';
+                            $memo_disp = !empty($sch['memo']) ? ' - ※' . htmlspecialchars($sch['memo']) : '';
+                        ?>
+                            <div style="font-size:0.9rem;">
+                                <b>日程 #<?= $idx + 1 ?>:</b> <?= htmlspecialchars($sch['date'] ?? '') ?> <?= $time_disp ?> <?= $loc_disp ?> <span style="color:#0284c7;"><?= $memo_disp ?></span>
+                            </div>
+                        <?php endforeach; ?>
+                    </div>
+                <?php else: ?>
+                    <?php
+                    $is_all_day = isset($_POST['is_all_day']) && $_POST['is_all_day'] === '1';
+                    $ev_date = $_POST['event_date'] ?? '';
+                    $ev_end  = $_POST['event_end_date'] ?? '';
+                    if ($ev_date) {
+                        if ($is_all_day) {
+                            echo htmlspecialchars($ev_date) . ($ev_end && $ev_end !== $ev_date ? ' 〜 ' . htmlspecialchars($ev_end) : '') . ' (終日)';
+                        } else {
+                            echo htmlspecialchars($ev_date) . ' ' . htmlspecialchars($_POST['start_time']) . ' 〜 ' . htmlspecialchars($_POST['end_time']);
+                        }
+                    } else {
+                        echo '指定なし';
+                    }
+                    ?>
+                <?php endif; ?>
             </td>
         </tr>
         <tr>
@@ -415,6 +482,7 @@ $btn_class = ($mode === 'delete') ? 'btn-delete-submit' : 'btn-save';
         <input type="hidden" name="start_time" value="<?= htmlspecialchars($_POST['start_time'] ?? '') ?>">
         <input type="hidden" name="end_time" value="<?= htmlspecialchars($_POST['end_time'] ?? '') ?>">
         <input type="hidden" name="is_all_day" value="<?= htmlspecialchars($_POST['is_all_day'] ?? '0') ?>">
+        <input type="hidden" name="event_schedules" value="<?= htmlspecialchars($_POST['event_schedules'] ?? '[]') ?>">
         
         <!-- 🆕 display_until が空なら空文字を送信（NULLにするため） -->
         <input type="hidden" name="display_until" value="<?= htmlspecialchars($_POST['display_until'] ?? '') ?>">

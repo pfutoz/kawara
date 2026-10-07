@@ -6,5 +6,8 @@
 		{
 			"path": "../auth"
 		}
-	]
+	],
+	"settings": {
+		"powershell.cwd": "kawara"
+	}
 }

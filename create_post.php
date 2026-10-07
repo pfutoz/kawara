@@ -1,15 +1,15 @@
 <?php
+// 1. セッション開始と認証ガード
 if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
-// 未ログイン状態のチェック（認証ガード）
 if (!isset($_SESSION['staff_id'])) {
     header("Location: login.php");
     exit;
 }
 
-// DB接続設定
+// 2. DB接続設定
 $host = 'localhost';
 $dbname = 'kawara';
 $user = 'postgres';
@@ -24,49 +24,34 @@ try {
     exit('DB接続エラー: ' . $e->getMessage());
 }
 
-// テンプレート保存処理 (AJAX/POST受信用)
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action_type']) && $_POST['action_type'] === 'save_template') {
-    $tpl_name = trim($_POST['tpl_name'] ?? '');
-    $cat_id   = (int)($_POST['category_id'] ?? 0);
-    $title    = trim($_POST['title'] ?? '');
-    $content  = trim($_POST['content'] ?? '');
-    
-    if ($tpl_name !== '' && $title !== '') {
-        $pdo->exec("CREATE TABLE IF NOT EXISTS post_templates (
-            template_id SERIAL PRIMARY KEY,
-            template_name VARCHAR(100) NOT NULL,
-            category_id INT,
-            title VARCHAR(255) NOT NULL,
-            content TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )");
-        
-        $stmt_t = $pdo->prepare("INSERT INTO post_templates (template_name, category_id, title, content) VALUES (:name, :cat, :title, :content)");
-        $stmt_t->execute([':name' => $tpl_name, ':cat' => $cat_id, ':title' => $title, ':content' => $content]);
-        echo json_encode(['status' => 'success']);
-    } else {
-        echo json_encode(['status' => 'error', 'message' => '入力情報が不足しています。']);
-    }
-    exit;
+// 休日判定ヘルパーの読み込み（事務長休日・小野会公休日の即時確認用）
+if (file_exists(__DIR__ . '/includes/calendar_helper_jimucho.php')) {
+    require_once __DIR__ . '/includes/calendar_helper_jimucho.php';
 }
 
-// 各種マスター ＆ スタッフ（削除済み除外） ＆ テンプレートの取得
+// 3. 各種マスター ＆ スタッフ ＆ 直近の登録済みイベント（コピー元用）の取得
 $categories  = $pdo->query("SELECT * FROM post_categories WHERE is_active = TRUE ORDER BY display_order")->fetchAll();
 $departments = $pdo->query("SELECT * FROM target_departments WHERE is_active = TRUE ORDER BY display_order")->fetchAll();
 $staff_members = $pdo->query("SELECT staff_id, staff_name, role, kana, kana_row FROM staff WHERE is_deleted = FALSE ORDER BY kana ASC")->fetchAll();
 
-$templates = [];
-try {
-    $templates = $pdo->query("SELECT * FROM post_templates ORDER BY template_id DESC")->fetchAll();
-} catch (Exception $e) {
-    // テーブルがまだ無い場合は無視
-}
+// 📋 登録済みイベント・お知らせの取得（コピー流用用：直近40件）
+$recent_source_posts = $pdo->query("
+    SELECT p.post_id, p.title, p.category_id, p.content, p.event_schedules, p.target_datetime, p.target_end_datetime,
+           c.category_name, c.icon_emoji, p.created_at,
+           (SELECT array_to_json(array_agg(dept_id)) FROM post_target_departments WHERE post_id = p.post_id) AS depts_json,
+           (SELECT array_to_json(array_agg(staff_id)) FROM post_target_staff WHERE post_id = p.post_id) AS staff_json
+    FROM posts p
+    LEFT JOIN post_categories c ON p.category_id = c.category_id
+    ORDER BY p.post_id DESC
+    LIMIT 40
+")->fetchAll();
 
-// 編集モード判定
+// 4. 編集モード判定と既存データの読み込み
 $post_id = isset($_GET['id']) ? (int)$_GET['id'] : 0;
 $post_data = null;
 $selected_depts = [];
 $selected_staff = [];
+$existing_schedules = [];
 
 if ($post_id > 0) {
     $stmt = $pdo->prepare("SELECT * FROM posts WHERE post_id = :post_id");
@@ -81,80 +66,425 @@ if ($post_id > 0) {
         $stmt_s = $pdo->prepare("SELECT staff_id FROM post_target_staff WHERE post_id = :post_id");
         $stmt_s->execute([':post_id' => $post_id]);
         $selected_staff = $stmt_s->fetchAll(PDO::FETCH_COLUMN);
+
+        // 既存の複数日程 JSONB の復元
+        if (!empty($post_data['event_schedules'])) {
+            $decoded = json_decode($post_data['event_schedules'], true);
+            if (is_array($decoded) && count($decoded) > 0) {
+                $existing_schedules = $decoded;
+            }
+        }
+
+        // target_datetime からのフォールバック復元
+        if (empty($existing_schedules) && !empty($post_data['target_datetime'])) {
+            $st = $post_data['target_datetime'];
+            $ed = $post_data['target_end_datetime'];
+            $is_allday = (substr($st, 11, 8) === '00:00:00' && substr($ed, 11, 8) === '23:59:59');
+            $existing_schedules[] = [
+                'schedule_id'    => 'slot_1',
+                'date'           => substr($st, 0, 10),
+                'end_date'       => $ed ? substr($ed, 0, 10) : substr($st, 0, 10),
+                'start_time'     => substr($st, 11, 5),
+                'end_time'       => $ed ? substr($ed, 11, 5) : '10:00',
+                'is_all_day'     => $is_allday,
+                'location'       => '',
+                'memo'           => ''
+            ];
+        }
     }
 }
 
 $is_edit = ($post_data !== null);
-$page_title = $is_edit ? '✏️ お知らせの編集' : '📝 新規お知らせ作成';
-
-// 無期限フラグ（display_until が NULL または空文字なら無期限）
+$page_title = $is_edit ? '✏️ お知らせ・予定の編集（修正モード）' : '📝 新規お知らせ・予定の作成';
 $is_unlimited = empty($post_data['display_until'] ?? '');
-?>
 
+// デフォルトの日程が空の場合
+if (empty($existing_schedules)) {
+    $initial_date = (isset($_GET['date']) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $_GET['date'])) ? $_GET['date'] : date('Y-m-d');
+    $existing_schedules[] = [
+        'schedule_id' => 'slot_1',
+        'date'        => $initial_date,
+        'end_date'    => $initial_date,
+        'start_time'  => '09:00',
+        'end_time'    => '10:00',
+        'is_all_day'  => false,
+        'location'    => '',
+        'memo'        => ''
+    ];
+}
+?>
 <!DOCTYPE html>
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title><?= $page_title ?> | 院内かわら版</title>
+    <!-- Quill.js リッチテキストエディタ -->
     <link href="https://cdn.quilljs.com/1.3.6/quill.snow.css" rel="stylesheet">
     <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f4f6f9; margin: 0; padding: 20px; color: #333; }
-        .container { max-width: 850px; margin: 0 auto; background: #fff; padding: 24px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
-        h1 { font-size: 1.3rem; border-left: 5px solid #005a9c; padding-left: 10px; color: #005a9c; margin-top: 0; margin-bottom: 20px; }
+        :root {
+            --primary: #0284c7;
+            --primary-dark: #0369a1;
+            --primary-light: #e0f2fe;
+            --bg-base: #f8fafc;
+            --surface: #ffffff;
+            --border: #e2e8f0;
+            --border-dark: #cbd5e1;
+            --text-main: #0f172a;
+            --text-sub: #475569;
+            --danger: #dc2626;
+            --warning: #f59e0b;
+            --success: #16a34a;
+            --shadow: 0 4px 6px -1px rgba(0,0,0,0.05), 0 2px 4px -2px rgba(0,0,0,0.05);
+            --shadow-lg: 0 10px 15px -3px rgba(0,0,0,0.08), 0 4px 6px -4px rgba(0,0,0,0.04);
+        }
 
-        .form-section { background: #f8f9fa; padding: 15px; border-radius: 6px; border: 1px solid #e9ecef; margin-bottom: 20px; }
-        .section-label { font-weight: bold; font-size: 0.95rem; margin-bottom: 10px; color: #005a9c; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
+        * { box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif;
+            background: var(--bg-base);
+            margin: 0;
+            padding: 24px;
+            color: var(--text-main);
+        }
 
-        .form-group { margin-bottom: 15px; }
-        .form-group label { display: block; font-weight: bold; font-size: 0.88rem; margin-bottom: 5px; color: #444; }
-        .form-control { width: 100%; padding: 8px 10px; border: 1px solid #ccc; border-radius: 4px; font-size: 0.93rem; box-sizing: border-box; }
-        
-        .flex-row { display: flex; gap: 10px; align-items: flex-start; flex-wrap: wrap; }
-        
-        .template-bar { background: #eef6fc; border: 1px solid #b8daff; padding: 10px 14px; border-radius: 6px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; }
-        .template-bar select { width: auto; flex: 1; min-width: 240px; background: #fff; }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            background: #fff;
+            padding: 28px;
+            border-radius: 12px;
+            box-shadow: var(--shadow-lg);
+            border: 1px solid var(--border);
+        }
 
-        .btn-group-copy { display: flex; gap: 4px; flex-wrap: wrap; }
-        .btn-copy { background: #e3f2fd; color: #0d6efd; border: 1px solid #90caf9; padding: 4px 10px; border-radius: 4px; font-size: 0.8rem; font-weight: bold; cursor: pointer; transition: all 0.15s ease-in-out; }
-        .btn-copy:hover { background: #bbdefb; }
+        .page-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            border-bottom: 2px solid var(--border);
+            padding-bottom: 14px;
+        }
+        .page-header h1 {
+            font-size: 1.35rem;
+            color: #0f172a;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
 
-        .time-quick-btns { display: flex; gap: 4px; margin-top: 4px; flex-wrap: wrap; align-items: center; }
-        .btn-time-quick { background: #fff; border: 1px solid #28a745; color: #28a745; padding: 2px 7px; border-radius: 10px; font-size: 0.72rem; font-weight: bold; cursor: pointer; }
-        .btn-time-quick:hover { background: #28a745; color: #fff; }
+        /* 📋 過去イベントからコピー・流用バー */
+        .copy-source-bar {
+            background: linear-gradient(135deg, #f0fdf4, #e0f2fe);
+            border: 2px solid #38bdf8;
+            border-radius: 10px;
+            padding: 14px 18px;
+            margin-bottom: 24px;
+            box-shadow: var(--shadow);
+        }
+        .copy-source-label {
+            font-size: 0.95rem;
+            font-weight: 800;
+            color: #0369a1;
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+        }
+        .btn-copy-apply {
+            background: #0284c7;
+            color: #fff;
+            border: none;
+            padding: 9px 18px;
+            border-radius: 6px;
+            font-weight: bold;
+            font-size: 0.9rem;
+            cursor: pointer;
+            transition: all 0.15s;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            white-space: nowrap;
+        }
+        .btn-copy-apply:hover {
+            background: #0369a1;
+            transform: translateY(-1px);
+        }
 
+        /* 📝 修正モード：変更検知差分パネル */
+        .diff-monitor-card {
+            background: #fffbeb;
+            border: 2px solid #f59e0b;
+            border-radius: 8px;
+            padding: 14px 18px;
+            margin-bottom: 22px;
+            display: none;
+        }
+        .diff-monitor-card.has-diff {
+            display: block;
+            animation: pulse-diff 2s infinite;
+        }
+        @keyframes pulse-diff {
+            0%, 100% { border-color: #f59e0b; }
+            50% { border-color: #dc2626; }
+        }
+        .diff-monitor-title {
+            font-weight: 800;
+            font-size: 0.95rem;
+            color: #92400e;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+        .diff-items-list {
+            font-size: 0.88rem;
+            color: #78350f;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            padding-left: 20px;
+        }
+        .diff-badge {
+            background: #fef08a;
+            color: #854d0e;
+            font-size: 0.75rem;
+            font-weight: bold;
+            padding: 2px 7px;
+            border-radius: 4px;
+            margin-left: 8px;
+            display: none;
+        }
+        .diff-badge.show { display: inline-block; }
+
+        /* フォームセクション */
+        .form-section {
+            background: #f8fafc;
+            padding: 18px 20px;
+            border-radius: 10px;
+            border: 1px solid var(--border);
+            margin-bottom: 22px;
+        }
+        .section-label {
+            font-weight: 800;
+            font-size: 1rem;
+            margin-bottom: 12px;
+            color: #1e293b;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px dashed var(--border-dark);
+            padding-bottom: 8px;
+        }
+
+        .form-group { margin-bottom: 16px; }
+        .form-group:last-child { margin-bottom: 0; }
+        .form-group label {
+            display: block;
+            font-weight: 700;
+            font-size: 0.88rem;
+            margin-bottom: 6px;
+            color: var(--text-main);
+        }
+        .form-control {
+            width: 100%;
+            padding: 9px 12px;
+            border: 1px solid var(--border-dark);
+            border-radius: 6px;
+            font-size: 0.95rem;
+            background: #fff;
+            transition: border-color 0.15s;
+        }
+        .form-control:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(2, 132, 199, 0.15);
+        }
+
+        /* 🗓️ 複数日程スロットマネージャー */
+        .schedule-slots-container {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            margin-bottom: 12px;
+        }
+        .slot-card {
+            background: #ffffff;
+            border: 2px solid var(--border);
+            border-radius: 8px;
+            padding: 14px 16px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.03);
+            transition: all 0.15s;
+            position: relative;
+        }
+        .slot-card:hover {
+            border-color: #94a3b8;
+        }
+        .slot-card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+            font-size: 0.9rem;
+            font-weight: 800;
+            color: var(--primary-dark);
+            border-bottom: 1px solid #f1f5f9;
+            padding-bottom: 6px;
+        }
+        .slot-pill {
+            background: #e0f2fe;
+            color: #0369a1;
+            padding: 3px 10px;
+            border-radius: 6px;
+            font-size: 0.85rem;
+            font-weight: 800;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .slot-actions {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+        .btn-slot-action {
+            background: #f8fafc;
+            border: 1px solid var(--border-dark);
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 0.78rem;
+            font-weight: bold;
+            cursor: pointer;
+            color: var(--text-sub);
+            transition: all 0.15s;
+        }
+        .btn-slot-action:hover { background: #e2e8f0; color: #0f172a; }
+        .btn-slot-delete {
+            background: #fee2e2;
+            border-color: #fca5a5;
+            color: #b91c1c;
+        }
+        .btn-slot-delete:hover { background: #fecdd3; color: #991b1b; }
+
+        .slot-grid-row {
+            display: grid;
+            grid-template-columns: 180px 140px auto 140px 140px;
+            gap: 12px;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        @media (max-width: 768px) {
+            .slot-grid-row { grid-template-columns: 1fr; gap: 8px; }
+        }
+
+        .slot-sub-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            background: #f8fafc;
+            padding: 8px 12px;
+            border-radius: 6px;
+        }
+        @media (max-width: 768px) {
+            .slot-sub-row { grid-template-columns: 1fr; }
+        }
+
+        .time-quick-btns {
+            display: flex;
+            gap: 4px;
+            margin-top: 4px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        .btn-time-quick {
+            background: #fff;
+            border: 1px solid #16a34a;
+            color: #16a34a;
+            padding: 2px 7px;
+            border-radius: 8px;
+            font-size: 0.72rem;
+            font-weight: bold;
+            cursor: pointer;
+        }
+        .btn-time-quick:hover { background: #16a34a; color: #fff; }
+
+        .btn-add-slot {
+            background: #ffffff;
+            border: 2px dashed #0284c7;
+            color: #0284c7;
+            padding: 10px;
+            border-radius: 8px;
+            font-weight: 800;
+            font-size: 0.95rem;
+            cursor: pointer;
+            width: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.15s;
+        }
+        .btn-add-slot:hover {
+            background: #e0f2fe;
+            border-color: #0369a1;
+        }
+
+        /* 掲載期間ボタン群 */
         .period-container { display: flex; align-items: center; gap: 15px; flex-wrap: wrap; margin-top: 5px; }
         .period-btn-group { display: flex; gap: 6px; flex-wrap: wrap; }
         .btn-period {
-            background-color: #ffffff !important; color: #495057 !important; border: 1px solid #ced4da !important;
-            padding: 7px 15px !important; border-radius: 4px !important; font-size: 0.88rem !important;
-            font-weight: bold !important; cursor: pointer !important; transition: all 0.15s ease-in-out !important; outline: none !important;
-        }
-        .btn-period:hover { background-color: #e9ecef !important; }
-        .btn-period.active {
-            background-color: #005a9c !important; color: #ffffff !important; border-color: #005a9c !important;
-            box-shadow: 0 2px 5px rgba(0, 90, 156, 0.3) !important;
-        }
-
-        .period-preview { font-size: 0.88rem; color: #555; background: #ffffff; padding: 6px 12px; border: 1px solid #ccc; border-radius: 4px; font-weight: bold; }
-        .period-preview span { color: #005a9c; margin-left: 5px; font-size: 0.95rem; }
-
-        .filter-bar { display: flex; gap: 3px; align-items: center; margin-bottom: 8px; flex-wrap: wrap; background: #eef2f5; padding: 6px; border-radius: 4px; }
-        .btn-row-filter { background: #fff; border: 1px solid #ced4da; padding: 2px 8px; border-radius: 3px; font-size: 0.78rem; font-weight: bold; cursor: pointer; color: #495057; }
-        .btn-row-filter.active { background: #005a9c; color: white; border-color: #005a9c; }
-
-        #individual-staff-box { display: none; margin-top: 10px; background: #fff; padding: 10px; border: 1px solid #ddd; border-radius: 4px; }
-        .staff-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 6px; max-height: 180px; overflow-y: auto; padding-top: 5px; }
-
-        #editor { height: 220px; background: #fff; }
-
-        .line-option-card {
-            background: #eefbf4;
-            border: 1px solid #a3e6cd;
-            padding: 12px 16px;
+            background: #ffffff;
+            color: var(--text-main);
+            border: 1px solid var(--border-dark);
+            padding: 7px 14px;
             border-radius: 6px;
-            margin-top: 20px;
-            margin-bottom: 20px;
+            font-size: 0.88rem;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .btn-period:hover { background: #e2e8f0; }
+        .btn-period.active {
+            background: #0284c7;
+            color: #ffffff;
+            border-color: #0284c7;
+            box-shadow: 0 2px 5px rgba(2, 132, 199, 0.3);
+        }
+
+        /* エディタ装飾アシスタントバー */
+        .editor-helper-bar {
+            background: #f1f5f9;
+            border: 1px solid var(--border-dark);
+            border-bottom: none;
+            padding: 6px 12px;
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            flex-wrap: wrap;
+            border-radius: 6px 6px 0 0;
+        }
+        .btn-helper-tag {
+            background: #fff;
+            border: 1px solid #cbd5e1;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 0.78rem;
+            font-weight: bold;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .btn-helper-tag:hover { background: #e2e8f0; }
+        #editor { min-height: 240px; background: #fff; font-size: 1rem; border-radius: 0 0 6px 6px; }
+
+        /* LINE通知オプションカード */
+        .line-option-card {
+            background: #ecfdf5;
+            border: 1px solid #6ee7b7;
+            padding: 12px 16px;
+            border-radius: 8px;
+            margin: 20px 0;
             display: flex;
             align-items: center;
             justify-content: space-between;
@@ -163,111 +493,137 @@ $is_unlimited = empty($post_data['display_until'] ?? '');
             cursor: pointer;
             font-weight: bold;
             font-size: 0.92rem;
-            color: #0f5132;
+            color: #065f46;
             display: flex;
             align-items: center;
             gap: 8px;
             margin: 0;
         }
-        .line-option-card input[type="checkbox"] {
-            width: 18px;
-            height: 18px;
-            accent-color: #198754;
-            cursor: pointer;
-        }
 
-        .tooltip-wrapper {
-            position: relative;
-            display: inline-block;
+        /* ボタングループ */
+        .btn-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 24px;
+            padding-top: 18px;
+            border-top: 2px solid var(--border);
         }
-        .badge-line-info {
-            font-size: 0.78rem;
-            color: #0f5132;
-            background: #d1e7dd;
-            padding: 4px 10px;
-            border-radius: 12px;
+        .btn-submit {
+            background: linear-gradient(135deg, #0284c7, #2563eb);
+            color: white;
+            border: none;
+            padding: 12px 32px;
+            border-radius: 8px;
+            font-weight: 800;
+            font-size: 1.05rem;
+            cursor: pointer;
+            box-shadow: 0 4px 10px rgba(37, 99, 235, 0.25);
+            transition: all 0.15s;
+        }
+        .btn-submit:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 14px rgba(37, 99, 235, 0.35);
+        }
+        .btn-delete {
+            background: #ef4444;
+            color: white;
+            border: none;
+            padding: 11px 22px;
+            border-radius: 8px;
             font-weight: bold;
+            font-size: 0.95rem;
             cursor: pointer;
-            transition: all 0.2s;
-            user-select: none;
         }
-        .badge-line-info:hover {
-            background: #a3e6cd;
-            color: #052c16;
-        }
+        .btn-delete:hover { background: #dc2626; }
 
-        .tooltip-bubble {
-            visibility: hidden;
-            opacity: 0;
-            width: 260px;
-            background-color: #2c3e50;
+        /* トースト通知 */
+        #toast-box {
+            position: fixed;
+            bottom: 24px;
+            right: 24px;
+            background: #0f172a;
             color: #fff;
-            text-align: center;
-            border-radius: 6px;
-            padding: 8px 12px;
-            position: absolute;
-            z-index: 10;
-            bottom: 125%;
-            right: 0;
-            font-size: 0.78rem;
-            line-height: 1.4;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.18);
-            transition: opacity 0.2s ease-in-out, visibility 0.2s ease-in-out;
+            padding: 12px 20px;
+            border-radius: 8px;
+            font-size: 0.9rem;
+            font-weight: 600;
+            box-shadow: 0 6px 16px rgba(0,0,0,0.25);
+            display: none;
+            z-index: 9999;
         }
-        .tooltip-bubble::after {
-            content: "";
-            position: absolute;
-            top: 100%;
-            right: 20px;
-            border-width: 6px;
-            border-style: solid;
-            border-color: #2c3e50 transparent transparent transparent;
-        }
-        .tooltip-wrapper:hover .tooltip-bubble,
-        .tooltip-wrapper.is-open .tooltip-bubble {
-            visibility: visible;
-            opacity: 1;
-        }
-
-        .btn-bar { display: flex; justify-content: space-between; align-items: center; margin-top: 20px; padding-top: 15px; border-top: 1px solid #eee; }
-        .btn-submit { background: #007bff; color: white; border: none; padding: 12px 28px; border-radius: 6px; font-weight: bold; font-size: 1rem; cursor: pointer; }
-        .btn-delete { background: #dc3545; color: white; border: none; padding: 12px 20px; border-radius: 6px; font-weight: bold; font-size: 0.95rem; cursor: pointer; }
-        
-        .btn-sm { background: #fff; border: 1px solid #005a9c; color: #005a9c; padding: 5px 12px; border-radius: 4px; font-weight: bold; font-size: 0.82rem; cursor: pointer; }
-        .btn-sm:hover { background: #005a9c; color: #fff; }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <h1><?= $page_title ?></h1>
-
-    <div class="template-bar">
-        <div style="font-size:0.88rem; font-weight:bold; color:#004085;">📋 テンプレートを使う:</div>
-        <select id="f_template" class="form-control" onchange="loadTemplate(this.value)">
-            <option value="">-- 登録済みテンプレートを選択 --</option>
-            <?php foreach ($templates as $tpl): ?>
-                <option value="<?= $tpl['template_id'] ?>" 
-                        data-category-id="<?= $tpl['category_id'] ?>" 
-                        data-title="<?= htmlspecialchars($tpl['title']) ?>" 
-                        data-content="<?= htmlspecialchars($tpl['content']) ?>">
-                    <?= htmlspecialchars($tpl['template_name']) ?>
-                </option>
-            <?php endforeach; ?>
-        </select>
-        <button type="button" class="btn-sm" onclick="saveAsTemplate()">＋ 入力内容をテンプレ保存</button>
+    <div class="page-header">
+        <h1>
+            <span><?= $is_edit ? '✏️' : '📝' ?></span>
+            <span><?= $page_title ?></span>
+        </h1>
+        <a href="jimucho_dashboard.php" style="color:#0284c7; text-decoration:none; font-weight:bold; font-size:0.9rem;">
+            👔 事務長ダッシュボードへ戻る
+        </a>
     </div>
 
+    <!-- 1. 📋 過去のお知らせ・イベントからコピーして作成バー -->
+    <div class="copy-source-bar">
+        <div class="copy-source-label">
+            <span>📋 登録済みのイベント・お知らせをコピーして作成:</span>
+            <small>過去の工事・定例会・点検などを選んで「コピー」を押すと、件名・通知先・本文・時間帯を一括流用して日程だけ調整できます。</small>
+        </div>
+        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top:8px;">
+            <select id="source_post_selector" class="form-control" style="flex:1; min-width:320px;">
+                <option value="">-- コピー元のお知らせ・イベントを選択してください --</option>
+                <?php foreach ($recent_source_posts as $sp): ?>
+                    <option value="<?= $sp['post_id'] ?>" data-json="<?= htmlspecialchars(json_encode($sp), ENT_QUOTES, 'UTF-8') ?>">
+                        <?= htmlspecialchars($sp['icon_emoji'] ?? '📄') ?> <?= htmlspecialchars($sp['title']) ?> (<?= date('Y/m/d', strtotime($sp['created_at'])) ?>)
+                    </option>
+                <?php endforeach; ?>
+            </select>
+            <button type="button" class="btn-copy-apply" onclick="applyCopiedPost()">
+                📋 この内容をフォームへコピー
+            </button>
+        </div>
+    </div>
+
+    <!-- 2. 📝 修正モード専用：変更検知差分パネル（リアルタイム監視） -->
+    <?php if ($is_edit): ?>
+        <div id="diff-monitor-card" class="diff-monitor-card">
+            <div class="diff-monitor-title">
+                <span>📝 変更検知ハイライト（修正前の内容からの変更点）:</span>
+            </div>
+            <ul id="diff-items-list" class="diff-items-list">
+                <!-- JSで動的差分生成 -->
+            </ul>
+        </div>
+    <?php endif; ?>
+
     <form action="confirm_post.php" method="POST" enctype="multipart/form-data" id="postForm" onkeydown="return preventEnterSubmit(event);">
-        
         <input type="hidden" name="post_id" value="<?= $post_id ?>">
         <input type="hidden" name="mode" id="f_mode" value="<?= $is_edit ? 'update' : 'create' ?>">
+        
+        <!-- 複数日程 JSON データ格納用 -->
+        <input type="hidden" name="event_schedules" id="f_event_schedules" value="<?= htmlspecialchars(json_encode($existing_schedules)) ?>">
+        
+        <!-- 後方互換用パラメータ（第1日程と同期） -->
+        <input type="hidden" name="event_date" id="f_legacy_event_date" value="">
+        <input type="hidden" name="event_end_date" id="f_legacy_event_end_date" value="">
+        <input type="hidden" name="start_time" id="f_legacy_start_time" value="">
+        <input type="hidden" name="end_time" id="f_legacy_end_time" value="">
+        <input type="hidden" name="is_all_day" id="f_legacy_is_all_day" value="0">
 
+        <!-- 基本情報セクション -->
         <div class="form-section">
-            <div class="flex-row" style="justify-content: space-between; align-items: center;">
-                <div style="flex: 1; min-width: 220px;">
+            <div class="section-label">
+                <span>🏷️ 基本情報</span>
+                <span id="diff-badge-basic" class="diff-badge">[基本情報変更あり]</span>
+            </div>
+            <div style="display:flex; gap:16px; align-items:center; flex-wrap:wrap; margin-bottom:12px;">
+                <div style="flex:1; min-width:220px;">
                     <label>区分・カテゴリー</label>
-                    <select name="category_id" id="f_category" class="form-control">
+                    <select name="category_id" id="f_category" class="form-control" onchange="onFieldChange()">
                         <?php foreach ($categories as $cat): ?>
                             <option value="<?= $cat['category_id'] ?>" <?= ($is_edit && $post_data['category_id'] == $cat['category_id']) ? 'selected' : '' ?>>
                                 <?= $cat['icon_emoji'] ?> <?= htmlspecialchars($cat['category_name']) ?>
@@ -275,496 +631,659 @@ $is_unlimited = empty($post_data['display_until'] ?? '');
                         <?php endforeach; ?>
                     </select>
                 </div>
-                <div style="margin-top:20px;">
-                    <label style="cursor:pointer; font-weight:bold;">
-                        <input type="checkbox" name="is_pinned" value="1" <?= ($is_edit && $post_data['is_pinned']) ? 'checked' : '' ?>> 📌 最上部に固定（ピン留め）
+                <div style="margin-top:24px;">
+                    <label style="cursor:pointer; font-weight:bold; display:flex; align-items:center; gap:6px;">
+                        <input type="checkbox" name="is_pinned" id="f_is_pinned" value="1" <?= ($is_edit && $post_data['is_pinned']) ? 'checked' : '' ?> onchange="onFieldChange()"> 
+                        📌 画面最上部に固定（ピン留め）
                     </label>
                 </div>
             </div>
 
-            <div class="form-group" style="margin-top:12px;">
-                <label>件名（タイトル） <span style="color:red;">*</span></label>
-                <input type="text" name="title" id="f_title" class="form-control" required value="<?= htmlspecialchars($post_data['title'] ?? '') ?>" placeholder="例: 【本日実施】1Fジャグジーポンプ交換作業">
+            <div class="form-group">
+                <label>
+                    件名（タイトル） <span style="color:red;">*</span>
+                    <span id="diff-badge-title" class="diff-badge">[件名変更あり]</span>
+                </label>
+                <input type="text" name="title" id="f_title" class="form-control" required value="<?= htmlspecialchars($post_data['title'] ?? '') ?>" placeholder="例: 【本日実施】窓リフォームおよび換気扇交換作業" oninput="onFieldChange()">
             </div>
         </div>
 
+        <!-- 🎯 通知対象セクション -->
         <div class="form-section">
-            <div class="section-label">🎯 通知対象の指定</div>
-            <div class="flex-row" style="margin-bottom:10px; align-items: center;">
-                <label style="cursor:pointer; font-weight:bold;">
+            <div class="section-label">
+                <span>🎯 通知対象の指定</span>
+                <span id="diff-badge-target" class="diff-badge">[対象変更あり]</span>
+            </div>
+            <div style="display:flex; gap:16px; margin-bottom:12px; align-items:center;">
+                <label style="cursor:pointer; font-weight:bold; display:flex; align-items:center; gap:6px;">
                     <input type="radio" name="target_type" value="dept" <?= (!$is_edit || !empty($selected_depts)) ? 'checked' : '' ?> onclick="toggleTargetType('dept')"> 部署グループで指定
                 </label>
-                <label style="cursor:pointer; font-weight:bold; margin-left:15px;">
+                <label style="cursor:pointer; font-weight:bold; display:flex; align-items:center; gap:6px;">
                     <input type="radio" name="target_type" value="individual" <?= ($is_edit && !empty($selected_staff)) ? 'checked' : '' ?> onclick="toggleTargetType('individual')"> 👤 特定の人だけに通知（指名）
                 </label>
             </div>
 
-            <div id="dept-selector" class="flex-row" style="align-items: center;">
+            <div id="dept-selector" style="display:flex; gap:12px; flex-wrap:wrap; align-items:center;">
                 <?php foreach ($departments as $d): ?>
-                    <label style="font-size:0.88rem; cursor:pointer;">
-                        <input type="checkbox" name="depts[]" value="<?= $d['dept_id'] ?>" <?= (!$is_edit && $d['dept_code'] === 'all') || in_array($d['dept_id'], $selected_depts) ? 'checked' : '' ?>>
+                    <label style="font-size:0.9rem; cursor:pointer; display:inline-flex; align-items:center; gap:4px; background:#fff; padding:6px 12px; border:1px solid #cbd5e1; border-radius:6px;">
+                        <input type="checkbox" name="depts[]" value="<?= $d['dept_id'] ?>" <?= (!$is_edit && $d['dept_code'] === 'all') || in_array($d['dept_id'], $selected_depts) ? 'checked' : '' ?> onchange="onFieldChange()">
                         <?= htmlspecialchars($d['dept_name']) ?>
                     </label>
                 <?php endforeach; ?>
             </div>
 
-            <div id="individual-staff-box">
-                <div class="filter-bar">
-                    <span style="font-weight:bold; font-size:0.78rem; color:#555; margin-right:5px;">50音絞り込み:</span>
-                    <button type="button" class="btn-row-filter active" onclick="filterStaffKana('all', this)">全</button>
-                    <button type="button" class="btn-row-filter" onclick="filterStaffKana('あ', this)">あ</button>
-                    <button type="button" class="btn-row-filter" onclick="filterStaffKana('か', this)">か</button>
-                    <button type="button" class="btn-row-filter" onclick="filterStaffKana('さ', this)">さ</button>
-                    <button type="button" class="btn-row-filter" onclick="filterStaffKana('た', this)">た</button>
-                    <button type="button" class="btn-row-filter" onclick="filterStaffKana('な', this)">な</button>
-                    <button type="button" class="btn-row-filter" onclick="filterStaffKana('は', this)">は</button>
-                    <button type="button" class="btn-row-filter" onclick="filterStaffKana('ま', this)">ま</button>
-                    <button type="button" class="btn-row-filter" onclick="filterStaffKana('や', this)">や</button>
-                    <button type="button" class="btn-row-filter" onclick="filterStaffKana('ら', this)">ら</button>
-                    <button type="button" class="btn-row-filter" onclick="filterStaffKana('わ', this)">わ</button>
+            <div id="individual-staff-box" style="display:none; margin-top:10px; background:#fff; padding:12px; border:1px solid #cbd5e1; border-radius:6px;">
+                <div style="display:flex; gap:4px; align-items:center; margin-bottom:8px; flex-wrap:wrap;">
+                    <span style="font-weight:bold; font-size:0.8rem; color:#555; margin-right:6px;">50音フィルター:</span>
+                    <?php foreach (['all'=>'全','あ'=>'あ','か'=>'か','さ'=>'さ','た'=>'た','な'=>'な','は'=>'は','ま'=>'ま','や'=>'や','ら'=>'ら','わ'=>'わ'] as $rk => $rv): ?>
+                        <button type="button" class="btn-time-quick" style="padding:2px 8px; border-radius:4px;" onclick="filterStaffKana('<?= $rk ?>', this)"><?= $rv ?></button>
+                    <?php endforeach; ?>
                 </div>
-                <div class="staff-grid">
+                <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(180px, 1fr)); gap:6px; max-height:180px; overflow-y:auto; padding:4px;">
                     <?php foreach ($staff_members as $sm): 
                         $kana_trim = trim($sm['kana'] ?? '');
                         $first_char = mb_substr($kana_trim, 0, 1);
                     ?>
-                        <label class="staff-item" 
-                               data-kana="<?= htmlspecialchars($kana_trim) ?>"
-                               data-first-char="<?= htmlspecialchars($first_char) ?>"
-                               style="font-size:0.85rem; cursor:pointer;">
-                            <input type="checkbox" name="target_staff_ids[]" value="<?= $sm['staff_id'] ?>" <?= in_array($sm['staff_id'], $selected_staff) ? 'checked' : '' ?>>
-                            <?= htmlspecialchars($sm['staff_name']) ?> <small style="color:#666;">(<?= htmlspecialchars($sm['role']) ?>)</small>
+                        <label class="staff-item" data-first-char="<?= htmlspecialchars($first_char) ?>" style="font-size:0.85rem; cursor:pointer; display:inline-flex; align-items:center; gap:4px;">
+                            <input type="checkbox" name="target_staff_ids[]" value="<?= $sm['staff_id'] ?>" <?= in_array($sm['staff_id'], $selected_staff) ? 'checked' : '' ?> onchange="onFieldChange()">
+                            <?= htmlspecialchars($sm['staff_name']) ?> <small style="color:#64748b;">(<?= htmlspecialchars($sm['role']) ?>)</small>
                         </label>
                     <?php endforeach; ?>
                 </div>
             </div>
         </div>
 
+        <!-- 🗓️ イベント日程マネージャー（複数日程・時刻・場所対応） -->
+        <div class="form-section" id="section-schedules">
+            <div class="section-label">
+                <span>🗓️ イベント・工事・点検の日程設定（複数日程対応）</span>
+                <span id="diff-badge-schedules" class="diff-badge">[日程変更あり]</span>
+            </div>
+            <p style="font-size:0.85rem; color:#64748b; margin-bottom:12px;">
+                1つの記事に対して、複数の日付・時間帯・場所を登録できます。登録した日程はカレンダーや部署別ポスターに自動連動します。
+            </p>
+
+            <div id="schedule-slots-container" class="schedule-slots-container">
+                <!-- JSで動的にスロットカードを生成 -->
+            </div>
+
+            <button type="button" class="btn-add-slot" onclick="addNewScheduleSlot()">
+                ➕ 新しい日程を追加する
+            </button>
+        </div>
+
+        <!-- 掲載期間セクション -->
         <div class="form-section">
             <div class="section-label">
-                <span>🗓 イベント日時・掲載期間</span>
+                <span>⏰ 掲示期間（掲載終了日）</span>
+                <span id="diff-badge-period" class="diff-badge">[掲載期間変更あり]</span>
             </div>
-
-            <?php
-            $start_dt = $post_data['target_datetime'] ?? null;
-            $end_dt   = $post_data['target_end_datetime'] ?? null;
-            
-            $ev_date  = $start_dt ? substr($start_dt, 0, 10) : '';
-            $ev_end   = $end_dt ? substr($end_dt, 0, 10) : '';
-            $st_time  = $start_dt ? substr($start_dt, 11, 5) : '09:00';
-            $ed_time  = $end_dt ? substr($end_dt, 11, 5) : '10:00';
-            $is_allday = $start_dt && (substr($start_dt, 11, 8) === '00:00:00') && ($end_dt && substr($end_dt, 11, 8) === '23:59:59');
-            ?>
-
-            <div class="flex-row" style="margin-bottom:15px;">
-                <div>
-                    <label id="lbl_start_date">開始日</label>
-                    <input type="date" name="event_date" id="f_event_date" class="form-control" style="width:150px;" value="<?= $ev_date ?>" onchange="onEventDateChange()">
+            <div class="period-container">
+                <div class="period-btn-group" id="periodBtnGroup">
+                    <button type="button" class="btn-period <?= $is_unlimited ? 'active' : '' ?>" onclick="selectPeriod(0, this)">♾️ 無期限</button>
+                    <button type="button" class="btn-period" onclick="selectPeriod(1, this)">1日間</button>
+                    <button type="button" class="btn-period" onclick="selectPeriod(3, this)">3日間</button>
+                    <button type="button" class="btn-period" onclick="selectPeriod(7, this)">1週間</button>
+                    <button type="button" class="btn-period" onclick="selectPeriod(14, this)">2週間</button>
+                    <button type="button" class="btn-period" onclick="selectPeriod(30, this)">1ヶ月</button>
                 </div>
-
-                <div id="box_time_start" style="<?= $is_allday ? 'display:none;' : '' ?>">
-                    <label>開始時間</label>
-                    <input type="time" name="start_time" id="f_start_time" class="form-control" style="width:120px;" value="<?= $st_time ?>" onchange="autoSetEndTime()">
+                <div style="font-size:0.9rem; font-weight:bold; color:#475569; background:#fff; padding:6px 14px; border:1px solid #cbd5e1; border-radius:6px;">
+                    掲載終了予定: <span id="lbl_display_until_preview" style="color:#0284c7;"><?= $is_unlimited ? '♾️ 無期限' : htmlspecialchars($post_data['display_until']) ?></span>
                 </div>
-                
-                <div id="box_time_sep" style="margin-top: 28px; font-weight: bold; color: #666; <?= $is_allday ? 'display:none;' : '' ?>">〜</div>
-                
-                <div id="box_time_end" style="<?= $is_allday ? 'display:none;' : '' ?>">
-                    <label>終了時間</label>
-                    <input type="time" name="end_time" id="f_end_time" class="form-control" style="width:120px;" value="<?= $ed_time ?>">
-                    <div class="time-quick-btns">
-                        <span style="font-size:0.7rem; color:#666;">加算:</span>
-                        <button type="button" class="btn-time-quick" onclick="addMinutesToEndTime(15)">+15分</button>
-                        <button type="button" class="btn-time-quick" onclick="addMinutesToEndTime(30)">+30分</button>
-                        <button type="button" class="btn-time-quick" onclick="addMinutesToEndTime(60)">+1h</button>
-                        <button type="button" class="btn-time-quick" onclick="addMinutesToEndTime(120)">+2h</button>
-                    </div>
-                </div>
-
-                <div id="box_end_date" style="<?= $is_allday ? '' : 'display:none;' ?>">
-                    <label>〜 終了日</label>
-                    <input type="date" name="event_end_date" id="f_event_end_date" class="form-control" style="width:150px;" value="<?= $ev_end ?>" onchange="onEventEndDateChange()">
-                </div>
-
-                <div style="margin-top: 28px; margin-left: 10px;">
-                    <label style="cursor:pointer; font-size:0.85rem; font-weight:bold; color:#005a9c; display: inline-flex; align-items: center; gap: 4px;">
-                        <input type="checkbox" name="is_all_day" id="f_all_day" value="1" <?= $is_allday ? 'checked' : '' ?> onchange="toggleAllDay(this.checked)"> 終日（日付ベース指定）
-                    </label>
-                </div>
-            </div>
-
-            <div class="form-group" style="margin-bottom:0;">
-                <label>掲載期間（クイック選択）</label>
-                <div class="period-container">
-                    <div class="period-btn-group" id="periodBtnGroup">
-                        <button type="button" class="btn-period <?= $is_unlimited ? 'active' : '' ?>" onclick="selectPeriod(0, this)">♾️ 無期限</button>
-                        <button type="button" class="btn-period <?= (!$is_unlimited && ($post_data['display_until'] ?? '') !== '') ? 'active' : '' ?>" onclick="selectPeriod(1, this)">1日間</button>
-                        <button type="button" class="btn-period" onclick="selectPeriod(3, this)">3日間</button>
-                        <button type="button" class="btn-period" onclick="selectPeriod(7, this)">1週間</button>
-                        <button type="button" class="btn-period" onclick="selectPeriod(14, this)">2週間</button>
-                        <button type="button" class="btn-period" onclick="selectPeriod(30, this)">1ヶ月</button>
-                    </div>
-
-                    <div class="period-preview">
-                        掲載終了予定: <span id="lbl_display_until_preview">
-                            <?= $is_unlimited ? '♾️ 無期限' : date('Y/m/d 23:59', strtotime($post_data['display_until'] ?? '')) ?>
-                        </span>
-                    </div>
-
-                    <input type="hidden" name="display_until" id="f_display_until" value="<?= htmlspecialchars($post_data['display_until'] ?? '') ?>">
-                </div>
+                <input type="hidden" name="display_until" id="f_display_until" value="<?= htmlspecialchars($post_data['display_until'] ?? '') ?>">
             </div>
         </div>
 
+        <!-- 記事本文エディタ（カラー＆網掛けハイライト対応） -->
         <div class="form-group">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:5px; flex-wrap:wrap; gap:8px;">
-                <label style="margin-bottom:0;">お知らせ本文 <span style="color:red;">*</span></label>
-                
-                <div class="btn-group-copy">
-                    <span style="font-size:0.78rem; color:#666; align-self:center;">本文へ転記:</span>
-                    <button type="button" class="btn-copy" onclick="copyToContent('all')">📦 全て転記</button>
-                    <button type="button" class="btn-copy" onclick="copyToContent('title')">🏷️ 区分・件名</button>
-                    <button type="button" class="btn-copy" onclick="copyToContent('target')">👥 通知対象</button>
-                    <button type="button" class="btn-copy" onclick="copyToContent('date')">🗓️ 日時など</button>
-                </div>
+            <div class="section-label" style="border-bottom:none; margin-bottom:4px;">
+                <span>📝 お知らせ本文 <span style="color:red;">*</span></span>
+                <span id="diff-badge-content" class="diff-badge">[本文変更あり]</span>
+            </div>
+
+            <!-- エディタクイック装飾アシスタントバー -->
+            <div class="editor-helper-bar">
+                <span style="font-size:0.78rem; font-weight:bold; color:#475569;">クイック装飾:</span>
+                <button type="button" class="btn-helper-tag" onclick="applyHighlight('#fef08a')">🟡 蛍光黄マーカー</button>
+                <button type="button" class="btn-helper-tag" onclick="applyHighlight('#fecdd3')">🔴 薄赤マーカー</button>
+                <button type="button" class="btn-helper-tag" onclick="applyHighlight('#bbf7d0')">🟢 薄緑マーカー</button>
+                <button type="button" class="btn-helper-tag" onclick="applyTextColor('#dc2626')">🔴 赤文字太字</button>
+                <button type="button" class="btn-helper-tag" onclick="insertCallout('warning')">⚠️ 警告枠を挿入</button>
+                <button type="button" class="btn-helper-tag" onclick="insertCallout('notice')">📢 案内枠を挿入</button>
+                <button type="button" class="btn-helper-tag" onclick="copySchedulesToEditor()">🗓 日程表を本文に自動挿入</button>
             </div>
 
             <input type="hidden" name="content" id="hiddenContent">
             <div id="editor"><?= $post_data['content'] ?? '' ?></div>
         </div>
 
-        <div class="form-group">
-            <label>写真・画像添付（複数可）</label>
+        <!-- 写真・画像添付 -->
+        <div class="form-group" style="margin-top:20px;">
+            <label>🖼️ 写真・画像添付（複数可）</label>
             <input type="file" name="images[]" multiple accept="image/*" class="form-control">
         </div>
 
+        <!-- LINE通知オプション -->
         <div class="line-option-card">
             <label>
                 <input type="checkbox" name="send_line" value="1">
-                <span>📲 対象スタッフのLINEへ通知を送信する（デフォルト: オフ）</span>
+                <span>📲 対象スタッフのLINEへ更新通知を送信する（デフォルト: オフ）</span>
             </label>
-
-            <div class="tooltip-wrapper" id="lineTooltipWrapper" onclick="toggleLineTooltip(event)">
-                <span class="badge-line-info">LINE連携機能 ❓</span>
-                <div class="tooltip-bubble">
-                    🔒 記事の詳しい内容はセキュリティ上送信されません（タイトル通知のみ）
-                </div>
-            </div>
+            <span style="font-size:0.8rem; color:#065f46; font-weight:bold;">
+                ※有事・重要連絡時のみチェック
+            </span>
         </div>
 
+        <!-- アクションボタンバー -->
         <div class="btn-bar">
             <div>
-                <a href="/kawara/index.php" style="color:#666; text-decoration:none; margin-right:15px;">← キャンセル</a>
+                <a href="jimucho_dashboard.php" style="color:#64748b; text-decoration:none; margin-right:15px; font-weight:bold;">
+                    ← キャンセル
+                </a>
                 <?php if ($is_edit): ?>
                     <button type="button" class="btn-delete" onclick="submitDelete()">🗑️ このお知らせを削除する</button>
                 <?php endif; ?>
             </div>
-            <button type="submit" class="btn-submit" onclick="submitQuill()">確認画面へ進む →</button>
+            <button type="submit" class="btn-submit" onclick="submitQuill()">
+                <?= $is_edit ? '確認画面で修正内容をチェック →' : '確認画面へ進む →' ?>
+            </button>
         </div>
-
     </form>
 </div>
 
+<!-- トースト通知 -->
+<div id="toast-box"></div>
+
+<!-- Quill.js 本体 -->
 <script src="https://cdn.quilljs.com/1.3.6/quill.min.js"></script>
 <script>
-const kanaRowMap = {
-    'あ': ['ア', 'イ', 'ウ', 'エ', 'オ', 'ぁ', 'ぃ', 'ぅ', 'ぇ', 'ぉ'],
-    'か': ['カ', 'キ', 'ク', 'ケ', 'コ', 'が', 'ぎ', 'ぐ', 'げ', 'ご', 'ガ', 'ギ', 'グ', 'ゲ', 'ゴ'],
-    'さ': ['サ', 'シ', 'ス', 'セ', 'ソ', 'ざ', 'じ', 'ず', 'ぜ', 'ぞ', 'ザ', 'ジ', 'ズ', 'ゼ', 'ゾ'],
-    'た': ['タ', 'チ', 'ツ', 'テ', 'ト', 'だ', 'ぢ', 'づ', 'で', 'ど', 'ダ', 'ヂ', 'ヅ', 'デ', 'ド', 'ッ'],
-    'な': ['ナ', 'ニ', 'ヌ', 'ネ', 'ノ'],
-    'は': ['ハ', 'ヒ', 'フ', 'ヘ', 'ホ', 'ば', 'び', 'ぶ', 'べ', 'ぼ', 'ぱ', 'ぴ', 'ぷ', 'ぺ', 'ぽ', 'バ', 'ビ', 'ブ', 'ベ', 'ボ', 'パ', 'ピ', 'プ', 'ペ', 'ポ'],
-    'ま': ['マ', 'ミ', 'ム', 'メ', 'モ'],
-    'や': ['ヤ', 'ユ', 'ヨ', 'ゃ', 'ゅ', 'ょ'],
-    'ら': ['ラ', 'リ', 'ル', 'レ', 'ロ'],
-    'わ': ['ワ', 'ヲ', 'ン', 'わ', 'を', 'ん']
+// 1. 元データ（修正前差分比較用）
+const isEditMode = <?= $is_edit ? 'true' : 'false' ?>;
+let originalData = {
+    title: <?= json_encode($post_data['title'] ?? '') ?>,
+    category_id: <?= json_encode((string)($post_data['category_id'] ?? '1')) ?>,
+    is_pinned: <?= json_encode(!empty($post_data['is_pinned'])) ?>,
+    target_type: <?= json_encode(!empty($selected_staff) ? 'individual' : 'dept') ?>,
+    depts: <?= json_encode(array_map('strval', $selected_depts)) ?>,
+    staff: <?= json_encode(array_map('strval', $selected_staff)) ?>,
+    schedules: <?= json_encode($existing_schedules) ?>,
+    display_until: <?= json_encode($post_data['display_until'] ?? '') ?>,
+    content: <?= json_encode($post_data['content'] ?? '') ?>
 };
 
-let selectedDays = 0;  // 0 = 無期限
+// 2. 現在の複数日程スロット配列
+let currentSchedules = <?= json_encode($existing_schedules) ?>;
+if (!Array.isArray(currentSchedules) || currentSchedules.length === 0) {
+    currentSchedules = [{
+        schedule_id: 'slot_1',
+        date: new Date().toISOString().substring(0, 10),
+        end_date: new Date().toISOString().substring(0, 10),
+        start_time: '09:00',
+        end_time: '10:00',
+        is_all_day: false,
+        location: '',
+        memo: ''
+    }];
+}
 
+// 3. Quill エディタ初期化（拡張カラーパレット ＆ 網掛けハイライト）
 var quill = new Quill('#editor', {
     theme: 'snow',
     placeholder: '本文を入力してください...',
     modules: {
         toolbar: [
             [{ 'header': [2, 3, false] }],
-            ['bold', 'italic', 'underline', { 'color': ['#000000', '#e74c3c', '#005a9c', '#27ae60'] }],
+            ['bold', 'italic', 'underline', 'strike'],
+            [
+                // 🎨 拡張文字色
+                { 'color': [
+                    '#000000', '#ffffff', '#475569', '#dc2626', '#b91c1c', 
+                    '#ea580c', '#d97706', '#16a34a', '#065f46', '#0284c7', 
+                    '#0369a1', '#7c3aed', '#db2777'
+                ]},
+                // 🟡 拡張背景色・網掛けハイライト
+                { 'background': [
+                    'transparent', '#fef08a', '#fecdd3', '#bae6fd', '#bbf7d0', 
+                    '#fed7aa', '#e9d5ff', '#f1f5f9', '#cbd5e1'
+                ]}
+            ],
             [{ 'list': 'ordered'}, { 'list': 'bullet' }],
-            ['link', 'clean']
+            ['link', 'blockquote', 'clean']
         ]
     }
 });
 
-document.addEventListener('DOMContentLoaded', () => {
-    if (!document.getElementById('f_event_date').value) {
-        document.getElementById('f_event_date').valueAsDate = new Date();
-    }
-    toggleTargetType(document.querySelector('input[name="target_type"]:checked').value);
-    updateDisplayUntil();
-
-    // 編集時に「無期限」が選択されていたら復元
-    const displayUntilVal = document.getElementById('f_display_until').value;
-    if (!displayUntilVal || displayUntilVal === '') {
-        const unlimitedBtn = document.querySelector('#periodBtnGroup .btn-period:first-child');
-        if (unlimitedBtn) {
-            document.querySelectorAll('#periodBtnGroup .btn-period').forEach(b => b.classList.remove('active'));
-            unlimitedBtn.classList.add('active');
-            selectedDays = 0;
-            document.getElementById('lbl_display_until_preview').textContent = '♾️ 無期限';
-        }
-    } else {
-        selectedDays = 1;
-        const day1Btn = document.querySelector('#periodBtnGroup .btn-period:nth-child(2)');
-        if (day1Btn) {
-            document.querySelectorAll('#periodBtnGroup .btn-period').forEach(b => b.classList.remove('active'));
-            day1Btn.classList.add('active');
-        }
-    }
+quill.on('text-change', () => {
+    onFieldChange();
 });
 
-function toggleLineTooltip(e) {
-    e.stopPropagation();
-    document.getElementById('lineTooltipWrapper').classList.toggle('is-open');
+// 4. DOM初期化
+document.addEventListener('DOMContentLoaded', () => {
+    renderScheduleSlots();
+    onFieldChange();
+});
+
+// トースト通知関数
+function showToast(msg) {
+    const box = document.getElementById('toast-box');
+    box.textContent = msg;
+    box.style.display = 'block';
+    setTimeout(() => { box.style.display = 'none'; }, 4000);
 }
 
-document.addEventListener('click', () => {
-    const el = document.getElementById('lineTooltipWrapper');
-    if (el) el.classList.remove('is-open');
-});
+// -------------------------------------------------------------
+// 🗓️ 複数日程スロットのレンダリング ＆ 操作
+// -------------------------------------------------------------
+function renderScheduleSlots() {
+    const container = document.getElementById('schedule-slots-container');
+    container.innerHTML = '';
 
+    currentSchedules.forEach((slot, index) => {
+        const card = document.createElement('div');
+        card.className = 'slot-card';
+        card.id = `slot-card-${index}`;
+
+        const isAllDay = !!slot.is_all_day;
+
+        card.innerHTML = `
+            <div class="slot-card-header">
+                <span class="slot-pill">🗓️ 日程 #${index + 1}</span>
+                <div class="slot-actions">
+                    <button type="button" class="btn-slot-action" onclick="duplicateScheduleSlot(${index})">📋 この日程を複製</button>
+                    ${currentSchedules.length > 1 ? `<button type="button" class="btn-slot-action btn-slot-delete" onclick="removeScheduleSlot(${index})">🗑️ 削除</button>` : ''}
+                </div>
+            </div>
+
+            <div class="slot-grid-row">
+                <div>
+                    <label style="font-size:0.8rem; font-weight:bold; margin-bottom:3px; display:block;">実施日 <span style="color:red;">*</span></label>
+                    <input type="date" class="form-control slot-input-date" value="${slot.date || ''}" onchange="updateSlot(${index}, 'date', this.value)">
+                </div>
+
+                <div class="slot-time-start-box" style="${isAllDay ? 'display:none;' : ''}">
+                    <label style="font-size:0.8rem; font-weight:bold; margin-bottom:3px; display:block;">開始時刻</label>
+                    <input type="time" class="form-control" value="${slot.start_time || '09:00'}" onchange="updateSlotTimeStart(${index}, this.value)">
+                </div>
+
+                <div style="text-align:center; font-weight:bold; color:#64748b; margin-top:20px; ${isAllDay ? 'display:none;' : ''}">
+                    〜
+                </div>
+
+                <div class="slot-time-end-box" style="${isAllDay ? 'display:none;' : ''}">
+                    <label style="font-size:0.8rem; font-weight:bold; margin-bottom:3px; display:block;">終了時刻</label>
+                    <input type="time" class="form-control slot-time-end-input" value="${slot.end_time || '10:00'}" onchange="updateSlot(${index}, 'end_time', this.value)">
+                    <div class="time-quick-btns">
+                        <button type="button" class="btn-time-quick" onclick="addMinutesToSlot(${index}, 15)">+15分</button>
+                        <button type="button" class="btn-time-quick" onclick="addMinutesToSlot(${index}, 30)">+30分</button>
+                        <button type="button" class="btn-time-quick" onclick="addMinutesToSlot(${index}, 60)">+1h</button>
+                    </div>
+                </div>
+
+                <div style="margin-top:20px;">
+                    <label style="font-size:0.82rem; font-weight:bold; cursor:pointer; color:#0284c7; display:flex; align-items:center; gap:4px;">
+                        <input type="checkbox" ${isAllDay ? 'checked' : ''} onchange="toggleSlotAllDay(${index}, this.checked)"> 終日
+                    </label>
+                </div>
+            </div>
+
+            <div class="slot-sub-row">
+                <div>
+                    <label style="font-size:0.8rem; font-weight:bold; margin-bottom:3px; display:block;">📍 実施場所・対象設備</label>
+                    <input type="text" class="form-control" placeholder="例: 新館2F マイトイレ / 旧館1F廊下" value="${slot.location || ''}" oninput="updateSlot(${index}, 'location', this.value)">
+                </div>
+                <div>
+                    <label style="font-size:0.8rem; font-weight:bold; margin-bottom:3px; display:block;">📝 作業・注意事項メモ</label>
+                    <input type="text" class="form-control" placeholder="例: 換気扇交換・使用禁止 / 施工: 〇〇サッシ" value="${slot.memo || ''}" oninput="updateSlot(${index}, 'memo', this.value)">
+                </div>
+            </div>
+        `;
+
+        container.appendChild(card);
+    });
+
+    syncLegacyInputs();
+    onFieldChange();
+}
+
+function addNewScheduleSlot() {
+    // 直前の日程をベースに翌日を初期値とする
+    let nextDate = new Date();
+    if (currentSchedules.length > 0 && currentSchedules[currentSchedules.length - 1].date) {
+        nextDate = new Date(currentSchedules[currentSchedules.length - 1].date);
+        nextDate.setDate(nextDate.getDate() + 1);
+    }
+    const yyyy = nextDate.getFullYear();
+    const mm = String(nextDate.getMonth() + 1).padStart(2, '0');
+    const dd = String(nextDate.getDate()).padStart(2, '0');
+
+    currentSchedules.push({
+        schedule_id: 'slot_' + (currentSchedules.length + 1),
+        date: `${yyyy}-${mm}-${dd}`,
+        end_date: `${yyyy}-${mm}-${dd}`,
+        start_time: '09:00',
+        end_time: '10:00',
+        is_all_day: false,
+        location: currentSchedules.length > 0 ? currentSchedules[currentSchedules.length - 1].location : '',
+        memo: ''
+    });
+
+    renderScheduleSlots();
+    showToast(`✓ 日程 #${currentSchedules.length} を追加しました`);
+}
+
+function duplicateScheduleSlot(index) {
+    const src = currentSchedules[index];
+    currentSchedules.splice(index + 1, 0, {
+        schedule_id: 'slot_' + (currentSchedules.length + 1),
+        date: src.date,
+        end_date: src.end_date,
+        start_time: src.start_time,
+        end_time: src.end_time,
+        is_all_day: src.is_all_day,
+        location: src.location,
+        memo: src.memo
+    });
+    renderScheduleSlots();
+    showToast(`✓ 日程 #${index + 1} を複製しました`);
+}
+
+function removeScheduleSlot(index) {
+    if (currentSchedules.length <= 1) return;
+    currentSchedules.splice(index, 1);
+    renderScheduleSlots();
+}
+
+function updateSlot(index, field, value) {
+    currentSchedules[index][field] = value;
+    syncLegacyInputs();
+    onFieldChange();
+}
+
+function updateSlotTimeStart(index, val) {
+    currentSchedules[index].start_time = val;
+    if (val) {
+        const [h, m] = val.split(':').map(Number);
+        const endH = (h + 1) % 24;
+        currentSchedules[index].end_time = String(endH).padStart(2, '0') + ':' + String(m).padStart(2, '0');
+    }
+    renderScheduleSlots();
+}
+
+function addMinutesToSlot(index, mins) {
+    const st = currentSchedules[index].start_time || '09:00';
+    const [h, m] = st.split(':').map(Number);
+    const total = (h * 60) + m + mins;
+    const endH = Math.floor(total / 60) % 24;
+    const endM = total % 60;
+    currentSchedules[index].end_time = String(endH).padStart(2, '0') + ':' + String(endM).padStart(2, '0');
+    renderScheduleSlots();
+}
+
+function toggleSlotAllDay(index, isAllDay) {
+    currentSchedules[index].is_all_day = isAllDay;
+    renderScheduleSlots();
+}
+
+function syncLegacyInputs() {
+    if (currentSchedules.length > 0) {
+        const first = currentSchedules[0];
+        document.getElementById('f_legacy_event_date').value = first.date || '';
+        document.getElementById('f_legacy_event_end_date').value = first.date || '';
+        document.getElementById('f_legacy_start_time').value = first.start_time || '09:00';
+        document.getElementById('f_legacy_end_time').value = first.end_time || '10:00';
+        document.getElementById('f_legacy_is_all_day').value = first.is_all_day ? '1' : '0';
+    }
+    document.getElementById('f_event_schedules').value = JSON.stringify(currentSchedules);
+}
+
+// -------------------------------------------------------------
+// 📋 登録済みイベントからコピーして作成
+// -------------------------------------------------------------
+function applyCopiedPost() {
+    const sel = document.getElementById('source_post_selector');
+    const opt = sel.options[sel.selectedIndex];
+    if (!opt || !opt.value) {
+        alert('コピー元のお知らせ・イベントを選択してください。');
+        return;
+    }
+
+    const jsonStr = opt.getAttribute('data-json');
+    if (!jsonStr) return;
+
+    try {
+        const sp = JSON.parse(jsonStr);
+
+        // 基本情報コピー
+        if (sp.category_id) document.getElementById('f_category').value = sp.category_id;
+        document.getElementById('f_title').value = sp.title || '';
+
+        // 本文コピー
+        if (sp.content) {
+            quill.clipboard.dangerouslyPasteHTML(0, sp.content);
+        }
+
+        // 通知先コピー
+        if (sp.depts_json) {
+            const depts = typeof sp.depts_json === 'string' ? JSON.parse(sp.depts_json) : sp.depts_json;
+            document.querySelectorAll('input[name="depts[]"]').forEach(cb => {
+                cb.checked = depts.includes(parseInt(cb.value));
+            });
+            toggleTargetType('dept');
+            document.querySelector('input[name="target_type"][value="dept"]').checked = true;
+        }
+
+        // 日程スロットのスマートコピー（日付は今日にリセット、時間・場所・メモは引き継ぎ）
+        if (sp.event_schedules) {
+            const decoded = typeof sp.event_schedules === 'string' ? JSON.parse(sp.event_schedules) : sp.event_schedules;
+            if (Array.isArray(decoded) && decoded.length > 0) {
+                const today = new Date().toISOString().substring(0, 10);
+                currentSchedules = decoded.map((s, idx) => ({
+                    schedule_id: 'slot_' + (idx + 1),
+                    date: today,
+                    end_date: today,
+                    start_time: s.start_datetime ? s.start_datetime.substring(11, 16) : (s.start_time || '09:00'),
+                    end_time: s.end_datetime ? s.end_datetime.substring(11, 16) : (s.end_time || '10:00'),
+                    is_all_day: !!s.is_all_day,
+                    location: s.location || '',
+                    memo: s.memo || ''
+                }));
+            }
+        } else if (sp.target_datetime) {
+            const today = new Date().toISOString().substring(0, 10);
+            currentSchedules = [{
+                schedule_id: 'slot_1',
+                date: today,
+                end_date: today,
+                start_time: sp.target_datetime.substring(11, 16),
+                end_time: sp.target_end_datetime ? sp.target_end_datetime.substring(11, 16) : '10:00',
+                is_all_day: false,
+                location: '',
+                memo: ''
+            }];
+        }
+
+        renderScheduleSlots();
+        showToast(`✓ 「${sp.title}」の内容をコピーしました。日付や時刻を調整してください。`);
+
+        // 日程セクションへスムーズスクロール
+        document.getElementById('section-schedules').scrollIntoView({ behavior: 'smooth' });
+
+    } catch (e) {
+        alert('コピー処理中にエラーが発生しました: ' + e.message);
+    }
+}
+
+// -------------------------------------------------------------
+// 📝 修正モード：変更検知差分ハイライト
+// -------------------------------------------------------------
+function onFieldChange() {
+    if (!isEditMode) return;
+
+    const diffs = [];
+
+    // 件名
+    const curTitle = document.getElementById('f_title').value.trim();
+    const titleBadge = document.getElementById('diff-badge-title');
+    if (curTitle !== originalData.title) {
+        diffs.push(`<b>件名</b>: 「${originalData.title}」 ➔ 「${curTitle}」`);
+        titleBadge.classList.add('show');
+    } else {
+        titleBadge.classList.remove('show');
+    }
+
+    // カテゴリー
+    const curCat = document.getElementById('f_category').value;
+    const catBadge = document.getElementById('diff-badge-basic');
+    if (curCat !== originalData.category_id) {
+        diffs.push(`<b>カテゴリー</b>が変更されました`);
+        catBadge.classList.add('show');
+    } else {
+        catBadge.classList.remove('show');
+    }
+
+    // 日程スロット
+    const curSchedJson = JSON.stringify(currentSchedules);
+    const origSchedJson = JSON.stringify(originalData.schedules);
+    const schedBadge = document.getElementById('diff-badge-schedules');
+    if (curSchedJson !== origSchedJson) {
+        diffs.push(`<b>イベント日程・時間帯・場所</b>に変更あり (${currentSchedules.length}件の日程)`);
+        schedBadge.classList.add('show');
+    } else {
+        schedBadge.classList.remove('show');
+    }
+
+    // 本文
+    const curContent = quill.root.innerHTML.trim();
+    const contentBadge = document.getElementById('diff-badge-content');
+    if (curContent !== (originalData.content || '').trim()) {
+        diffs.push(`<b>お知らせ本文</b>が修正されました`);
+        contentBadge.classList.add('show');
+    } else {
+        contentBadge.classList.remove('show');
+    }
+
+    // 差分カードの更新
+    const diffCard = document.getElementById('diff-monitor-card');
+    const diffList = document.getElementById('diff-items-list');
+
+    if (diffs.length > 0) {
+        diffCard.classList.add('has-diff');
+        diffList.innerHTML = diffs.map(d => `<li>${d}</li>`).join('');
+    } else {
+        diffCard.classList.remove('has-diff');
+        diffList.innerHTML = '';
+    }
+}
+
+// -------------------------------------------------------------
+// 🎨 リッチテキストエディタ補助機能（色付け・網掛け・枠挿入）
+// -------------------------------------------------------------
+function applyHighlight(color) {
+    const range = quill.getSelection();
+    if (range && range.length > 0) {
+        quill.format('background', color);
+    } else {
+        alert('網掛けを適用するテキストをマウスで選択してください。');
+    }
+}
+
+function applyTextColor(color) {
+    const range = quill.getSelection();
+    if (range && range.length > 0) {
+        quill.format('color', color);
+        quill.format('bold', true);
+    } else {
+        alert('文字色を適用するテキストをマウスで選択してください。');
+    }
+}
+
+function insertCallout(type) {
+    const range = quill.getSelection(true);
+    let html = '';
+    if (type === 'warning') {
+        html = '<p style="background:#fff1f2; border-left:6px solid #e11d48; padding:10px 14px; color:#991b1b; font-weight:bold;">⚠️ 【重要注意事項】ここに注意内容を入力してください。</p><p></p>';
+    } else {
+        html = '<p style="background:#e0f2fe; border-left:6px solid #0284c7; padding:10px 14px; color:#0369a1; font-weight:bold;">📢 【お知らせ案内】ここに案内内容を入力してください。</p><p></p>';
+    }
+    quill.clipboard.dangerouslyPasteHTML(range.index, html);
+}
+
+function copySchedulesToEditor() {
+    if (currentSchedules.length === 0) return;
+    let html = '<p><strong>【実施日程・場所】</strong></p><ul>';
+    currentSchedules.forEach((s, idx) => {
+        const timeStr = s.is_all_day ? '終日' : `${s.start_time} 〜 ${s.end_time}`;
+        const locStr = s.location ? ` (場所: ${s.location})` : '';
+        const memoStr = s.memo ? ` - ※${s.memo}` : '';
+        html += `<li><strong>日程 #${idx + 1}:</strong> ${s.date} ${timeStr}${locStr}${memoStr}</li>`;
+    });
+    html += '</ul><p></p>';
+    quill.clipboard.dangerouslyPasteHTML(quill.getLength(), html);
+    showToast('✓ 日程一覧を本文に挿入しました');
+}
+
+// -------------------------------------------------------------
+// フォーム送信制御
+// -------------------------------------------------------------
 function toggleTargetType(type) {
     document.getElementById('dept-selector').style.display = (type === 'dept') ? 'flex' : 'none';
     document.getElementById('individual-staff-box').style.display = (type === 'individual') ? 'block' : 'none';
+    onFieldChange();
 }
 
 function filterStaffKana(row, btn) {
-    document.querySelectorAll('.btn-row-filter').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
+    const kanaRowMap = {
+        'あ': ['ア', 'イ', 'ウ', 'エ', 'オ', 'ぁ', 'ぃ', 'ぅ', 'ぇ', 'ぉ'],
+        'か': ['カ', 'キ', 'ク', 'ケ', 'コ', 'が', 'ぎ', 'ぐ', 'げ', 'ご'],
+        'さ': ['サ', 'シ', 'ス', 'セ', 'ソ', 'ざ', 'じ', 'ず', 'ぜ', 'ぞ'],
+        'た': ['タ', 'チ', 'ツ', 'テ', 'ト', 'だ', 'ぢ', 'づ', 'で', 'ど'],
+        'な': ['ナ', 'ニ', 'ヌ', 'ネ', 'ノ'],
+        'は': ['ハ', 'ヒ', 'フ', 'ヘ', 'ホ', 'ば', 'び', 'ぶ', 'べ', 'ぼ'],
+        'ま': ['マ', 'ミ', 'ム', 'メ', 'モ'],
+        'や': ['ヤ', 'ユ', 'ヨ', 'ゃ', 'ゅ', 'ょ'],
+        'ら': ['ラ', 'リ', 'ル', 'レ', 'ロ'],
+        'わ': ['ワ', 'ヲ', 'ン']
+    };
 
     const items = document.querySelectorAll('.staff-item');
     items.forEach(item => {
-        const firstChar = item.getAttribute('data-first-char');
-        
+        const fc = item.getAttribute('data-first-char');
         if (row === 'all') {
             item.style.display = 'inline-flex';
         } else {
-            const targetChars = kanaRowMap[row] || [];
-            if (targetChars.includes(firstChar)) {
-                item.style.display = 'inline-flex';
-            } else {
-                item.style.display = 'none';
-            }
+            const chars = kanaRowMap[row] || [];
+            item.style.display = chars.includes(fc) ? 'inline-flex' : 'none';
         }
     });
-}
-
-function autoSetEndTime() {
-    const startTimeVal = document.getElementById('f_start_time').value;
-    if (!startTimeVal) return;
-
-    const [h, m] = startTimeVal.split(':').map(Number);
-    let endH = (h + 1) % 24;
-    
-    const formattedEnd = String(endH).padStart(2, '0') + ':' + String(m).padStart(2, '0');
-    document.getElementById('f_end_time').value = formattedEnd;
-}
-
-function addMinutesToEndTime(mins) {
-    const startTimeVal = document.getElementById('f_start_time').value;
-    if (!startTimeVal) return;
-
-    const [h, m] = startTimeVal.split(':').map(Number);
-    const totalMins = (h * 60) + m + mins;
-
-    let newH = Math.floor(totalMins / 60) % 24;
-    let newM = totalMins % 60;
-
-    const formattedEnd = String(newH).padStart(2, '0') + ':' + String(newM).padStart(2, '0');
-    document.getElementById('f_end_time').value = formattedEnd;
-}
-
-function onEventDateChange() {
-    const isAllDay = document.getElementById('f_all_day').checked;
-    const startDate = document.getElementById('f_event_date').value;
-    const endDateInput = document.getElementById('f_event_end_date');
-
-    if (isAllDay) {
-        if (!endDateInput.value || endDateInput.value < startDate) {
-            endDateInput.value = startDate;
-        }
-    }
-    updateDisplayUntil();
-}
-
-function onEventEndDateChange() {
-    updateDisplayUntil();
-}
-
-function toggleAllDay(isAllDay) {
-    document.getElementById('box_time_start').style.display = isAllDay ? 'none' : 'block';
-    document.getElementById('box_time_sep').style.display   = isAllDay ? 'none' : 'block';
-    document.getElementById('box_time_end').style.display     = isAllDay ? 'none' : 'block';
-    
-    document.getElementById('box_end_date').style.display     = isAllDay ? 'block' : 'none';
-    document.getElementById('lbl_start_date').textContent     = isAllDay ? '開始日' : '実施日';
-
-    onEventDateChange();
 }
 
 function selectPeriod(days, btn) {
-    selectedDays = days;
     const buttons = document.querySelectorAll('#periodBtnGroup .btn-period');
     buttons.forEach(b => b.classList.remove('active'));
     if (btn) btn.classList.add('active');
-    updateDisplayUntil();
-}
 
-function updateDisplayUntil() {
-    const isAllDay = document.getElementById('f_all_day').checked;
-    const startDateVal = document.getElementById('f_event_date').value;
-    const endDateVal   = document.getElementById('f_event_end_date').value;
-
-    // 無期限（0日）の場合
-    if (selectedDays === 0) {
+    if (days === 0) {
         document.getElementById('f_display_until').value = '';
         document.getElementById('lbl_display_until_preview').textContent = '♾️ 無期限';
-        return;
-    }
-
-    let baseDate = new Date();
-    if (isAllDay && endDateVal) {
-        baseDate = new Date(endDateVal);
-    } else if (startDateVal) {
-        baseDate = new Date(startDateVal);
-    }
-
-    baseDate.setDate(baseDate.getDate() + (selectedDays - 1));
-
-    const yyyy = baseDate.getFullYear();
-    const mm = String(baseDate.getMonth() + 1).padStart(2, '0');
-    const dd = String(baseDate.getDate()).padStart(2, '0');
-
-    document.getElementById('f_display_until').value = `${yyyy}-${mm}-${dd} 23:59:00`;
-    document.getElementById('lbl_display_until_preview').textContent = `${yyyy}/${mm}/${dd} 23:59`;
-}
-
-function copyToContent(type) {
-    const categorySelect = document.getElementById('f_category');
-    const categoryText = categorySelect.options[categorySelect.selectedIndex].text.trim();
-    const titleText = document.getElementById('f_title').value;
-
-    const eventDate = document.getElementById('f_event_date').value;
-    const eventEndDate = document.getElementById('f_event_end_date').value;
-    const startTime = document.getElementById('f_start_time').value;
-    const endTime = document.getElementById('f_end_time').value;
-    const isAllDay = document.getElementById('f_all_day').checked;
-
-    let targetText = '';
-    const targetType = document.querySelector('input[name="target_type"]:checked').value;
-    if (targetType === 'dept') {
-        const checkedDepts = Array.from(document.querySelectorAll('input[name="depts[]"]:checked')).map(el => el.parentNode.innerText.trim());
-        targetText = checkedDepts.join(', ');
     } else {
-        const checkedStaff = Array.from(document.querySelectorAll('input[name="target_staff_ids[]"]:checked')).map(el => el.parentNode.innerText.trim());
-        targetText = checkedStaff.join(', ');
+        const d = new Date();
+        d.setDate(d.getDate() + days);
+        const yyyy = d.getFullYear();
+        const mm = String(d.getMonth() + 1).padStart(2, '0');
+        const dd = String(d.getDate()).padStart(2, '0');
+        document.getElementById('f_display_until').value = `${yyyy}-${mm}-${dd} 23:59:00`;
+        document.getElementById('lbl_display_until_preview').textContent = `${yyyy}/${mm}/${dd} 23:59`;
     }
-
-    let dateStr = eventDate ? eventDate : '未定';
-    let timeStr = '';
-
-    if (isAllDay) {
-        if (eventEndDate && eventEndDate !== eventDate) {
-            dateStr = `${eventDate} 〜 ${eventEndDate}`;
-        }
-        timeStr = '終日';
-    } else {
-        timeStr = `${startTime} 〜 ${endTime}`;
-    }
-    
-    let htmlSnippet = '';
-
-    if (type === 'all') {
-        htmlSnippet = `
-            <p><strong>【要項】</strong></p>
-            <ul>
-                <li><strong>📌 区分：</strong> ${categoryText}</li>
-                <li><strong>📝 件名：</strong> ${titleText || '（未入力）'}</li>
-                <li><strong>🎯 対象者：</strong> ${targetText || '全員'}</li>
-                <li><strong>🗓 実施日時：</strong> ${dateStr} (${timeStr})</li>
-            </ul>
-            <hr><p></p>
-        `;
-    } else if (type === 'title') {
-        htmlSnippet = `<p><strong>【区分・件名】</strong> ${categoryText} / ${titleText}</p>`;
-    } else if (type === 'target') {
-        htmlSnippet = `<p><strong>【対象者】</strong> ${targetText || '全員'}</p>`;
-    } else if (type === 'date') {
-        htmlSnippet = `<p><strong>【実施日時】</strong> ${dateStr} (${timeStr})</p>`;
-    }
-
-    if (htmlSnippet !== '') {
-        quill.clipboard.dangerouslyPasteHTML(quill.getLength(), htmlSnippet);
-    }
-}
-
-function loadTemplate(tplId) {
-    if (!tplId) return;
-    const select = document.getElementById('f_template');
-    const option = select.options[select.selectedIndex];
-
-    const catId   = option.getAttribute('data-category-id');
-    const title   = option.getAttribute('data-title');
-    const content = option.getAttribute('data-content');
-
-    if (catId) document.getElementById('f_category').value = catId;
-    if (title) document.getElementById('f_title').value = title;
-    if (content) quill.clipboard.dangerouslyPasteHTML(0, content);
-}
-
-function saveAsTemplate() {
-    const tplName = prompt("保存するテンプレート名を入力してください:", "例: 定例機器メンテナンス");
-    if (!tplName) return;
-
-    const catId   = document.getElementById('f_category').value;
-    const title   = document.getElementById('f_title').value;
-    const content = quill.root.innerHTML;
-
-    if (!title || title.trim() === '') {
-        alert('テンプレートに保存するための「件名（タイトル）」を入力してください。');
-        return;
-    }
-
-    const formData = new FormData();
-    formData.append('action_type', 'save_template');
-    formData.append('tpl_name', tplName);
-    formData.append('category_id', catId);
-    formData.append('title', title);
-    formData.append('content', content);
-
-    fetch('create_post.php', {
-        method: 'POST',
-        body: formData
-    })
-    .then(res => res.json())
-    .then(data => {
-        if (data.status === 'success') {
-            alert(`「${tplName}」をテンプレートとして保存しました！`);
-            location.reload();
-        } else {
-            alert('保存に失敗しました: ' + (data.message || ''));
-        }
-    })
-    .catch(err => {
-        alert('通信エラーが発生しました。');
-    });
+    onFieldChange();
 }
 
 function submitQuill() {
+    syncLegacyInputs();
     document.getElementById('hiddenContent').value = quill.root.innerHTML;
 }
 
 function submitDelete() {
-    if (confirm('このお知らせを完全に削除してもよろしいですか？')) {
+    if (confirm('このお知らせ・予定を完全に削除してもよろしいですか？')) {
         document.getElementById('f_mode').value = 'delete';
         submitQuill();
         document.getElementById('postForm').submit();

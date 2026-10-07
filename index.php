@@ -681,6 +681,9 @@ usort($posts, function($a, $b) use ($date_filter) {
                     <?= $has_line_id ? '🟢 LINE連携済' : '📱 LINE未登録' ?>
                 </button>
                 <div class="header-actions">
+                    <?php if ($is_admin || $current_staff_id === 15 || mb_strpos($login_user['role'] ?? '', '事務') !== false): ?>
+                        <a href="jimucho_dashboard.php" class="btn-header" style="background:#0284c7; font-weight:bold;">👔 事務長業務</a>
+                    <?php endif; ?>
                     <a href="safety_contacts.php" class="btn-header" style="background:#28a745;">🛡️ 連絡網・安否</a>
                     <a href="/index.php" class="btn-header">ポータル</a>
                     <a href="help.php" class="btn-header" style="background:#17a2b8;" target="_blank">❓ 使い方</a>

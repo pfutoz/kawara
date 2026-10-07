@@ -93,7 +93,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['staff_id'])) {
             $_SESSION['can_toggle_disaster'] = (bool)($staff['can_toggle_disaster'] ?? false);
             $_SESSION['last_activity'] = time();
 
-            $redirect_url = !empty($_GET['redirect']) ? $_GET['redirect'] : 'index.php';
+            $default_dest = ((int)$staff['staff_id'] === 15 || !empty($staff['is_admin'])) ? 'jimucho_dashboard.php' : 'index.php';
+            $redirect_url = !empty($_GET['redirect']) ? $_GET['redirect'] : $default_dest;
             header("Location: " . $redirect_url);
             exit;
         }

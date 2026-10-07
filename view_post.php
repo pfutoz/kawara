@@ -250,7 +250,35 @@ $read_staff_ids = $read_stmt->fetchAll(PDO::FETCH_COLUMN);
             <span>掲載期限: <?= empty($post['display_until']) ? '♾️ 無期限' : date('Y/m/d 23:59', strtotime($post['display_until'])) ?></span>
         </div>
 
-        <?php if ($event_date_str): ?>
+        <?php
+        $multi_schedules = [];
+        if (!empty($post['event_schedules'])) {
+            $dec = json_decode($post['event_schedules'], true);
+            if (is_array($dec) && count($dec) > 0) {
+                $multi_schedules = $dec;
+            }
+        }
+        ?>
+
+        <?php if (!empty($multi_schedules)): ?>
+            <div class="event-box" style="display:flex; flex-direction:column; gap:6px;">
+                <div style="font-weight:bold; font-size:1.05rem; border-bottom:1px solid #b8daff; padding-bottom:4px; margin-bottom:4px;">
+                    🗓 実施・対象日程 (全 <?= count($multi_schedules) ?> 回)
+                </div>
+                <?php foreach ($multi_schedules as $idx => $sch): 
+                    $s_ts = !empty($sch['date']) ? strtotime($sch['date']) : (!empty($sch['start_datetime']) ? strtotime($sch['start_datetime']) : null);
+                    $w_name = $s_ts ? $week_names[(int)date('w', $s_ts)] : '';
+                    $d_str = $s_ts ? date('Y/m/d', $s_ts) . '(' . $w_name . ')' : ($sch['date'] ?? '未定');
+                    $t_str = !empty($sch['is_all_day']) ? '終日' : ($sch['start_time'] ?? '') . ' 〜 ' . ($sch['end_time'] ?? '');
+                    $loc   = !empty($sch['location']) ? '📍 場所: ' . htmlspecialchars($sch['location']) : '';
+                    $memo  = !empty($sch['memo']) ? '※' . htmlspecialchars($sch['memo']) : '';
+                ?>
+                    <div style="font-size:0.95rem;">
+                        <b>第 <?= $idx + 1 ?> 回:</b> <?= $d_str ?> <?= $t_str ?> <?= $loc ? ' | ' . $loc : '' ?> <?= $memo ? ' | <span style="color:#c2410c;">' . $memo . '</span>' : '' ?>
+                    </div>
+                <?php endforeach; ?>
+            </div>
+        <?php elseif ($event_date_str): ?>
             <div class="event-box">
                 🗓 実施・対象日時: <?= $event_date_str ?>
             </div>
