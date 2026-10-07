@@ -1,18 +1,5 @@
 <?php
-if (session_status() === PHP_SESSION_NONE) {
-    session_start();
-}
-$timeout_duration = 1800;
-if (isset($_SESSION['last_activity']) && (time() - $_SESSION['last_activity']) > $timeout_duration) {
-    session_unset(); session_destroy(); header("Location: login.php?reason=timeout"); exit;
-}
-$_SESSION['last_activity'] = time();
-
-// 未ログイン状態のチェック（認証ガード）
-if (!isset($_SESSION['staff_id'])) {
-    header("Location: login.php");
-    exit;
-}
+require_once __DIR__ . '/includes/auth_helper.php';
 
 $host = 'localhost'; $dbname = 'kawara'; $user = 'postgres'; $password = 'postgres';
 try {
@@ -26,13 +13,12 @@ if (file_exists(__DIR__ . '/includes/line_helper.php')) {
     require_once __DIR__ . '/includes/line_helper.php';
 }
 
-$current_staff_id = (int)$_SESSION['staff_id'];
-$stmt_user = $pdo->prepare("SELECT staff_id, staff_name, role, dept_id, is_admin, line_user_id FROM staff WHERE staff_id = :id");
-$stmt_user->execute([':id' => $current_staff_id]);
-$login_user = $stmt_user->fetch();
-if (!$login_user) { header("Location: login.php"); exit; }
+// 📱 端末固定Cookieがあれば自動ログイン！なければlogin.phpへ
+$login_user = checkAuthOrAutoLogin($pdo, $_SERVER['REQUEST_URI'] ?? '');
+$current_staff_id = (int)$login_user['staff_id'];
 $is_admin = (bool)($login_user['is_admin'] ?? false);
 $has_line_id = !empty(trim($login_user['line_user_id'] ?? ''));
+
 
 $post_id = (int)($_GET['id'] ?? 0);
 
@@ -266,14 +252,42 @@ foreach ($target_members as $tm) {
         .stat-chip-absence { background: #ede9fe; color: #5b21b6; border-color: #ddd6fe; }
         .stat-chip-read { background: #f1f5f9; color: #334155; border-color: #cbd5e1; }
         .stat-chip-unread { background: #fee2e2; color: #991b1b; border-color: #fecaca; }
+
+        /* 📱 スマホ最適化レスポンシブスタイル */
+        @media (max-width: 640px) {
+            body { padding: 0; background: #fff; }
+            header { padding: 0.6rem 0.8rem; }
+            main { margin: 0; padding: 0; }
+            .card { border: none; border-radius: 0; padding: 14px 12px; box-shadow: none; }
+            .title { font-size: 1.22rem; line-height: 1.4; margin: 8px 0; }
+            .meta { font-size: 0.78rem; gap: 4px; flex-direction: column; border-bottom: 1px dashed #e2e8f0; }
+            .content { font-size: 0.95rem; line-height: 1.65; }
+            .event-box { padding: 8px 10px; font-size: 0.86rem; }
+            .image-gallery { padding: 6px; gap: 8px; }
+            .image-gallery img { max-height: 240px; }
+            .read-box { padding: 12px 10px !important; margin-bottom: 15px; border-radius: 8px; }
+            .read-btn-grid { grid-template-columns: repeat(2, 1fr) !important; gap: 6px !important; }
+            .read-btn-grid button { padding: 12px 6px !important; font-size: 0.88rem !important; }
+            .btn-action-group { flex-direction: column; align-items: stretch; gap: 6px; }
+            .btn-action-group a, .btn-action-group button { text-align: center; justify-content: center; }
+            .read-grid { grid-template-columns: repeat(auto-fill, minmax(85px, 1fr)); gap: 4px; }
+            .read-badge { font-size: 0.72rem; padding: 3px 4px; }
+        }
     </style>
 </head>
 <body>
 
 <header>
-    <div style="font-weight:bold; font-size:1.1rem;">📜 お知らせ詳細閲覧</div>
-    <div>
-        <a href="index.php" class="btn-back">← 一覧へ戻る</a>
+    <div style="font-weight:bold; font-size:1.02rem; display:flex; align-items:center; gap:6px;">
+        <span>📜</span>
+        <span>院内かわら版</span>
+    </div>
+    <div style="display:flex; align-items:center; gap:8px;">
+        <span style="font-size:0.78rem; background:rgba(255,255,255,0.18); padding:3px 8px; border-radius:4px; max-width:120px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="<?= htmlspecialchars($login_user['staff_name']) ?>">
+            👤 <?= htmlspecialchars($login_user['staff_name']) ?>
+        </span>
+        <a href="login.php?switch_user=1" title="別のアカウントに切り替える" style="color:rgba(255,255,255,0.85); font-size:0.75rem; text-decoration:underline;">切替</a>
+        <a href="index.php" class="btn-back">← 一覧</a>
     </div>
 </header>
 
@@ -382,7 +396,7 @@ foreach ($target_members as $tm) {
 
             <form method="POST" style="margin:0;">
                 <input type="hidden" name="action_type" value="mark_read">
-                <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap:8px; margin-bottom:10px;">
+                <div class="read-btn-grid" style="display:grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap:8px; margin-bottom:10px;">
                     <button type="submit" name="response_status" value="ok" style="background:#16a34a; color:#fff; border:none; padding:10px 12px; border-radius:6px; font-weight:bold; font-size:0.92rem; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:4px; box-shadow:0 1px 3px rgba(0,0,0,0.1);">
                         👍 了解しました
                     </button>

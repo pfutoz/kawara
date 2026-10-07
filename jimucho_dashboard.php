@@ -1,25 +1,5 @@
 <?php
-// 1. セッションとアクセス権限ガード
-if (session_status() === PHP_SESSION_NONE) {
-    session_start();
-}
-
-$timeout_duration = 1800; // 30分
-if (isset($_SESSION['last_activity'])) {
-    if ((time() - $_SESSION['last_activity']) > $timeout_duration) {
-        session_unset();
-        session_destroy();
-        header("Location: login.php?reason=timeout");
-        exit;
-    }
-}
-$_SESSION['last_activity'] = time();
-
-if (!isset($_SESSION['staff_id'])) {
-    $req_uri = $_SERVER['REQUEST_URI'] ?? '';
-    header("Location: login.php?redirect=" . urlencode($req_uri));
-    exit;
-}
+require_once __DIR__ . '/includes/auth_helper.php';
 
 // 2. DB接続
 $host = 'localhost'; $dbname = 'kawara'; $user = 'postgres'; $password = 'postgres';
@@ -32,10 +12,10 @@ try {
     exit('DB接続エラー: ' . $e->getMessage());
 }
 
-$current_staff_id = (int)$_SESSION['staff_id'];
-$stmt_me = $pdo->prepare("SELECT staff_id, staff_name, role, is_admin, line_user_id FROM staff WHERE staff_id = :id");
-$stmt_me->execute([':id' => $current_staff_id]);
-$current_user = $stmt_me->fetch();
+// 📱 端末固定Cookieがあれば自動復元！なければlogin.phpへ
+$current_user = checkAuthOrAutoLogin($pdo, $_SERVER['REQUEST_URI'] ?? '');
+$current_staff_id = (int)$current_user['staff_id'];
+
 
 // 事務長（山本太 / staff_id = 15）または システム管理者（is_admin = true）のみアクセス許可
 $is_admin = (bool)($current_user['is_admin'] ?? false);

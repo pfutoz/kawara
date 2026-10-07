@@ -1,13 +1,5 @@
 <?php
-// 1. セッション開始と認証ガード
-if (session_status() === PHP_SESSION_NONE) {
-    session_start();
-}
-
-if (!isset($_SESSION['staff_id'])) {
-    header("Location: login.php");
-    exit;
-}
+require_once __DIR__ . '/includes/auth_helper.php';
 
 // 2. DB接続設定
 $host = 'localhost';
@@ -23,6 +15,11 @@ try {
 } catch (PDOException $e) {
     exit('DB接続エラー: ' . $e->getMessage());
 }
+
+// 📱 端末固定Cookieがあれば自動復元！なければlogin.phpへ
+$login_user = checkAuthOrAutoLogin($pdo, $_SERVER['REQUEST_URI'] ?? '');
+$current_staff_id = (int)$login_user['staff_id'];
+
 
 // 休日判定ヘルパーの読み込み（事務長休日・小野会公休日の即時確認用）
 if (file_exists(__DIR__ . '/includes/calendar_helper_jimucho.php')) {
@@ -764,14 +761,21 @@ if (empty($existing_schedules)) {
         </div>
 
         <!-- LINE通知オプション -->
-        <div class="line-option-card">
-            <label>
-                <input type="checkbox" name="send_line" value="1">
-                <span>📲 対象スタッフのLINEへ更新通知を送信する（デフォルト: オフ）</span>
-            </label>
-            <span style="font-size:0.8rem; color:#065f46; font-weight:bold;">
-                ※有事・重要連絡時のみチェック
-            </span>
+        <div class="line-option-card" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+            <div>
+                <label>
+                    <input type="checkbox" name="send_line" value="1">
+                    <span>📲 対象スタッフのLINEへ更新通知を送信する（デフォルト: オフ）</span>
+                </label>
+                <div style="font-size:0.8rem; color:#065f46; font-weight:bold; margin-top:2px;">
+                    ※有事・重要連絡時のみチェック
+                </div>
+            </div>
+            <?php if ($is_edit && !empty($post_id)): ?>
+                <button type="button" onclick="openLineNotifyModal(<?= (int)$post_id ?>)" style="background:#16a34a; color:#fff; border:none; padding:8px 16px; border-radius:6px; font-weight:bold; font-size:0.85rem; cursor:pointer; display:inline-flex; align-items:center; gap:6px; box-shadow:0 2px 6px rgba(22,163,74,0.25);">
+                    💬 LINE Flex通知 プレビュー＆送信
+                </button>
+            <?php endif; ?>
         </div>
 
         <!-- アクションボタンバー -->
@@ -793,6 +797,9 @@ if (empty($existing_schedules)) {
 
 <!-- トースト通知 -->
 <div id="toast-box"></div>
+
+<?php require_once __DIR__ . '/includes/line_notify_modal.php'; ?>
+
 
 <!-- Quill.js 本体 -->
 <script src="https://cdn.quilljs.com/1.3.6/quill.min.js"></script>

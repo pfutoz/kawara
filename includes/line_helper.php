@@ -607,6 +607,7 @@ function getLineTunnelStatus() {
     if ($is_online) {
         // ログファイルから直近のtrycloudflare URLを探索
         $possible_logs = [
+            'C:/Apache24/htdocs/kawara/bin/tunnel.log',
             'C:/Users/Owner/.gemini/antigravity-ide/brain/2a6cb00d-b8f4-4fcf-8abe-5c28581fc417/scratch/tunnel_quick.log',
             'C:/Users/Owner/.gemini/antigravity-ide/brain/2a6cb00d-b8f4-4fcf-8abe-5c28581fc417/scratch/tunnel.log'
         ];
@@ -628,4 +629,75 @@ function getLineTunnelStatus() {
         'webhook_url' => $url ? $url . '/kawara/api/line_webhook.php' : '',
         'checked_at'  => date('H:i:s')
     ];
-}
+}
+
+/**
+ * LINE DevelopersのWebhook URLをAPI経由で自動更新する関数
+ * 
+ * @param string $webhook_url
+ * @return array ['success' => bool, 'http_code' => int, 'response' => string]
+ */
+function updateLineWebhookEndpoint($webhook_url) {
+    if (LINE_CHANNEL_ACCESS_TOKEN === 'YOUR_LINE_CHANNEL_ACCESS_TOKEN_HERE' || empty(LINE_CHANNEL_ACCESS_TOKEN) || empty($webhook_url)) {
+        return ['success' => false, 'error' => 'トークンまたはURLが無効です'];
+    }
+
+    $url = 'https://api.line.me/v2/bot/channel/webhook/endpoint';
+    $ch = curl_init($url);
+    curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'PUT');
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
+    curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode(['endpoint' => $webhook_url]));
+    curl_setopt($ch, CURLOPT_HTTPHEADER, [
+        'Content-Type: application/json',
+        'Authorization: Bearer ' . LINE_CHANNEL_ACCESS_TOKEN
+    ]);
+
+    $response = curl_exec($ch);
+    $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    @curl_close($ch);
+
+    return [
+        'success'   => ($http_code === 200),
+        'http_code' => $http_code,
+        'response'  => $response
+    ];
+}
+
+/**
+ * LINE DevelopersのWebhook疎通テストをAPI経由で実行する関数
+ * 
+ * @param string $webhook_url
+ * @return array ['success' => bool, 'http_code' => int, 'response' => string]
+ */
+function testLineWebhookEndpoint($webhook_url = '') {
+    if (LINE_CHANNEL_ACCESS_TOKEN === 'YOUR_LINE_CHANNEL_ACCESS_TOKEN_HERE' || empty(LINE_CHANNEL_ACCESS_TOKEN)) {
+        return ['success' => false, 'error' => 'トークンが無効です'];
+    }
+
+    $url = 'https://api.line.me/v2/bot/channel/webhook/test';
+    $post_data = !empty($webhook_url) ? ['endpoint' => $webhook_url] : [];
+    
+    $ch = curl_init($url);
+    curl_setopt($ch, CURLOPT_POST, true);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
+    curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($post_data));
+    curl_setopt($ch, CURLOPT_HTTPHEADER, [
+        'Content-Type: application/json',
+        'Authorization: Bearer ' . LINE_CHANNEL_ACCESS_TOKEN
+    ]);
+
+    $response = curl_exec($ch);
+    $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    @curl_close($ch);
+
+    return [
+        'success'   => ($http_code === 200),
+        'http_code' => $http_code,
+        'response'  => $response
+    ];
+}
+

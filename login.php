@@ -1,10 +1,11 @@
 <?php
-// 1. セッション開始
-if (session_status() === PHP_SESSION_NONE) {
-    session_start();
-}
+/**
+ * 院内かわら版 - ログイン画面
+ * スマホ端末自動固定（Remember Device）＆ モバイル最適化
+ */
+require_once __DIR__ . '/includes/auth_helper.php';
 
-// 2. DB接続設定
+// 1. DB接続設定
 $host = 'localhost';
 $dbname = 'kawara';
 $user = 'postgres';
@@ -19,26 +20,9 @@ try {
     exit('DB接続エラー: ' . $e->getMessage());
 }
 
-// 3. ログイン中のセッションがあり、かつそのスタッフが削除済みになっていないかチェック
-if (isset($_SESSION['staff_id'])) {
-    $check_stmt = $pdo->prepare("SELECT is_deleted FROM staff WHERE staff_id = :id");
-    $check_stmt->execute([':id' => $_SESSION['staff_id']]);
-    $current_staff = $check_stmt->fetch();
+$is_switch_user = isset($_GET['switch_user']) && $_GET['switch_user'] === '1';
 
-    if (!$current_staff || $current_staff['is_deleted'] === true || $current_staff['is_deleted'] === 't' || $current_staff['is_deleted'] === 1) {
-        $_SESSION = [];
-        if (ini_get("session.use_cookies")) {
-            $params = session_get_cookie_params();
-            setcookie(session_name(), '', time() - 42000,
-                $params["path"], $params["domain"],
-                $params["secure"], $params["httponly"]
-            );
-        }
-        session_destroy();
-    }
-}
-
-// 4. ログアウト処理
+// 2. ログアウト処理（端末固定Cookieもクリア）
 if (isset($_GET['logout']) && $_GET['logout'] == '1') {
     $_SESSION = [];
     if (ini_get("session.use_cookies")) {
@@ -49,11 +33,37 @@ if (isset($_GET['logout']) && $_GET['logout'] == '1') {
         );
     }
     session_destroy();
+    clearDeviceRememberCookie();
     header("Location: login.php");
     exit;
 }
 
-// 5. スタッフ選択時（POST送信時）のログイン処理
+// 3. 端末自動固定チェック（switch_userでなければ自動ログインで直接アクセス）
+$remembered_staff = verifyDeviceRememberCookie($pdo);
+$redirect_param = $_GET['redirect'] ?? '';
+
+if (!$is_switch_user) {
+    // セッションまたは端末Cookieがあれば即座にリダイレクト（ログイン画面を完全スキップ！）
+    if (!empty($_SESSION['staff_id'])) {
+        $sid = (int)$_SESSION['staff_id'];
+        $stmt_cur = $pdo->prepare("SELECT * FROM staff WHERE staff_id = :id AND (is_deleted IS NOT TRUE)");
+        $stmt_cur->execute([':id' => $sid]);
+        $cur_staff = $stmt_cur->fetch();
+        if ($cur_staff) {
+            $default_dest = ($sid === 15 || !empty($cur_staff['is_admin'])) ? 'jimucho_dashboard.php' : 'index.php';
+            header("Location: " . (!empty($redirect_param) ? $redirect_param : $default_dest));
+            exit;
+        }
+    } elseif ($remembered_staff) {
+        setupStaffSession($remembered_staff);
+        issueDeviceRememberCookie($remembered_staff['staff_id'], 180);
+        $default_dest = ((int)$remembered_staff['staff_id'] === 15 || !empty($remembered_staff['is_admin'])) ? 'jimucho_dashboard.php' : 'index.php';
+        header("Location: " . (!empty($redirect_param) ? $redirect_param : $default_dest));
+        exit;
+    }
+}
+
+// 4. スタッフ選択時（POST送信時）のログイン処理
 $error_msg = '';
 $error_staff_id = 0;
 
@@ -77,24 +87,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['staff_id'])) {
         }
 
         if (empty($error_msg)) {
-            // ---------- セッションに「最近使ったスタッフ」を記録 ----------
-            if (!isset($_SESSION['recent_staff_ids'])) {
-                $_SESSION['recent_staff_ids'] = [];
-            }
-            $_SESSION['recent_staff_ids'] = array_diff($_SESSION['recent_staff_ids'], [$staff['staff_id']]);
-            array_unshift($_SESSION['recent_staff_ids'], $staff['staff_id']);
-            $_SESSION['recent_staff_ids'] = array_slice($_SESSION['recent_staff_ids'], 0, 10);
-            // ----------------------------------------------------------------
+            // セッション確立
+            setupStaffSession($staff);
 
-            $_SESSION['staff_id'] = $staff['staff_id'];
-            $_SESSION['staff_name'] = $staff['staff_name'];
-            $_SESSION['role'] = $staff['role'];
-            $_SESSION['is_admin'] = (bool)$staff['is_admin'];
-            $_SESSION['can_toggle_disaster'] = (bool)($staff['can_toggle_disaster'] ?? false);
-            $_SESSION['last_activity'] = time();
+            // 📱 このスマホ・ブラウザを180日間このスタッフとして自動固定！
+            issueDeviceRememberCookie($staff['staff_id'], 180);
 
             $default_dest = ((int)$staff['staff_id'] === 15 || !empty($staff['is_admin'])) ? 'jimucho_dashboard.php' : 'index.php';
-            $redirect_url = !empty($_GET['redirect']) ? $_GET['redirect'] : $default_dest;
+            $redirect_url = !empty($redirect_param) ? $redirect_param : $default_dest;
             header("Location: " . $redirect_url);
             exit;
         }
@@ -103,30 +103,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['staff_id'])) {
     }
 }
 
-// 6. スタッフ一覧の取得 ＆ セッションから最近使ったスタッフを取得
+// 5. スタッフ一覧の取得 ＆ 最近使ったスタッフを取得
 try {
-    // 全スタッフ（50音順）
     $stmt_all = $pdo->query("SELECT staff_id, staff_name, short_icon, role, kana, kana_row, line_user_id, pin_code, can_toggle_disaster FROM staff WHERE (is_deleted IS NOT TRUE) ORDER BY kana ASC");
     $staff_list = $stmt_all->fetchAll();
 
-    // 最近使ったスタッフ（セッションから取得）
+    // 最近使ったスタッフ
     $recent_staff_list = [];
     if (!empty($_SESSION['recent_staff_ids'])) {
         $ids = array_map('intval', $_SESSION['recent_staff_ids']);
         $in_ids = implode(',', $ids);
-        $stmt_recent = $pdo->query("
-            SELECT staff_id, staff_name, role, pin_code, can_toggle_disaster 
-            FROM staff 
-            WHERE staff_id IN ({$in_ids}) AND (is_deleted IS NOT TRUE)
-        ");
+        $stmt_recent = $pdo->query("SELECT staff_id, staff_name, role, pin_code, can_toggle_disaster FROM staff WHERE staff_id IN ({$in_ids}) AND (is_deleted IS NOT TRUE)");
         $fetched = $stmt_recent->fetchAll();
-
-        // セッションの順序（最新順）に並べ替え
         $order = array_flip($_SESSION['recent_staff_ids']);
         usort($fetched, function($a, $b) use ($order) {
-            return $order[$a['staff_id']] - $order[$b['staff_id']];
+            return ($order[$a['staff_id']] ?? 999) - ($order[$b['staff_id']] ?? 999);
         });
         $recent_staff_list = $fetched;
+    } elseif ($remembered_staff) {
+        $recent_staff_list = [$remembered_staff];
     }
 
     // 特別アカウント「管理者」の抽出
@@ -137,7 +132,6 @@ try {
             break;
         }
     }
-
 } catch (Exception $e) {
     $staff_list = [];
     $recent_staff_list = [];
@@ -148,7 +142,7 @@ try {
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>ログイン | 院内かわら版</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -166,7 +160,7 @@ try {
             background: var(--bg-color);
             color: #333;
             margin: 0;
-            padding: 20px;
+            padding: 16px 12px;
             display: flex;
             justify-content: center;
             align-items: center;
@@ -176,46 +170,69 @@ try {
             background: #fff;
             width: 100%;
             max-width: 680px;
-            padding: 28px;
-            border-radius: 12px;
-            box-shadow: 0 6px 20px rgba(0,0,0,0.08);
+            padding: 24px 20px;
+            border-radius: 14px;
+            box-shadow: 0 6px 24px rgba(0,0,0,0.08);
             border: 1px solid #e2e8f0;
         }
-        h1 { font-size: 1.4rem; color: var(--primary); text-align: center; margin-top: 0; margin-bottom: 5px; font-weight: 900; }
-        .subtitle { text-align: center; font-size: 0.85rem; color: #64748b; margin-bottom: 20px; }
+        h1 { font-size: 1.35rem; color: var(--primary); text-align: center; margin-top: 0; margin-bottom: 4px; font-weight: 900; }
+        .subtitle { text-align: center; font-size: 0.82rem; color: #64748b; margin-bottom: 16px; }
+
+        /* 📱 スマホ端末固定バナー（記憶中表示） */
+        .remember-device-notice {
+            background: #eff6ff;
+            border: 1.5px solid #bfdbfe;
+            border-radius: 10px;
+            padding: 10px 14px;
+            margin-bottom: 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 10px;
+            font-size: 0.84rem;
+        }
         
         .section-title { font-size: 0.84rem; font-weight: bold; color: #475569; margin-bottom: 8px; display: flex; align-items: center; gap: 4px; }
         
-        .recent-grid { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 8px; margin-bottom: 16px; }
+        /* 最近使ったスタッフ */
+        .recent-grid { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 6px; margin-bottom: 16px; -webkit-overflow-scrolling: touch; }
         .recent-btn {
             background: #f0f7ff;
-            border: 1.5px solid #b8daff;
-            padding: 8px 14px;
-            border-radius: 8px;
+            border: 1.5px solid #93c5fd;
+            padding: 9px 16px;
+            border-radius: 10px;
             text-align: center;
             cursor: pointer;
             white-space: nowrap;
             transition: all 0.15s;
             position: relative;
+            flex-shrink: 0;
+            min-height: 52px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
         }
-        .recent-btn:hover { background: #dbeafe; border-color: var(--primary); transform: translateY(-1px); }
-        .recent-name { font-weight: bold; font-size: 0.88rem; color: #004085; }
+        .recent-btn:hover, .recent-btn:active { background: #dbeafe; border-color: var(--primary); }
+        .recent-name { font-weight: bold; font-size: 0.92rem; color: #004085; }
         .recent-role { font-size: 0.7rem; color: #64748b; margin-top: 2px; }
 
-        .filter-bar { display: flex; gap: 4px; justify-content: center; margin-bottom: 15px; flex-wrap: wrap; background: #e2e8f0; padding: 6px; border-radius: 8px; }
-        .btn-filter { background: #fff; border: 1px solid #cbd5e1; padding: 5px 11px; border-radius: 6px; font-size: 0.82rem; font-weight: bold; cursor: pointer; color: #475569; transition: all 0.15s; }
+        /* 50音フィルターバー */
+        .filter-bar { display: flex; gap: 3px; justify-content: center; margin-bottom: 12px; flex-wrap: wrap; background: #e2e8f0; padding: 5px; border-radius: 8px; }
+        .btn-filter { background: #fff; border: 1px solid #cbd5e1; padding: 6px 10px; border-radius: 6px; font-size: 0.82rem; font-weight: bold; cursor: pointer; color: #475569; transition: all 0.15s; min-width: 32px; min-height: 34px; }
         .btn-filter.active { background: var(--primary); color: white; border-color: var(--primary); }
 
+        /* スタッフグリッド（スマホで押しやすいサイズ） */
         .staff-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(135px, 1fr));
-            gap: 10px;
-            max-height: 320px;
+            grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+            gap: 8px;
+            max-height: 340px;
             overflow-y: auto;
             padding: 8px;
             border: 1px solid #e2e8f0;
-            border-radius: 8px;
+            border-radius: 10px;
             background: #fafafa;
+            -webkit-overflow-scrolling: touch;
         }
         .staff-btn {
             background: #fff;
@@ -228,27 +245,26 @@ try {
             display: flex;
             flex-direction: column;
             align-items: center;
+            justify-content: center;
             gap: 4px;
             position: relative;
+            min-height: 58px;
         }
-        .staff-btn:hover { background: #eff6ff; border-color: var(--primary); transform: translateY(-2px); box-shadow: 0 4px 10px rgba(0,90,156,0.12); }
+        .staff-btn:hover, .staff-btn:active { background: #eff6ff; border-color: var(--primary); }
         .staff-name { font-weight: bold; font-size: 0.92rem; color: #1e293b; }
-        .staff-role { font-size: 0.72rem; color: #64748b; background: #f1f5f9; padding: 1px 6px; border-radius: 10px; }
-        .staff-btn.admin-user-btn { border-color: #38bdf8; background: #f0f9ff; }
-        .staff-btn.admin-user-btn:hover { border-color: #0284c7; background: #e0f2fe; }
+        .staff-role { font-size: 0.7rem; color: #64748b; background: #f1f5f9; padding: 1px 6px; border-radius: 10px; }
         
         .pin-badge {
             position: absolute;
             top: 4px;
             right: 5px;
-            font-size: 0.8rem;
+            font-size: 0.75rem;
             line-height: 1;
         }
 
-        .error-box { background: #fee2e2; color: #991b1b; border: 1.5px solid #f87171; padding: 12px; border-radius: 8px; font-size: 0.9rem; margin-bottom: 16px; text-align: center; font-weight: bold; animation: shake 0.3s; }
-        @keyframes shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-5px); } 75% { transform: translateX(5px); } }
+        .error-box { background: #fee2e2; color: #991b1b; border: 1.5px solid #f87171; padding: 10px 14px; border-radius: 8px; font-size: 0.88rem; margin-bottom: 14px; text-align: center; font-weight: bold; }
 
-        /* 📱 数字キータッチパッド（PINモーダル） */
+        /* 📱 テンキー暗証番号入力モーダル */
         .pin-modal-overlay {
             display: none;
             position: fixed;
@@ -266,172 +282,89 @@ try {
         .pin-card {
             background: #ffffff;
             width: 100%;
-            max-width: 360px;
+            max-width: 350px;
             border-radius: 16px;
-            padding: 24px 20px;
+            padding: 22px 18px;
             box-shadow: 0 10px 30px rgba(0,0,0,0.25);
             text-align: center;
         }
-        .pin-card-header {
-            margin-bottom: 14px;
-        }
-        .pin-target-name {
-            font-size: 1.15rem;
-            font-weight: 900;
-            color: #1e293b;
-        }
-        .pin-target-role {
-            font-size: 0.78rem;
-            color: #d97706;
-            font-weight: bold;
-            background: #fef3c7;
-            display: inline-block;
-            padding: 2px 8px;
-            border-radius: 12px;
-            margin-top: 4px;
-        }
-        .pin-instruction {
-            font-size: 0.8rem;
-            color: #64748b;
-            margin-top: 8px;
-        }
+        .pin-target-name { font-size: 1.15rem; font-weight: 900; color: #1e293b; }
+        .pin-target-role { font-size: 0.75rem; color: #d97706; font-weight: bold; background: #fef3c7; display: inline-block; padding: 2px 8px; border-radius: 12px; margin-top: 3px; }
+        .pin-instruction { font-size: 0.78rem; color: #64748b; margin-top: 6px; }
 
-        /* 入力ディスプレイ */
         .pin-display-wrap {
+            margin: 14px 0;
             background: #f8fafc;
             border: 2px solid #cbd5e1;
             border-radius: 10px;
-            height: 52px;
-            margin: 12px 0 18px 0;
+            height: 48px;
             display: flex;
             align-items: center;
             justify-content: center;
-            gap: 8px;
-            font-family: 'Outfit', monospace;
-            box-shadow: inset 0 2px 4px rgba(0,0,0,0.04);
         }
-        .pin-display-text {
-            font-size: 1.6rem;
-            letter-spacing: 6px;
-            color: #0f172a;
-            font-weight: 900;
-        }
-        .pin-placeholder {
-            color: #94a3b8;
-            font-size: 0.85rem;
-            font-family: sans-serif;
-            letter-spacing: normal;
-        }
+        .pin-display-text { font-size: 1.6rem; letter-spacing: 6px; color: var(--primary); font-family: monospace; font-weight: bold; }
+        .pin-placeholder { font-size: 0.8rem; color: #94a3b8; }
 
-        /* テンキーグリッド */
         .pin-keypad {
             display: grid;
             grid-template-columns: repeat(3, 1fr);
-            gap: 10px;
+            gap: 8px;
             margin-bottom: 14px;
         }
         .pin-key {
-            height: 56px;
+            height: 52px;
             background: #ffffff;
             border: 1.5px solid #cbd5e1;
-            border-radius: 12px;
-            font-family: 'Outfit', sans-serif;
-            font-size: 1.55rem;
+            border-radius: 10px;
+            font-size: 1.4rem;
             font-weight: 700;
             color: #1e293b;
             cursor: pointer;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.06);
-            transition: all 0.1s;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.04);
             display: flex;
             align-items: center;
             justify-content: center;
             user-select: none;
-            -webkit-user-select: none;
+            -webkit-tap-highlight-color: transparent;
         }
-        .pin-key:hover { background: #f1f5f9; border-color: #94a3b8; }
-        .pin-key:active { transform: scale(0.94); background: #e2e8f0; }
-
-        .pin-key.btn-clear {
-            font-size: 0.95rem;
-            font-weight: bold;
-            color: #dc2626;
-            background: #fef2f2;
-            border-color: #fecaca;
-        }
-        .pin-key.btn-clear:hover { background: #fee2e2; }
-
-        .pin-key.btn-backspace {
-            font-size: 1.2rem;
-            color: #475569;
-            background: #f8fafc;
-        }
+        .pin-key:active { transform: scale(0.95); background: #e2e8f0; }
+        .pin-key.btn-clear { font-size: 0.95rem; color: #dc2626; background: #fef2f2; border-color: #fecaca; }
+        .pin-key.btn-backspace { font-size: 1.2rem; color: #475569; background: #f8fafc; }
 
         .btn-pin-submit {
             width: 100%;
-            height: 48px;
+            height: 46px;
             background: var(--primary);
             color: #ffffff;
             border: none;
             border-radius: 10px;
-            font-size: 1.05rem;
+            font-size: 1rem;
             font-weight: 900;
             cursor: pointer;
             box-shadow: 0 3px 8px rgba(0,90,156,0.3);
-            transition: all 0.15s;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 6px;
         }
-        .btn-pin-submit:hover { background: var(--primary-dark); transform: translateY(-1px); }
-        .btn-pin-submit:active { transform: scale(0.98); }
-
         .btn-pin-cancel {
             width: 100%;
             background: none;
             border: none;
             color: #64748b;
-            font-size: 0.85rem;
+            font-size: 0.84rem;
             font-weight: bold;
             padding: 8px;
             margin-top: 6px;
             cursor: pointer;
         }
-        .btn-pin-cancel:hover { text-decoration: underline; color: #334155; }
 
-        /* 👑 管理者（特別ユーザー）バナー */
-        .admin-special-banner {
-            background: linear-gradient(135deg, #f0f7ff 0%, #e0f2fe 100%);
-            border: 2px solid #38bdf8;
-            border-radius: 12px;
-            padding: 12px 16px;
-            margin-bottom: 20px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            cursor: pointer;
-            box-shadow: 0 2px 8px rgba(2, 132, 199, 0.12);
-            transition: all 0.2s;
-        }
-        .admin-special-banner:hover {
-            transform: translateY(-2px);
-            border-color: #0284c7;
-            box-shadow: 0 4px 14px rgba(2, 132, 199, 0.25);
-        }
-        .admin-special-banner:active { transform: scale(0.99); }
-        .admin-special-left { display: flex; align-items: center; gap: 12px; }
-        .admin-special-icon { font-size: 1.8rem; line-height: 1; }
-        .admin-special-name { font-size: 1.05rem; font-weight: 900; color: #0369a1; }
-        .admin-special-desc { font-size: 0.76rem; color: #0284c7; font-weight: 500; margin-top: 2px; }
-        .admin-special-btn {
-            background: #0284c7;
-            color: #fff;
-            padding: 8px 14px;
-            border-radius: 8px;
-            font-size: 0.85rem;
-            font-weight: 900;
-            box-shadow: 0 2px 6px rgba(2, 132, 199, 0.3);
-            white-space: nowrap;
+        /* 📱 モバイル画面最適化 (幅640px以下) */
+        @media (max-width: 640px) {
+            body { padding: 10px 8px; align-items: flex-start; }
+            .login-card { padding: 18px 14px; border-radius: 12px; }
+            h1 { font-size: 1.2rem; }
+            .subtitle { font-size: 0.78rem; margin-bottom: 12px; }
+            .staff-grid { grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 6px; max-height: 280px; }
+            .staff-btn { min-height: 52px; padding: 8px 4px; }
+            .staff-name { font-size: 0.86rem; }
+            .btn-filter { padding: 5px 8px; font-size: 0.78rem; min-width: 28px; }
         }
     </style>
 </head>
@@ -445,24 +378,19 @@ try {
         <div class="error-box"><?= $error_msg ?></div>
     <?php endif; ?>
 
-    <!-- 👑 特別アカウント：管理者ログイン（退職・引継対応） -->
-    <?php if ($admin_staff): 
-        $a_has_pin = !empty(trim($admin_staff['pin_code'] ?? ''));
-    ?>
-        <div class="admin-special-banner" onclick="handleClickStaff(<?= $admin_staff['staff_id'] ?>, '<?= htmlspecialchars($admin_staff['staff_name'], ENT_QUOTES) ?>', '<?= htmlspecialchars($admin_staff['role'], ENT_QUOTES) ?>', <?= $a_has_pin ? 'true' : 'false' ?>)">
-            <div class="admin-special-left">
-                <span class="admin-special-icon">👑</span>
-                <div>
-                    <div class="admin-special-name"><?= htmlspecialchars($admin_staff['staff_name']) ?>（特別アカウント）</div>
-                    <div class="admin-special-desc">退職・引継対応 / システム管理・災害モード切替権限</div>
-                </div>
+    <!-- 📱 端末固定中の案内（switch_user時に表示） -->
+    <?php if ($remembered_staff && $is_switch_user): ?>
+        <div class="remember-device-notice">
+            <div>
+                📱 この端末は <b><?= htmlspecialchars($remembered_staff['staff_name']) ?> 様</b> として固定中
             </div>
-            <div class="admin-special-btn">
-                🔒 暗証番号でログイン
-            </div>
+            <a href="login.php" style="background:#0284c7; color:#fff; text-decoration:none; padding:4px 10px; border-radius:6px; font-size:0.78rem; font-weight:bold; white-space:nowrap;">
+                そのまま進む →
+            </a>
         </div>
     <?php endif; ?>
 
+    <!-- ⏱️ 最近使ったスタッフ（一番上に優先配置！） -->
     <?php if (!empty($recent_staff_list)): ?>
         <div class="section-title">⏱️ 最近使ったスタッフ</div>
         <div class="recent-grid">
@@ -502,37 +430,63 @@ try {
         
         <div class="staff-grid">
             <?php foreach ($staff_list as $st): 
+                // 管理者は一番下に移設したためグリッドからはスキップ
+                if ($st['staff_name'] === '管理者' || $st['staff_name'] === 'システム管理者') continue;
+
                 $kana_trim = trim($st['kana'] ?? '');
                 $first_char = mb_substr($kana_trim, 0, 1);
                 $has_pin = !empty(trim($st['pin_code'] ?? ''));
-                $is_admin_user = ($st['staff_name'] === '管理者' || $st['staff_name'] === 'システム管理者');
             ?>
-                <div class="staff-btn <?= $is_admin_user ? 'admin-user-btn' : '' ?>" 
+                <div class="staff-btn" 
                      data-kana="<?= htmlspecialchars($kana_trim) ?>"
                      data-first-char="<?= htmlspecialchars($first_char) ?>"
                      onclick="handleClickStaff(<?= $st['staff_id'] ?>, '<?= htmlspecialchars($st['staff_name'], ENT_QUOTES) ?>', '<?= htmlspecialchars($st['role'], ENT_QUOTES) ?>', <?= $has_pin ? 'true' : 'false' ?>)">
                     <?php if ($has_pin): ?>
                         <span class="pin-badge" title="要暗証番号">🔒</span>
                     <?php endif; ?>
-                    <div class="staff-name"><?= $is_admin_user ? '👑 ' : '' ?><?= htmlspecialchars($st['staff_name']) ?></div>
+                    <div class="staff-name"><?= htmlspecialchars($st['staff_name']) ?></div>
                     <div class="staff-role"><?= htmlspecialchars($st['role']) ?></div>
                 </div>
             <?php endforeach; ?>
         </div>
     </form>
+
+    <!-- 👑 特別アカウント：管理者ログイン（フッターの控えめなアコーディオンに移設） -->
+    <?php if ($admin_staff): 
+        $a_has_pin = !empty(trim($admin_staff['pin_code'] ?? ''));
+    ?>
+        <details style="margin-top:20px; border-top:1px dashed #cbd5e1; padding-top:12px; font-size:0.8rem; color:#64748b;">
+            <summary style="cursor:pointer; color:#0284c7; font-weight:bold; outline:none;">
+                ⚙️ システム管理者・特別ログイン（引継・災害設定用）
+            </summary>
+            <div style="margin-top:8px; background:#f0f9ff; border:1px solid #bae6fd; border-radius:8px; padding:10px 14px; display:flex; justify-content:space-between; align-items:center;">
+                <div>
+                    <div style="font-weight:bold; color:#0369a1;">👑 <?= htmlspecialchars($admin_staff['staff_name']) ?></div>
+                    <div style="font-size:0.72rem; color:#0284c7;">全権限・災害モード切替用</div>
+                </div>
+                <button type="button" onclick="handleClickStaff(<?= $admin_staff['staff_id'] ?>, '<?= htmlspecialchars($admin_staff['staff_name'], ENT_QUOTES) ?>', '<?= htmlspecialchars($admin_staff['role'], ENT_QUOTES) ?>', <?= $a_has_pin ? 'true' : 'false' ?>)" style="background:#0284c7; color:#fff; border:none; padding:6px 12px; border-radius:6px; font-size:0.78rem; font-weight:bold; cursor:pointer;">
+                    🔒 暗証番号で入る
+                </button>
+            </div>
+        </details>
+    <?php endif; ?>
+
+    <div style="margin-top:16px; text-align:center; font-size:0.74rem; color:#94a3b8;">
+        📱 一度ログインすると、この端末（スマホ）が自動記憶され次回からそのまま開けます。
+    </div>
 </div>
 
-<!-- 📱 テンキー暗証番号入力モーダル（バカでも押せる大型数字キー！） -->
+<!-- 📱 テンキー暗証番号入力モーダル -->
 <div id="pinModal" class="pin-modal-overlay">
     <div class="pin-card">
-        <div class="pin-card-header">
-            <div style="font-size:0.85rem; color:#64748b; font-weight:bold;">🔒 認証が必要です</div>
+        <div style="margin-bottom:12px;">
+            <div style="font-size:0.82rem; color:#64748b; font-weight:bold;">🔒 暗証番号入力</div>
             <div class="pin-target-name" id="pinTargetName">職員名</div>
             <div class="pin-target-role" id="pinTargetRole">役職</div>
             <div class="pin-instruction">下の数字キーを押して暗証番号を入力してください</div>
         </div>
 
-        <!-- パスワード表示エリア（ドットで表示） -->
+        <!-- パスワード表示エリア -->
         <div class="pin-display-wrap">
             <div class="pin-display-text" id="pinDots"></div>
             <div class="pin-placeholder" id="pinPlaceholder">数字キーを押してください</div>
@@ -603,7 +557,7 @@ let currentStaffId = null;
 
 function handleClickStaff(staffId, staffName, role, hasPin) {
     if (!hasPin) {
-        // 一般スタッフ：パスワードなしでワンタップログイン！
+        // 一般スタッフ：パスワードなしでワンタップログイン＆端末固定！
         document.getElementById('selectedStaffId').value = staffId;
         document.getElementById('enteredPinCode').value = '';
         document.getElementById('loginForm').submit();
@@ -627,7 +581,7 @@ function closePinModal() {
 }
 
 function pressKey(num) {
-    if (currentPin.length >= 10) return; // 最大10桁
+    if (currentPin.length >= 10) return;
     currentPin += num;
     updatePinDisplay();
 }
@@ -653,7 +607,6 @@ function updatePinDisplay() {
         placeholderEl.style.display = 'block';
     } else {
         placeholderEl.style.display = 'none';
-        // ドット表示（例: ● ● ● ●）
         dotsEl.textContent = '●'.repeat(currentPin.length);
     }
 }
@@ -669,7 +622,6 @@ function submitWithPin() {
     document.getElementById('loginForm').submit();
 }
 
-// 物理キーボードの数字・テンキー入力にも対応
 window.addEventListener('keydown', function(e) {
     const modal = document.getElementById('pinModal');
     if (!modal.classList.contains('active')) return;

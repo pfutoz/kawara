@@ -1,25 +1,5 @@
 <?php
-// 1. セッション開始と30分タイムアウト処理
-if (session_status() === PHP_SESSION_NONE) {
-    session_start();
-}
-$timeout_duration = 1800; // 30分
-
-if (isset($_SESSION['last_activity'])) {
-    if ((time() - $_SESSION['last_activity']) > $timeout_duration) {
-        session_unset();
-        session_destroy();
-        header("Location: login.php?reason=timeout");
-        exit;
-    }
-}
-$_SESSION['last_activity'] = time();
-
-// 未ログイン状態のチェック（認証ガード）
-if (!isset($_SESSION['staff_id'])) {
-    header("Location: login.php");
-    exit;
-}
+require_once __DIR__ . '/includes/auth_helper.php';
 
 // 2. DB接続設定 ＆ LINEヘルパー読み込み
 $host = 'localhost'; $dbname = 'kawara'; $user = 'postgres'; $password = 'postgres';
@@ -36,15 +16,12 @@ if (file_exists('includes/line_helper.php')) {
     require_once 'includes/line_helper.php';
 }
 
-// 3. ログインユーザー情報（line_user_idも一緒に取得）
-$current_staff_id = (int)$_SESSION['staff_id'];
-$stmt_user = $pdo->prepare("SELECT staff_id, staff_name, role, dept_id, is_admin, line_user_id FROM staff WHERE staff_id = :id");
-$stmt_user->execute([':id' => $current_staff_id]);
-$login_user = $stmt_user->fetch();
-
-if (!$login_user) { header("Location: login.php"); exit; }
+// 📱 端末固定Cookieがあれば自動ログイン！なければlogin.phpへ
+$login_user = checkAuthOrAutoLogin($pdo, $_SERVER['REQUEST_URI'] ?? '');
+$current_staff_id = (int)$login_user['staff_id'];
 $is_admin = (bool)($login_user['is_admin'] ?? false);
 $has_line_id = !empty(trim($login_user['line_user_id'] ?? ''));
+
 
 // 本日の生存確認・安否報告チェック
 $today_start = date('Y-m-d 00:00:00');
@@ -673,9 +650,9 @@ usort($posts, function($a, $b) use ($date_filter) {
                 <h1>📜 院内かわら版 <span>医療法人小野会</span></h1>
             </div>
             <div class="header-right">
-                <a href="login.php" class="user-info" title="クリックしてユーザーを切り替え">
+                <a href="login.php?switch_user=1" class="user-info" title="クリックしてユーザーを切り替え">
                     👤 <span style="font-weight:bold;"><?= htmlspecialchars($login_user['staff_name']) ?></span> (<?= htmlspecialchars($login_user['role']) ?>)
-                    <span style="font-size:0.7rem; background:rgba(255,255,255,0.3); padding:1px 5px; border-radius:3px; margin-left:2px;">変更</span>
+                    <span style="font-size:0.7rem; background:rgba(255,255,255,0.3); padding:1px 5px; border-radius:3px; margin-left:2px;">切替</span>
                 </a>
                 <button type="button" class="btn-line-header <?= $has_line_id ? 'is-linked' : 'is-unlinked' ?>" id="headerLineBtn" onclick="openLineLinkModal()" title="LINE連携設定">
                     <?= $has_line_id ? '🟢 LINE連携済' : '📱 LINE未登録' ?>
@@ -688,7 +665,7 @@ usort($posts, function($a, $b) use ($date_filter) {
                     <a href="/index.php" class="btn-header">ポータル</a>
                     <a href="help.php" class="btn-header" style="background:#17a2b8;" target="_blank">❓ 使い方</a>
                     <?php if ($is_admin): ?><a href="master_mente.php" class="btn-header" style="background:#e67e22;">⚙️ メンテ</a><?php endif; ?>
-                    <a href="login.php" class="btn-header" style="background:#e74c3c;">切替</a>
+                    <a href="login.php?switch_user=1" class="btn-header" style="background:#e74c3c;">切替</a>
                 </div>
             </div>
         </div>

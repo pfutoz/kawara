@@ -1,6 +1,6 @@
 <!-- 院内かわら版 - LINE Flex Message 通知・プレビュー ＆ テスト送信共通モーダルコンポーネント -->
 <div id="modal-line-notify" class="modal-overlay" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(15,23,42,0.65); z-index:9999; justify-content:center; align-items:center; backdrop-filter:blur(3px);">
-    <div class="modal-box" style="background:#ffffff; max-width:840px; width:95%; border-radius:14px; box-shadow:0 12px 36px rgba(0,0,0,0.25); overflow:hidden; display:flex; flex-direction:column; max-height:92vh; font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+    <div class="modal-box" style="background:#ffffff; max-width:860px; width:95%; border-radius:14px; box-shadow:0 12px 36px rgba(0,0,0,0.25); overflow:hidden; display:flex; flex-direction:column; max-height:92vh; font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
         
         <!-- ヘッダー -->
         <div style="background:linear-gradient(135deg, #005a9c, #003d6b); color:#ffffff; padding:14px 20px; display:flex; justify-content:space-between; align-items:center;">
@@ -81,13 +81,13 @@
                 </div>
 
                 <!-- 右側：送信設定・調整フォーム -->
-                <div style="display:flex; flex-direction:column; gap:16px;">
+                <div style="display:flex; flex-direction:column; gap:14px;">
                     <div>
                         <div style="font-size:0.82rem; font-weight:bold; color:#475569; margin-bottom:4px;">📡 送信対象 ＆ LINE連携状況:</div>
                         <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:10px 14px; font-size:0.86rem; color:#1e293b;">
                             <div><b>対象部署:</b> <span id="line-notify-depts">-</span></div>
                             <div style="margin-top:4px;">
-                                <b>LINE連携済み:</b> <span id="line-notify-linked-count" style="font-weight:bold; color:#16a34a; font-size:1.1rem;">0</span>名
+                                <b>LINE連携済み:</b> <span id="line-notify-linked-count" style="font-weight:bold; color:#16a34a; font-size:1.15rem;">0</span>名
                                 <span style="font-size:0.8rem; color:#64748b;">(対象 <span id="line-notify-total-count">0</span>名中)</span>
                             </div>
                         </div>
@@ -97,19 +97,68 @@
                         <label style="font-size:0.82rem; font-weight:bold; color:#475569; display:block; margin-bottom:4px;">
                             ✏️ LINE用ひとこと要約・注意事項（リアルタイム反映）:
                         </label>
-                        <textarea id="line-notify-custom-notice" rows="3" style="width:100%; box-sizing:border-box; padding:8px 10px; border:1.5px solid #cbd5e1; border-radius:6px; font-size:0.86rem; line-height:1.4;" placeholder="例: 工事中、使用禁止となります。西側トイレをご利用ください。" oninput="updateLineModalPreview()"></textarea>
-                        <span style="font-size:0.75rem; color:#64748b;">※カード中央の赤枠スロットに太字で表示されます（30〜60文字程度が最も読みやすいです）。</span>
+                        <textarea id="line-notify-custom-notice" rows="2" style="width:100%; box-sizing:border-box; padding:8px 10px; border:1.5px solid #cbd5e1; border-radius:6px; font-size:0.86rem; line-height:1.4;" placeholder="例: 午前中は外来診療に関係のない場所を中心に行います。" oninput="updateLineModalPreview()"></textarea>
+                        <span style="font-size:0.74rem; color:#64748b;">※カード中央の赤枠スロットに太字で表示されます（30〜60文字程度推奨）。</span>
                     </div>
 
-                    <!-- 自分自身のLINE状態 -->
-                    <div id="my-line-status-box" style="background:#eff6ff; border:1px solid #bfdbfe; border-radius:6px; padding:10px 12px; font-size:0.82rem; color:#1e40af; display:flex; align-items:center; justify-content:space-between;">
-                        <span>📱 あなた（<b id="my-line-staff-name">-</b>）のLINE連携: <span id="my-line-badge" style="font-weight:bold; color:#16a34a;">連携済み</span></span>
-                        <a href="safety_contacts.php" target="_blank" style="color:#0284c7; text-decoration:underline; font-size:0.78rem;">連携確認・変更</a>
+                    <!-- 自分自身のLINE状態 ＆ クイック連携エリア -->
+                    <div style="border:1px solid #cbd5e1; border-radius:8px; background:#f8fafc; overflow:hidden;">
+                        <div id="my-line-status-box" style="padding:10px 12px; font-size:0.84rem; display:flex; align-items:center; justify-content:space-between; background:#eff6ff; border-bottom:1px solid #dbeafe;">
+                            <div>
+                                <span>📱 あなた（<b id="my-line-staff-name">-</b>）: </span>
+                                <span id="my-line-badge" style="font-weight:bold; color:#dc2626;">未連携</span>
+                            </div>
+                            <button type="button" id="btn-toggle-quick-link" onclick="toggleQuickLinkPanel()" style="background:#0284c7; color:#fff; border:none; padding:4px 10px; border-radius:4px; font-size:0.75rem; font-weight:bold; cursor:pointer;">
+                                📲 LINE連携する
+                            </button>
+                        </div>
+
+                        <!-- インラインLINE連携アコーディオンパネル -->
+                        <div id="quick-link-panel" style="display:none; padding:12px 14px; background:#ffffff; font-size:0.82rem;">
+                            <div style="display:flex; gap:14px; align-items:flex-start;">
+                                <!-- QRコード -->
+                                <div style="text-align:center; flex-shrink:0;">
+                                    <img id="quick-link-qr" src="https://api.qrserver.com/v1/create-qr-code/?size=110x110&data=https://line.me/R/ti/p/@tmw3446q" alt="LINE QR" style="width:100px; height:100px; border:1px solid #cbd5e1; border-radius:6px; padding:2px; background:#fff;">
+                                    <div style="font-size:0.7rem; color:#64748b; margin-top:2px;">公式アカウント追加</div>
+                                </div>
+                                <!-- 手順説明 ＆ 4桁コード -->
+                                <div style="flex:1; display:flex; flex-direction:column; gap:6px;">
+                                    <div style="font-weight:bold; color:#1e293b;">
+                                        ① スマホでQRを読み「おの肛門科」を友だち追加<br>
+                                        ② 下記の【4桁コード】をLINEトークで送信:
+                                    </div>
+                                    <div style="display:flex; align-items:center; gap:8px;">
+                                        <div id="quick-link-code-box" style="background:#f1f5f9; border:2px dashed #0284c7; border-radius:8px; padding:6px 14px; font-size:1.35rem; font-weight:bold; letter-spacing:0.2em; color:#0284c7; min-width:90px; text-align:center;">
+                                            ----
+                                        </div>
+                                        <button type="button" onclick="issueNewLinkCode()" style="background:#e2e8f0; color:#334155; border:none; padding:6px 10px; border-radius:4px; font-size:0.75rem; cursor:pointer; font-weight:bold;">
+                                            🔄 再発行
+                                        </button>
+                                    </div>
+                                    <div id="quick-link-timer" style="font-size:0.72rem; color:#64748b;">
+                                        ⏳ 有効期限: 残り 20分 / 送信されると自動で連携完了します
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- 手動登録・解除オプション（折りたたみ） -->
+                            <details style="margin-top:10px; border-top:1px dashed #e2e8f0; padding-top:8px; font-size:0.76rem; color:#475569;">
+                                <summary style="cursor:pointer; font-weight:bold; color:#0284c7;">⚙️ 管理者用：LINE User ID直接登録 / 連携解除</summary>
+                                <div style="margin-top:6px; display:flex; gap:6px; align-items:center;">
+                                    <input type="text" id="quick-manual-line-id" placeholder="Uから始まる33桁のLINE User ID" style="flex:1; padding:4px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.76rem; font-family:monospace;">
+                                    <button type="button" onclick="submitManualLineId()" style="background:#16a34a; color:#fff; border:none; padding:4px 10px; border-radius:4px; font-weight:bold; cursor:pointer;">
+                                        登録
+                                    </button>
+                                    <button type="button" onclick="submitUnlinkLine()" style="background:#ef4444; color:#fff; border:none; padding:4px 10px; border-radius:4px; font-weight:bold; cursor:pointer;">
+                                        解除
+                                    </button>
+                                </div>
+                            </details>
+                        </div>
                     </div>
 
-                    <div style="background:#fefce8; border:1px solid #fef08a; border-radius:6px; padding:10px 12px; font-size:0.8rem; color:#854d0e; line-height:1.5;">
-                        💡 <b>実務のおすすめ手順</b>:<br>
-                        いきなり対象者全員に送る前に、まず下の「📲 まず自分のLINEにテスト送信」を押し、ご自身のスマホで届き方やボタンの動作を確認してから本番送信を行ってください。
+                    <div style="background:#fefce8; border:1px solid #fef08a; border-radius:6px; padding:10px 12px; font-size:0.78rem; color:#854d0e; line-height:1.5;">
+                        💡 <b>実務手順</b>: まず「📲 まず自分のLINEにテスト送信」を押し、ご自身のスマホで届き方や「👍 了解しました」ボタンの動作を確認してから本番送信を行ってください。
                     </div>
                 </div>
 
@@ -143,10 +192,15 @@
 let currentLinePostId = 0;
 let currentLineBubble = null;
 let currentLinePostData = null;
+let quickLinkPollTimer = null;
 
 function closeLineNotifyModal() {
     const m = document.getElementById('modal-line-notify');
     if (m) m.style.display = 'none';
+    if (quickLinkPollTimer) {
+        clearInterval(quickLinkPollTimer);
+        quickLinkPollTimer = null;
+    }
 }
 
 async function openLineNotifyModal(postId, customNotice = '') {
@@ -183,19 +237,7 @@ async function openLineNotifyModal(postId, customNotice = '') {
         document.getElementById('line-notify-total-count').textContent = data.total_targets;
         document.getElementById('my-line-staff-name').textContent = data.my_name || '自分';
 
-        const myBadge = document.getElementById('my-line-badge');
-        const btnTestMe = document.getElementById('btn-line-test-me');
-        if (data.my_line_linked) {
-            myBadge.textContent = '✅ 連携済み（テスト受信可）';
-            myBadge.style.color = '#16a34a';
-            btnTestMe.disabled = false;
-            btnTestMe.title = 'あなたのスマホLINEに実機テスト送信します';
-        } else {
-            myBadge.textContent = '❌ 未連携（テスト送信不可）';
-            myBadge.style.color = '#dc2626';
-            btnTestMe.disabled = true;
-            btnTestMe.title = '安否連絡網画面からLINE連携を行ってください';
-        }
+        updateMyLineBadgeUI(data.my_line_linked);
 
         // 左側カードプレビュー描画
         renderLineCardMock(data.bubble);
@@ -214,9 +256,42 @@ async function openLineNotifyModal(postId, customNotice = '') {
 
         if (loading) loading.style.display = 'none';
         if (content) content.style.display = 'grid';
+
+        // もし未連携なら自動でクイック連携パネルを展開しコードを発行
+        if (!data.my_line_linked) {
+            openQuickLinkPanel();
+        } else {
+            closeQuickLinkPanel();
+        }
     } catch (e) {
         alert('❌ プレビュー通信エラー: ' + e.message);
         closeLineNotifyModal();
+    }
+}
+
+function updateMyLineBadgeUI(isLinked) {
+    const myBadge = document.getElementById('my-line-badge');
+    const btnTestMe = document.getElementById('btn-line-test-me');
+    const btnToggle = document.getElementById('btn-toggle-quick-link');
+
+    if (isLinked) {
+        myBadge.textContent = '✅ 連携済み（テスト受信可）';
+        myBadge.style.color = '#16a34a';
+        btnTestMe.disabled = false;
+        btnTestMe.style.opacity = '1';
+        btnTestMe.style.cursor = 'pointer';
+        btnTestMe.title = 'あなたのスマホLINEに実機テスト送信します';
+        btnToggle.textContent = '連携設定・変更';
+        btnToggle.style.background = '#64748b';
+    } else {
+        myBadge.textContent = '❌ 未連携（テスト送信不可）';
+        myBadge.style.color = '#dc2626';
+        btnTestMe.disabled = true;
+        btnTestMe.style.opacity = '0.55';
+        btnTestMe.style.cursor = 'not-allowed';
+        btnTestMe.title = '上の「LINE連携する」からスマホと連携してください';
+        btnToggle.textContent = '📲 LINE連携する';
+        btnToggle.style.background = '#0284c7';
     }
 }
 
@@ -255,6 +330,115 @@ function updateLineModalPreview() {
     document.getElementById('line-notify-custom-notice').dataset.userEdited = '1';
 }
 
+// -------------------------------------------------------------
+// クイックLINE連携パネル制御
+// -------------------------------------------------------------
+function toggleQuickLinkPanel() {
+    const panel = document.getElementById('quick-link-panel');
+    if (panel.style.display === 'none' || !panel.style.display) {
+        openQuickLinkPanel();
+    } else {
+        closeQuickLinkPanel();
+    }
+}
+
+function openQuickLinkPanel() {
+    const panel = document.getElementById('quick-link-panel');
+    if (panel) panel.style.display = 'block';
+    issueNewLinkCode();
+    startQuickLinkPolling();
+}
+
+function closeQuickLinkPanel() {
+    const panel = document.getElementById('quick-link-panel');
+    if (panel) panel.style.display = 'none';
+    if (quickLinkPollTimer) {
+        clearInterval(quickLinkPollTimer);
+        quickLinkPollTimer = null;
+    }
+}
+
+async function issueNewLinkCode() {
+    const codeBox = document.getElementById('quick-link-code-box');
+    codeBox.textContent = '...';
+    try {
+        const res = await fetch('api/line_link_status.php?action=generate_code');
+        const data = await res.json();
+        if (data.success && data.link_code) {
+            codeBox.textContent = data.link_code;
+        } else {
+            codeBox.textContent = 'エラー';
+        }
+    } catch(e) {
+        codeBox.textContent = '通信失敗';
+    }
+}
+
+function startQuickLinkPolling() {
+    if (quickLinkPollTimer) clearInterval(quickLinkPollTimer);
+    quickLinkPollTimer = setInterval(async () => {
+        try {
+            const res = await fetch('api/line_link_status.php?action=status');
+            const data = await res.json();
+            if (data.success && data.is_linked) {
+                // 連携完了検知！
+                clearInterval(quickLinkPollTimer);
+                quickLinkPollTimer = null;
+                alert('🎉 LINE連携が完了しました！\nこれであなたのスマホへテスト送信が可能です。');
+                closeQuickLinkPanel();
+                // プレビュー再読込
+                if (currentLinePostId) {
+                    openLineNotifyModal(currentLinePostId);
+                }
+            }
+        } catch(e) {}
+    }, 2500);
+}
+
+async function submitManualLineId() {
+    const input = document.getElementById('quick-manual-line-id');
+    const val = input.value.trim();
+    if (!val) {
+        alert('LINE User IDを入力してください（空の場合はダミーIDでテスト登録されます）');
+    }
+    const fd = new FormData();
+    fd.append('action', 'manual_link');
+    if (val) fd.append('line_user_id', val);
+
+    try {
+        const res = await fetch('api/line_link_status.php', { method: 'POST', body: fd });
+        const data = await res.json();
+        if (data.success) {
+            alert('✅ LINE IDを登録しました: ' + data.line_user_id);
+            closeQuickLinkPanel();
+            if (currentLinePostId) openLineNotifyModal(currentLinePostId);
+        } else {
+            alert('❌ 登録失敗: ' + (data.error || ''));
+        }
+    } catch(e) {
+        alert('❌ 通信エラー: ' + e.message);
+    }
+}
+
+async function submitUnlinkLine() {
+    if (!confirm('本当にLINE連携を解除しますか？')) return;
+    const fd = new FormData();
+    fd.append('action', 'unlink');
+    try {
+        const res = await fetch('api/line_link_status.php', { method: 'POST', body: fd });
+        const data = await res.json();
+        if (data.success) {
+            alert('LINE連携を解除しました。');
+            if (currentLinePostId) openLineNotifyModal(currentLinePostId);
+        }
+    } catch(e) {
+        alert('❌ 通信エラー: ' + e.message);
+    }
+}
+
+// -------------------------------------------------------------
+// 送信実行
+// -------------------------------------------------------------
 async function executeLineTestMe() {
     if (!currentLinePostId) return;
     const btn = document.getElementById('btn-line-test-me');
@@ -275,18 +459,10 @@ async function executeLineTestMe() {
         btn.textContent = origText;
 
         if (data.success) {
-            if (typeof showToast === 'function') {
-                showToast('📲 ' + data.message);
-            } else {
-                alert('📲 ' + data.message);
-            }
+            alert('📲 ' + data.message + '\n\nトーク画面の「👍 了解しました」ボタンをタップして意思表示の自動返信もテストできます。');
         } else {
             const err = data.error || '送信失敗';
-            if (typeof showToast === 'function') {
-                showToast('❌ ' + err, 'error');
-            } else {
-                alert('❌ ' + err);
-            }
+            alert('❌ ' + err);
         }
     } catch(e) {
         btn.disabled = false;
@@ -321,19 +497,11 @@ async function executeLineBroadcast(targetMode) {
         btn.textContent = origText;
 
         if (data.success) {
-            if (typeof showToast === 'function') {
-                showToast('🚀 ' + data.message);
-            } else {
-                alert('🚀 ' + data.message);
-            }
+            alert('🚀 ' + data.message);
             closeLineNotifyModal();
         } else {
             const err = data.error || '送信失敗';
-            if (typeof showToast === 'function') {
-                showToast('❌ ' + err, 'error');
-            } else {
-                alert('❌ ' + err);
-            }
+            alert('❌ ' + err);
         }
     } catch(e) {
         btn.disabled = false;
