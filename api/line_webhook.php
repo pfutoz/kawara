@@ -81,6 +81,66 @@ foreach ($events as $event) {
                 sendLineReply($reply_token, $reply_msg);
             }
         }
+    } elseif ($type === 'postback') {
+        // Flex Message のボタンタップ（1タップ意思表示）
+        $postback_data = $event['postback']['data'] ?? '';
+        parse_str($postback_data, $params);
+        $action = $params['action'] ?? '';
+
+        if ($action === 'ack') {
+            $post_id = (int)($params['post_id'] ?? 0);
+            $status = $params['status'] ?? 'ok'; // ok, question, absence
+
+            // 1. 送信元の line_user_id からスタッフを特定
+            $stmt_st = $pdo->prepare("SELECT staff_id, staff_name, role FROM staff WHERE line_user_id = :uid AND (is_deleted IS NOT TRUE) LIMIT 1");
+            $stmt_st->execute([':uid' => $user_id]);
+            $staff = $stmt_st->fetch();
+
+            if ($staff && $post_id > 0) {
+                $sid = (int)$staff['staff_id'];
+
+                // 2. 記事タイトルを取得
+                $stmt_p = $pdo->prepare("SELECT title FROM posts WHERE post_id = :pid");
+                $stmt_p->execute([':pid' => $post_id]);
+                $post_title = $stmt_p->fetchColumn() ?: 'お知らせ';
+
+                // 3. post_reads テーブルに記録（未読なら新規INSERT、既読ならUPDATE）
+                $stmt_upsert = $pdo->prepare("
+                    INSERT INTO post_reads (post_id, staff_id, read_at, response_status, response_at)
+                    VALUES (:pid, :sid, NOW(), :status, NOW())
+                    ON CONFLICT (post_id, staff_id) 
+                    DO UPDATE SET response_status = :status, response_at = NOW()
+                ");
+                $stmt_upsert->execute([
+                    ':pid'    => $post_id,
+                    ':sid'    => $sid,
+                    ':status' => $status
+                ]);
+
+                // 4. ステータスに応じた丁寧な自動返信
+                $status_labels = [
+                    'ok'       => '👍 了解（対応可能）',
+                    'question' => '❓ 質問・確認あり',
+                    'absence'  => '⚠️ 不在・対応不可'
+                ];
+                $status_text = $status_labels[$status] ?? '確認済み';
+
+                $reply_msg = "✅ 【意思表示を受け付けました】\n"
+                           . "伝達: {$post_title}\n"
+                           . "返答: {$status_text}\n"
+                           . "職員: {$staff['staff_name']} 様\n\n";
+
+                if ($status === 'ok') {
+                    $reply_msg .= "「了解」として登録しました。かわら版管理画面（事務長ダッシュボード）にリアルタイム反映されました。ご協力ありがとうございます！";
+                } elseif ($status === 'question') {
+                    $reply_msg .= "「質問・確認あり」として登録しました。確認事項はかわら版コメント欄または事務部・担当者へ直接お伝えください。";
+                } elseif ($status === 'absence') {
+                    $reply_msg .= "「不在・対応不可」として登録しました。当日の出勤者・担当者側で代替対応を調整いたします。";
+                }
+
+                sendLineReply($reply_token, $reply_msg);
+            }
+        }
     } elseif ($type === 'follow') {
         // 友達追加時の自動あいさつメッセージ
         $reply_msg = "🏥 医療法人小野会 院内かわら版・BCP連絡網へようこそ！\n\n"

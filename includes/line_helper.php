@@ -118,6 +118,365 @@ function sendLineNotification($pdo, $staff_ids, $message) {
 }
 
 /**
+ * 院内伝達記事から LINE Flex Message（Bubble Container）を自動生成する関数
+ * 
+ * @param array  $post               記事データ連想配列（title, category_name, icon_emoji, target_datetime, event_schedules等）
+ * @param string $custom_notice      LINE通知用のひとこと注意事項・要約（空なら本文から抽出）
+ * @param string $target_dept_names  対象部署名（例: "看護部 / 事務部"）
+ * @param string $base_url           かわら版のベースURL（空なら自動補完）
+ * @return array                     LINE Flex Message の bubble 配列
+ */
+function buildPostFlexBubble($post, $custom_notice = '', $target_dept_names = '', $base_url = '') {
+    $post_id = (int)($post['post_id'] ?? 0);
+    $title = (string)($post['title'] ?? '無題のお知らせ');
+    $cat_name = (string)($post['category_name'] ?? 'お知らせ');
+    $icon = (string)($post['icon_emoji'] ?? '📋');
+    $author_name = (string)($post['staff_name'] ?? ($post['author_name'] ?? ''));
+    $author_dept = (string)($post['author_dept'] ?? '');
+
+    if (empty($base_url)) {
+        $tunnel = getLineTunnelStatus();
+        if (!empty($tunnel['url'])) {
+            $base_url = rtrim($tunnel['url'], '/') . '/kawara';
+        } else {
+            $base_url = 'http://192.168.1.16/kawara';
+        }
+    }
+    $view_url = "{$base_url}/view_post.php?id={$post_id}";
+
+    // カテゴリ別のヘッダー背景色マップ
+    $cat_colors = [
+        '設備・営繕'   => '#d97706',
+        '研修・勉強会' => '#0284c7',
+        '会議・委員会' => '#4f46e5',
+        '緊急・重要'   => '#dc2626',
+        '安全・感染'   => '#16a34a',
+        '総務・人事'   => '#0d9488',
+        '連絡事項'     => '#475569'
+    ];
+    $header_bg = '#005a9c'; // デフォルト小野会ブルー
+    foreach ($cat_colors as $key => $color) {
+        if (mb_strpos($cat_name, $key) !== false) {
+            $header_bg = $color;
+            break;
+        }
+    }
+
+    // 実施日時の組み立て
+    $week_names = ['日', '月', '火', '水', '木', '金', '土'];
+    $date_str = '指定なし';
+    $multi_schedules = [];
+    if (!empty($post['event_schedules'])) {
+        $dec = is_array($post['event_schedules']) ? $post['event_schedules'] : json_decode($post['event_schedules'], true);
+        if (is_array($dec) && count($dec) > 0) {
+            $multi_schedules = $dec;
+        }
+    }
+
+    if (!empty($multi_schedules)) {
+        $count = count($multi_schedules);
+        $first = $multi_schedules[0];
+        $f_ts = !empty($first['date']) ? strtotime($first['date']) : (!empty($first['start_datetime']) ? strtotime($first['start_datetime']) : null);
+        $w = $f_ts ? $week_names[(int)date('w', $f_ts)] : '';
+        $f_d = $f_ts ? date('n/j', $f_ts) . "({$w})" : ($first['date'] ?? '');
+        $f_t = !empty($first['is_all_day']) ? '終日' : ($first['start_time'] ?? '');
+        $date_str = "全{$count}回 / 初回: {$f_d} {$f_t}";
+    } elseif (!empty($post['target_datetime'])) {
+        $s_ts = strtotime($post['target_datetime']);
+        $w = $week_names[(int)date('w', $s_ts)];
+        $s_d = date('n/j', $s_ts) . "({$w})";
+        $e_ts = !empty($post['target_end_datetime']) ? strtotime($post['target_end_datetime']) : null;
+        if (!empty($post['is_all_day'])) {
+            $date_str = "{$s_d} 終日";
+        } elseif ($e_ts) {
+            $t_start = date('H:i', $s_ts);
+            $t_end = date('H:i', $e_ts);
+            $date_str = "{$s_d} {$t_start}〜{$t_end}";
+        } else {
+            $date_str = "{$s_d} " . date('H:i', $s_ts) . "〜";
+        }
+    }
+
+    // LINE用ひとこと注意事項・影響（空なら本文のテキストを平文化して先頭100文字）
+    $notice_text = trim($custom_notice);
+    if (empty($notice_text)) {
+        $raw_content = strip_tags($post['content'] ?? '');
+        $raw_content = preg_replace('/\s+/u', ' ', $raw_content);
+        $notice_text = mb_substr($raw_content, 0, 80);
+        if (mb_strlen($raw_content) > 80) $notice_text .= '...';
+    }
+
+    // 対象部署
+    $dept_display = !empty($target_dept_names) ? $target_dept_names : '全館共通';
+
+    // Bubble構造の構築
+    $bubble = [
+        'type' => 'bubble',
+        'size' => 'mega',
+        'header' => [
+            'type'            => 'box',
+            'layout'          => 'horizontal',
+            'backgroundColor' => $header_bg,
+            'paddingAll'      => '12px',
+            'contents'        => [
+                [
+                    'type'   => 'text',
+                    'text'   => "{$icon} {$cat_name}",
+                    'color'  => '#ffffff',
+                    'weight' => 'bold',
+                    'size'   => 'sm',
+                    'flex'   => 4
+                ],
+                [
+                    'type'    => 'text',
+                    'text'    => '院内伝達',
+                    'color'   => '#ffffff',
+                    'size'    => 'xxs',
+                    'align'   => 'end',
+                    'gravity' => 'center',
+                    'flex'    => 2
+                ]
+            ]
+        ],
+        'body' => [
+            'type'       => 'box',
+            'layout'     => 'vertical',
+            'spacing'    => 'md',
+            'paddingAll' => '16px',
+            'contents'   => [
+                [
+                    'type'   => 'text',
+                    'text'   => $title,
+                    'weight' => 'bold',
+                    'size'   => 'md',
+                    'wrap'   => true,
+                    'color'  => '#0f172a'
+                ],
+                [
+                    'type'  => 'separator',
+                    'color' => '#e2e8f0'
+                ],
+                [
+                    'type'     => 'box',
+                    'layout'   => 'vertical',
+                    'spacing'  => 'sm',
+                    'contents' => [
+                        [
+                            'type'     => 'box',
+                            'layout'   => 'baseline',
+                            'spacing'  => 'sm',
+                            'contents' => [
+                                ['type' => 'text', 'text' => '🗓️ 日程', 'color' => '#64748b', 'size' => 'xs', 'flex' => 2],
+                                ['type' => 'text', 'text' => $date_str, 'color' => '#1e293b', 'size' => 'xs', 'flex' => 6, 'weight' => 'bold', 'wrap' => true]
+                            ]
+                        ],
+                        [
+                            'type'     => 'box',
+                            'layout'   => 'baseline',
+                            'spacing'  => 'sm',
+                            'contents' => [
+                                ['type' => 'text', 'text' => '👥 対象', 'color' => '#64748b', 'size' => 'xs', 'flex' => 2],
+                                ['type' => 'text', 'text' => $dept_display, 'color' => '#1e293b', 'size' => 'xs', 'flex' => 6, 'wrap' => true]
+                            ]
+                        ]
+                    ]
+                ],
+                [
+                    'type'            => 'box',
+                    'layout'          => 'vertical',
+                    'backgroundColor' => '#fef2f2',
+                    'cornerRadius'    => '8px',
+                    'paddingAll'      => '10px',
+                    'borderWidth'     => '1px',
+                    'borderColor'     => '#fecdd3',
+                    'contents'        => [
+                        [
+                            'type'   => 'text',
+                            'text'   => '⚠️ 概要・注意事項',
+                            'color'  => '#dc2626',
+                            'size'   => 'xxs',
+                            'weight' => 'bold'
+                        ],
+                        [
+                            'type'   => 'text',
+                            'text'   => $notice_text,
+                            'color'  => '#991b1b',
+                            'size'   => 'xs',
+                            'wrap'   => true,
+                            'weight' => 'bold',
+                            'margin' => 'xs'
+                        ]
+                    ]
+                ]
+            ]
+        ],
+        'footer' => [
+            'type'            => 'box',
+            'layout'          => 'vertical',
+            'spacing'         => 'sm',
+            'paddingAll'      => '14px',
+            'backgroundColor' => '#f8fafc',
+            'contents'        => [
+                [
+                    'type'   => 'button',
+                    'style'  => 'primary',
+                    'color'  => '#16a34a',
+                    'height' => 'sm',
+                    'action' => [
+                        'type'        => 'postback',
+                        'label'       => '👍 了解しました',
+                        'data'        => "action=ack&post_id={$post_id}&status=ok",
+                        'displayText' => '👍 了解しました'
+                    ]
+                ],
+                [
+                    'type'     => 'box',
+                    'layout'   => 'horizontal',
+                    'spacing'  => 'sm',
+                    'contents' => [
+                        [
+                            'type'   => 'button',
+                            'style'  => 'secondary',
+                            'height' => 'sm',
+                            'action' => [
+                                'type'        => 'postback',
+                                'label'       => '❓ 質問・確認',
+                                'data'        => "action=ack&post_id={$post_id}&status=question",
+                                'displayText' => '❓ 質問・確認があります'
+                            ]
+                        ],
+                        [
+                            'type'   => 'button',
+                            'style'  => 'secondary',
+                            'height' => 'sm',
+                            'action' => [
+                                'type'        => 'postback',
+                                'label'       => '⚠️ 不在・不可',
+                                'data'        => "action=ack&post_id={$post_id}&status=absence",
+                                'displayText' => '⚠️ 当日は不在・対応できません'
+                            ]
+                        ]
+                    ]
+                ],
+                [
+                    'type'   => 'button',
+                    'style'  => 'link',
+                    'height' => 'sm',
+                    'action' => [
+                        'type'  => 'uri',
+                        'label' => '📄 かわら版で詳細を開く',
+                        'uri'   => $view_url
+                    ]
+                ]
+            ]
+        ]
+    ];
+
+    return $bubble;
+}
+
+/**
+ * 指定スタッフへ LINE Flex Message を送信する関数
+ * 
+ * @param PDO       $pdo              DB接続
+ * @param int|array $staff_ids        対象の staff_id（単一または配列）
+ * @param string    $alt_text         通知バーに表示される代替テキスト（例: "【伝達】新館2F トイレ換気扇交換"）
+ * @param array     $bubble_container Flex Message の bubble 配列
+ * @return array                      ['success' => bool, 'sent_count' => int, 'unregistered_count' => int, 'errors' => array]
+ */
+function sendLineFlexMessage($pdo, $staff_ids, $alt_text, $bubble_container) {
+    if (!is_array($staff_ids)) {
+        $staff_ids = [$staff_ids];
+    }
+    $staff_ids = array_unique(array_map('intval', $staff_ids));
+    if (empty($staff_ids)) {
+        return ['success' => false, 'sent_count' => 0, 'unregistered_count' => 0, 'errors' => ['送信対象が指定されていません']];
+    }
+
+    // 1. 対象スタッフの line_user_id を取得
+    $in_clause = implode(',', array_fill(0, count($staff_ids), '?'));
+    $stmt = $pdo->prepare("SELECT staff_id, staff_name, line_user_id FROM staff WHERE staff_id IN ({$in_clause}) AND is_deleted = FALSE");
+    $stmt->execute($staff_ids);
+    $members = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    $target_tokens = [];
+    $unregistered_count = 0;
+
+    foreach ($members as $m) {
+        $token = trim($m['line_user_id'] ?? '');
+        if (!empty($token)) {
+            $target_tokens[] = $token;
+        } else {
+            $unregistered_count++;
+        }
+    }
+
+    if (empty($target_tokens)) {
+        return [
+            'success'            => false,
+            'sent_count'         => 0,
+            'unregistered_count' => $unregistered_count,
+            'errors'             => ['対象スタッフのLINE連携が完了していません。']
+        ];
+    }
+
+    if (LINE_CHANNEL_ACCESS_TOKEN === 'YOUR_LINE_CHANNEL_ACCESS_TOKEN_HERE' || empty(LINE_CHANNEL_ACCESS_TOKEN)) {
+        return [
+            'success'            => false,
+            'sent_count'         => 0,
+            'unregistered_count' => $unregistered_count,
+            'errors'             => ['LINEアクセストークンが未設定です。']
+        ];
+    }
+
+    $url = 'https://api.line.me/v2/bot/message/multicast';
+    $chunked_tokens = array_chunk($target_tokens, 500);
+    $sent_count = 0;
+    $errors = [];
+
+    foreach ($chunked_tokens as $tokens) {
+        $post_data = [
+            'to'       => $tokens,
+            'messages' => [
+                [
+                    'type'     => 'flex',
+                    'altText'  => mb_substr($alt_text, 0, 400),
+                    'contents' => $bubble_container
+                ]
+            ]
+        ];
+
+        $ch = curl_init($url);
+        curl_setopt($ch, CURLOPT_POST, true);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($post_data, JSON_UNESCAPED_UNICODE));
+        curl_setopt($ch, CURLOPT_HTTPHEADER, [
+            'Content-Type: application/json',
+            'Authorization: Bearer ' . LINE_CHANNEL_ACCESS_TOKEN
+        ]);
+
+        $response = curl_exec($ch);
+        $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        @curl_close($ch);
+
+        if ($http_code === 200) {
+            $sent_count += count($tokens);
+        } else {
+            $errors[] = "LINE Flex API Error (HTTP {$http_code}): {$response}";
+        }
+    }
+
+    return [
+        'success'            => ($sent_count > 0),
+        'sent_count'         => $sent_count,
+        'unregistered_count' => $unregistered_count,
+        'errors'             => $errors
+    ];
+}
+
+/**
  * LINE Messaging API の Reply API を呼び出して返信する関数
  */
 function sendLineReply($reply_token, $message_text) {

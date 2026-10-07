@@ -55,8 +55,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action_type'])) {
     }
 
     if ($_POST['action_type'] === 'mark_read') {
-        $stmt_r = $pdo->prepare("INSERT INTO post_reads (post_id, staff_id, read_at) VALUES (:pid, :sid, NOW()) ON CONFLICT DO NOTHING");
-        $stmt_r->execute([':pid' => $post_id, ':sid' => $current_staff_id]);
+        $resp_status = $_POST['response_status'] ?? 'ok';
+        if (!in_array($resp_status, ['ok', 'question', 'absence', 'read'], true)) {
+            $resp_status = 'ok';
+        }
+
+        $stmt_r = $pdo->prepare("
+            INSERT INTO post_reads (post_id, staff_id, read_at, response_status, response_at) 
+            VALUES (:pid, :sid, NOW(), :resp_status, NOW())
+            ON CONFLICT (post_id, staff_id) DO UPDATE SET 
+                read_at = EXCLUDED.read_at,
+                response_status = EXCLUDED.response_status,
+                response_at = EXCLUDED.response_at
+        ");
+        $stmt_r->execute([
+            ':pid'         => $post_id,
+            ':sid'         => $current_staff_id,
+            ':resp_status' => $resp_status
+        ]);
+
+        $status_labels = [
+            'ok'       => '👍 了解',
+            'question' => '❓ 質問あり',
+            'absence'  => '⚠️ 不在・不参加',
+            'read'     => '👀 既読（確認済）'
+        ];
+        $my_label = $status_labels[$resp_status] ?? '確認済';
 
         $send_self_line = isset($_POST['send_self_line']) && $_POST['send_self_line'] === '1';
 
@@ -72,17 +96,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action_type'])) {
                 $plain_content = mb_substr($plain_content, 0, 1500) . "\n…(以下省略)";
             }
 
-            $memo_msg = "【既読完了メモ】\n■ 件名：{$p_title}\n----------------------------------\n【本文】\n{$plain_content}";
+            $memo_msg = "【意思表示受付メモ: {$my_label}】\n■ 件名：{$p_title}\n----------------------------------\n【本文】\n{$plain_content}";
 
             $line_res = sendLineNotification($pdo, $current_staff_id, $memo_msg);
 
             if ($line_res['unregistered_count'] > 0) {
-                $_SESSION['notice_msg'] = "✓ 既読を付けました。（※LINE IDが未登録のためLINE通知は送信されませんでした）";
+                $_SESSION['notice_msg'] = "✓ ステータスを「{$my_label}」に更新しました。（※LINE ID未登録のためLINE通知は送信されませんでした）";
             } else {
-                $_SESSION['notice_msg'] = "✓ 既読を付けました。自分のLINEに本文メモを送信しました。";
+                $_SESSION['notice_msg'] = "✓ ステータスを「{$my_label}」に更新し、ご自身のLINEへ確認メモを送信しました。";
             }
         } else {
-            $_SESSION['notice_msg'] = "✓ 既読を付けました。";
+            $_SESSION['notice_msg'] = "✓ ステータスを「{$my_label}」に更新しました。";
         }
     }
 
@@ -148,9 +172,32 @@ foreach ($all_active_staff as $st) {
     if ($is_target) $target_members[] = $st;
 }
 
-$read_stmt = $pdo->prepare("SELECT staff_id FROM post_reads WHERE post_id = :pid");
+$read_stmt = $pdo->prepare("SELECT staff_id, response_status, response_at, response_comment FROM post_reads WHERE post_id = :pid");
 $read_stmt->execute([':pid' => $post_id]);
-$read_staff_ids = $read_stmt->fetchAll(PDO::FETCH_COLUMN);
+$raw_reads = $read_stmt->fetchAll();
+$read_map = [];
+foreach ($raw_reads as $r) {
+    $read_map[(int)$r['staff_id']] = [
+        'status'  => !empty($r['response_status']) ? $r['response_status'] : 'read',
+        'at'      => $r['response_at'] ? date('m/d H:i', strtotime($r['response_at'])) : '',
+        'comment' => $r['response_comment'] ?? ''
+    ];
+}
+$read_staff_ids = array_keys($read_map);
+$my_read_info = $read_map[$current_staff_id] ?? null;
+
+// 対象メンバー内の集計
+$stats_count = ['ok' => 0, 'question' => 0, 'absence' => 0, 'read' => 0, 'unread' => 0];
+foreach ($target_members as $tm) {
+    $sid = (int)$tm['staff_id'];
+    if (isset($read_map[$sid])) {
+        $st = $read_map[$sid]['status'];
+        if (isset($stats_count[$st])) $stats_count[$st]++;
+        else $stats_count['read']++;
+    } else {
+        $stats_count['unread']++;
+    }
+}
 ?>
 
 <!DOCTYPE html>
@@ -207,9 +254,18 @@ $read_staff_ids = $read_stmt->fetchAll(PDO::FETCH_COLUMN);
         .section-title { font-size: 1rem; font-weight: bold; margin-top: 25px; padding-bottom: 5px; border-bottom: 2px solid var(--primary-color); }
         .comment-item { border-bottom: 1px dashed #ddd; padding: 8px 0; display: flex; justify-content: space-between; font-size: 0.9rem; }
         .read-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 6px; margin-top: 10px; }
-        .read-badge { padding: 4px 8px; border-radius: 4px; font-size: 0.78rem; text-align: center; }
-        .read-badge.is-read { background: #d4edda; color: #155724; }
-        .read-badge.is-unread { background: #f8d7da; color: #721c24; }
+        .read-badge { padding: 4px 8px; border-radius: 4px; font-size: 0.78rem; text-align: center; border: 1px solid transparent; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 4px; }
+        .read-badge.is-ok { background: #dcfce7; color: #166534; border-color: #bbf7d0; }
+        .read-badge.is-question { background: #fef3c7; color: #92400e; border-color: #fde68a; }
+        .read-badge.is-absence { background: #ede9fe; color: #5b21b6; border-color: #ddd6fe; }
+        .read-badge.is-read { background: #f1f5f9; color: #334155; border-color: #cbd5e1; }
+        .read-badge.is-unread { background: #fee2e2; color: #991b1b; border-color: #fecaca; }
+        .stat-chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 9999px; font-size: 0.76rem; font-weight: bold; border: 1px solid transparent; }
+        .stat-chip-ok { background: #dcfce7; color: #166534; border-color: #bbf7d0; }
+        .stat-chip-question { background: #fef3c7; color: #92400e; border-color: #fde68a; }
+        .stat-chip-absence { background: #ede9fe; color: #5b21b6; border-color: #ddd6fe; }
+        .stat-chip-read { background: #f1f5f9; color: #334155; border-color: #cbd5e1; }
+        .stat-chip-unread { background: #fee2e2; color: #991b1b; border-color: #fecaca; }
     </style>
 </head>
 <body>
@@ -297,33 +353,63 @@ $read_staff_ids = $read_stmt->fetchAll(PDO::FETCH_COLUMN);
             </div>
         <?php endif; ?>
 
-        <?php if (!$post['is_my_read']): ?>
-            <div class="read-box">
-                <form method="POST">
-                    <input type="hidden" name="action_type" value="mark_read">
-                    
-                    <button type="submit" style="background:#28a745; color:white; border:none; padding:12px 30px; border-radius:6px; font-weight:bold; font-size:1rem; cursor:pointer; width:100%; max-width:400px; box-shadow:0 2px 6px rgba(40,167,69,0.3);">
-                         内容を確認しました（既読を付ける）
+        <!-- 意思表示・確認アクションボックス -->
+        <div class="read-box" style="text-align:left; background:#f8fafc; border:1px solid #cbd5e1; padding:16px 20px; border-radius:10px; margin-bottom:20px;">
+            <?php if ($my_read_info): 
+                $my_st = $my_read_info['status'];
+                $my_st_labels = ['ok' => ['👍 了解済み', '#166534', '#dcfce7'], 'question' => ['❓ 質問あり', '#92400e', '#fef3c7'], 'absence' => ['⚠️ 不在・不参加', '#5b21b6', '#ede9fe'], 'read' => ['👀 確認（既読）済み', '#334155', '#f1f5f9']];
+                $cur_badge = $my_st_labels[$my_st] ?? ['確認済', '#334155', '#f1f5f9'];
+            ?>
+                <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:12px; padding-bottom:10px; border-bottom:1px dashed #cbd5e1;">
+                    <div style="font-weight:bold; font-size:0.95rem; color:#0f172a; display:flex; align-items:center; gap:8px;">
+                        <span>あなたの確認状況:</span>
+                        <span style="background:<?= $cur_badge[2] ?>; color:<?= $cur_badge[1] ?>; padding:3px 10px; border-radius:6px; font-size:0.88rem; font-weight:800;">
+                            <?= $cur_badge[0] ?>
+                        </span>
+                        <span style="font-size:0.78rem; color:#64748b; font-weight:normal;">(<?= $my_read_info['at'] ?>)</span>
+                    </div>
+                    <form method="POST" style="margin:0;">
+                        <input type="hidden" name="action_type" value="mark_unread">
+                        <button type="submit" class="btn-unread-reset" style="margin:0; padding:4px 10px; font-size:0.78rem;">↩️ 未読に戻す</button>
+                    </form>
+                </div>
+                <div style="font-size:0.82rem; color:#64748b; margin-bottom:8px;">ステータスを変更する場合は、以下のボタンを押してください:</div>
+            <?php else: ?>
+                <div style="font-weight:800; font-size:0.95rem; color:#0f172a; margin-bottom:10px;">
+                    📝 この連絡・お知らせの内容を確認し、意思表示を選択してください:
+                </div>
+            <?php endif; ?>
+
+            <form method="POST" style="margin:0;">
+                <input type="hidden" name="action_type" value="mark_read">
+                <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap:8px; margin-bottom:10px;">
+                    <button type="submit" name="response_status" value="ok" style="background:#16a34a; color:#fff; border:none; padding:10px 12px; border-radius:6px; font-weight:bold; font-size:0.92rem; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:4px; box-shadow:0 1px 3px rgba(0,0,0,0.1);">
+                        👍 了解しました
                     </button>
-                    <br>
-                    <label style="display:inline-flex; align-items:center; gap:6px; margin-top:10px; font-size:0.85rem; color:#0f5132; font-weight:bold; cursor:pointer;">
-                        <input type="checkbox" name="send_self_line" value="1" <?= $has_line_id ? 'checked' : '' ?> onclick="checkLineIdStatus(event, <?= $has_line_id ? 'true' : 'false' ?>)" style="accent-color:#198754; width:16px; height:16px;">
-                        <span>📲 自分のLINE宛てにこの記事の本文テキストをメモ送信する</span>
-                    </label>
-                </form>
-            </div>
-        <?php else: ?>
-            <div style="color:#0369a1; font-weight:bold; background:#e0f2fe; padding:12px; border-radius:6px; text-align:center; margin-bottom:15px;">
-                <div>🩵 このお知らせは確認済み（既読）です</div>
-                <form method="POST" style="margin:0;">
-                    <input type="hidden" name="action_type" value="mark_unread">
-                    <button type="submit" class="btn-unread-reset">↩️ この記事を未読に戻す</button>
-                </form>
-            </div>
-        <?php endif; ?>
+                    <button type="submit" name="response_status" value="question" style="background:#d97706; color:#fff; border:none; padding:10px 12px; border-radius:6px; font-weight:bold; font-size:0.92rem; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:4px; box-shadow:0 1px 3px rgba(0,0,0,0.1);">
+                        ❓ 質問あり
+                    </button>
+                    <button type="submit" name="response_status" value="absence" style="background:#7c3aed; color:#fff; border:none; padding:10px 12px; border-radius:6px; font-weight:bold; font-size:0.92rem; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:4px; box-shadow:0 1px 3px rgba(0,0,0,0.1);">
+                        ⚠️ 不在・不参加
+                    </button>
+                    <button type="submit" name="response_status" value="read" style="background:#475569; color:#fff; border:none; padding:10px 12px; border-radius:6px; font-weight:bold; font-size:0.88rem; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:4px;">
+                        👀 既読のみ
+                    </button>
+                </div>
+                <label style="display:inline-flex; align-items:center; gap:6px; font-size:0.82rem; color:#475569; cursor:pointer;">
+                    <input type="checkbox" name="send_self_line" value="1" <?= $has_line_id ? 'checked' : '' ?> onclick="checkLineIdStatus(event, <?= $has_line_id ? 'true' : 'false' ?>)" style="accent-color:#16a34a; width:15px; height:15px;">
+                    <span>📲 同時に自分のLINE宛てにも確認メモを送信する</span>
+                </label>
+            </form>
+        </div>
 
         <div class="btn-action-group">
             <a href="print_post.php?id=<?= $post_id ?>" target="_blank" class="btn-print">🖨️ ポスター風印刷</a>
+            <?php if ($can_edit || (!empty($current_user['is_admin']))): ?>
+                <button type="button" onclick="openLineNotifyModal(<?= $post_id ?>)" style="background:#16a34a; color:#fff; border:none; padding:6px 14px; border-radius:4px; font-weight:bold; font-size:0.85rem; cursor:pointer; display:inline-flex; align-items:center; gap:6px;">
+                    💬 LINE通知（プレビュー・自分宛テスト）
+                </button>
+            <?php endif; ?>
             <?php if ($can_edit): ?>
                 <a href="create_post.php?id=<?= $post_id ?>" class="btn-edit">✏️ 記事を編集する（投稿者/管理者専用）</a>
             <?php endif; ?>
@@ -359,11 +445,31 @@ $read_staff_ids = $read_stmt->fetchAll(PDO::FETCH_COLUMN);
             <button type="submit" style="background:var(--primary-color); color:white; border:none; padding:6px 14px; border-radius:4px; font-weight:bold; cursor:pointer;">送信</button>
         </form>
 
-        <div class="section-title">👀 確認状況 (既読 <?= count(array_intersect(array_column($target_members, 'staff_id'), $read_staff_ids)) ?> / 全 <?= count($target_members) ?>名)</div>
+        <div class="section-title" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+            <span>👀 確認・意思表示状況 (確認済 <?= count(array_intersect(array_column($target_members, 'staff_id'), $read_staff_ids)) ?> / 全 <?= count($target_members) ?>名)</span>
+            <div style="display:flex; gap:4px; flex-wrap:wrap;">
+                <span class="stat-chip stat-chip-ok">👍 了解 <?= $stats_count['ok'] ?></span>
+                <?php if ($stats_count['question'] > 0): ?><span class="stat-chip stat-chip-question">❓ 質問 <?= $stats_count['question'] ?></span><?php endif; ?>
+                <?php if ($stats_count['absence'] > 0): ?><span class="stat-chip stat-chip-absence">⚠️ 不在 <?= $stats_count['absence'] ?></span><?php endif; ?>
+                <span class="stat-chip stat-chip-read">👀 既読 <?= $stats_count['read'] ?></span>
+                <span class="stat-chip stat-chip-unread">⏳ 未読 <?= $stats_count['unread'] ?></span>
+            </div>
+        </div>
         <div class="read-grid">
-            <?php foreach ($target_members as $st): $is_st_read = in_array($st['staff_id'], $read_staff_ids); ?>
-                <div class="read-badge <?= $is_st_read ? 'is-read' : 'is-unread' ?>">
-                    <?= htmlspecialchars($st['staff_name']) ?> <?= $is_st_read ? '✓' : '' ?>
+            <?php foreach ($target_members as $st): 
+                $sid = (int)$st['staff_id'];
+                $r_info = $read_map[$sid] ?? null;
+                $st_type = $r_info ? $r_info['status'] : 'unread';
+                $icon = '';
+                $cls = 'is-unread';
+                if ($st_type === 'ok') { $icon = '👍 '; $cls = 'is-ok'; }
+                elseif ($st_type === 'question') { $icon = '❓ '; $cls = 'is-question'; }
+                elseif ($st_type === 'absence') { $icon = '⚠️ '; $cls = 'is-absence'; }
+                elseif ($st_type === 'read') { $icon = '👀 '; $cls = 'is-read'; }
+                $tooltip = htmlspecialchars($st['staff_name']) . ($r_info ? " ({$r_info['at']})" . (!empty($r_info['comment']) ? ": {$r_info['comment']}" : '') : ' (未読)');
+            ?>
+                <div class="read-badge <?= $cls ?>" title="<?= $tooltip ?>">
+                    <?= $icon ?><?= htmlspecialchars($st['staff_name']) ?>
                 </div>
             <?php endforeach; ?>
         </div>
@@ -378,6 +484,8 @@ function checkLineIdStatus(e, hasLine) {
     }
 }
 </script>
+
+<?php require_once __DIR__ . '/includes/line_notify_modal.php'; ?>
 
 </body>
 </html>

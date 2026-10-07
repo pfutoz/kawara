@@ -752,10 +752,10 @@
 
             <!-- 機能1 -->
             <div class="feature-block">
-                <span class="feature-badge badge-line">中核機能 1（基盤稼働中）</span>
-                <h3>📱 LINE Flex Message ✕ 1タップ意思表示エンジン</h3>
+                <span class="feature-badge badge-line">中核機能 1（本番完全稼働中）</span>
+                <h3>📱 LINE Flex Message ✕ 1タップ意思表示エンジン ＆ プレビュー・自分宛テスト送信</h3>
                 <p>
-                    PDF添付を完全撤廃。トーク画面にカード型UIが直接届き、スタッフはアプリから離れずに<strong>1タップで「了解」「質問あり」「不在」</strong>の返答を送信可能。
+                    PDF添付を完全撤廃。トーク画面にカード型UIが直接届き、スタッフはアプリから離れずに<strong>1タップで「👍 了解」「❓ 質問」「⚠️ 不在」</strong>の意思表示を送信可能。さらに「機械的な即時一斉配信」を防止するため、送信前にスマホ実寸大の画面で確認し、<strong>まず自分のLINE宛てにテスト送信して仕上がりを実機確認してから本番一斉送信できる安心設計</strong>を標準装備。
                 </p>
 
                 <div class="flex-mockup-wrapper">
@@ -775,20 +775,16 @@
                                 <div class="flex-val">新館2F マイトイレ</div>
                             </div>
                             <div class="flex-row">
-                                <div class="flex-lbl">⚠️ 影響</div>
-                                <div class="flex-val warn">工事中、使用不可</div>
-                            </div>
-                            <div class="flex-row">
-                                <div class="flex-lbl">👷 業者</div>
-                                <div class="flex-val">〇〇設備 (立会: 事務長)</div>
-                            </div>
-                            <div class="flex-row">
                                 <div class="flex-lbl">👥 対象</div>
                                 <div class="flex-val">看護部 / 事務部</div>
                             </div>
+                            <div style="background:#fef2f2; border:1px solid #fecdd3; border-radius:6px; padding:6px 8px; margin-top:6px;">
+                                <div style="font-size:0.68rem; font-weight:bold; color:#dc2626;">⚠️ 概要・注意事項</div>
+                                <div style="font-size:0.75rem; font-weight:bold; color:#991b1b; margin-top:2px;">※工事中、西側トイレをご利用ください。</div>
+                            </div>
                         </div>
                         <div class="flex-footer">
-                            <a href="#" class="flex-btn-main">👍 了解しました・対応します</a>
+                            <a href="#" class="flex-btn-main">👍 了解しました</a>
                             <div class="flex-btn-sub-group">
                                 <a href="#" class="flex-btn-sub btn-sub-question">❓ 質問・確認あり</a>
                                 <a href="#" class="flex-btn-sub btn-sub-absence">⚠️ 不在・対応不可</a>
@@ -797,11 +793,12 @@
                     </div>
 
                     <div style="flex:1; min-width:280px; font-size:0.88rem; color:#4a5568; line-height:1.6;">
-                        <h4 style="color:#005a9c; margin-bottom:6px;">✨ 1タップ意思表示で解決すること</h4>
+                        <h4 style="color:#005a9c; margin-bottom:6px;">✨ 実務に寄り添った4つの安全・迅速機能</h4>
                         <ul style="padding-left:1.2rem; margin-bottom:12px;">
-                            <li><strong>「誰が了解したか」がかわら版側で即座に一覧化:</strong> 単なる「既読」ではなく「了解」が何名いるかが事務長の管理画面に反映されるため、前日に出勤者を探して確認する手間がゼロに。</li>
-                            <li><strong>災害安否確認モードへの転用:</strong> 地震などの緊急時には、ボタンが自動的に「🟢 無事・出勤可」「🟡 軽傷・自宅待機」「🔴 被災・出勤不可」に切り替わり、全職員の安否確認が一瞬で集計可能。</li>
-                            <li><strong>個人ID・グループ双方に対応:</strong> 個人のLINE宛てにも、部署のグループLINE宛てにも同様に送信可能。</li>
+                            <li><strong>📱 スマホ実寸大プレビュー ＆ リアルタイム要約入力:</strong> 本文全文を送るとスマホ画面が文字で埋まるため、30〜60文字の「要約・注意事項」スロットを設け、入力した文字がプレビューにリアルタイム反映されます。</li>
+                            <li><strong>📲 まず自分のLINE宛てにテスト送信:</strong> 送信ボタンを押す前に、ログインしている事務長自身のLINEにテストカードを送信し、実際のスマホ実機で文字の崩れやボタンの挙動を直接検証可能。</li>
+                            <li><strong>⚡ 1タップPostback ＆ 自動御礼返信:</strong> 職員がカードの「了解」ボタンをタップすると、Webブラウザを開くことなくLINE内部通信（Postback）で <code>post_reads</code> テーブルが更新され、トーク画面へ即座に「受領確認メッセージ」が自動返信されます。</li>
+                            <li><strong>🎯 未読・未了解者のみへの絞り込み再送信:</strong> 「対象者全員」だけでなく、「まだ了解していない職員のみ」に絞り込んで再度リマインド配信する機能を搭載。</li>
                         </ul>
                     </div>
                 </div>
@@ -931,11 +928,25 @@
                     </div>
                 </div>
 
+                <div class="timeline-step completed">
+                    <div class="timeline-dot"></div>
+                    <div class="timeline-content">
+                        <div class="timeline-title">
+                            <span>Phase 5: LINE Flex Message ✕ 1タップ意思表示エンジン ＆ プレビュー・自分宛テスト送信</span>
+                            <span class="badge-phase phase-done">✅ 完了・稼働中</span>
+                        </div>
+                        <div class="timeline-desc">
+                            <strong>【実績】</strong>
+                            LINE Flex Message生成エンジン（<code>buildPostFlexBubble</code>）、実寸大スマホプレビュー・リアルタイム要約入力・「まず自分のLINEにテスト送信」共通モーダル（<code>includes/line_notify_modal.php</code>）、1タップPostback受信＆自動御礼返信（<code>api/line_webhook.php</code>）、事務長ダッシュボード返答集計（👍了解/❓質問/⚠️不在内訳バッジ・返答者タグ・全体進捗バー）、および記事閲覧画面（<code>view_post.php</code>）のWeb1タップ意思表示を完全実装・本番稼働。
+                        </div>
+                    </div>
+                </div>
+
                 <div class="timeline-step">
                     <div class="timeline-dot"></div>
                     <div class="timeline-content">
                         <div class="timeline-title">
-                            <span>Phase 5: ナースステーション用サイネージ巡回モード ＆ 定時無人運用</span>
+                            <span>Phase 6: ナースステーション用サイネージ巡回モード ＆ 定時無人運用</span>
                             <span class="badge-phase phase-todo">⏳ 計画・展開中</span>
                         </div>
                         <div class="timeline-desc">

@@ -76,10 +76,18 @@ if (isset($_GET['action']) && $_GET['action'] === 'get_post_detail') {
         exit;
     }
 
-    // 既読スタッフ
-    $stmt_reads = $pdo->prepare("SELECT staff_id FROM post_reads WHERE post_id = :pid");
+    // 既読・返答スタッフ
+    $stmt_reads = $pdo->prepare("SELECT staff_id, response_status, response_at, response_comment FROM post_reads WHERE post_id = :pid");
     $stmt_reads->execute([':pid' => $pid]);
-    $read_set = array_flip($stmt_reads->fetchAll(PDO::FETCH_COLUMN));
+    $raw_reads = $stmt_reads->fetchAll();
+    $read_map = [];
+    foreach ($raw_reads as $r) {
+        $read_map[(int)$r['staff_id']] = [
+            'status'   => !empty($r['response_status']) ? $r['response_status'] : 'read',
+            'at'       => $r['response_at'] ? date('m/d H:i', strtotime($r['response_at'])) : '',
+            'comment'  => $r['response_comment'] ?? ''
+        ];
+    }
 
     // 部署一覧
     $stmt_depts = $pdo->query("SELECT dept_id, dept_name FROM target_departments WHERE dept_id > 1 ORDER BY dept_id ASC");
@@ -90,32 +98,82 @@ if (isset($_GET['action']) && $_GET['action'] === 'get_post_detail') {
     $staffs = $stmt_staff->fetchAll();
 
     $dept_stats = [];
+    $total_target = 0;
+    $total_read = 0;
+    $total_ok = 0;
+    $total_question = 0;
+    $total_absence = 0;
+
     foreach ($depts as $dept) {
         $did = (int)$dept['dept_id'];
         $d_staffs = array_values(array_filter($staffs, function($s) use ($did) { return (int)$s['dept_id'] === $did; }));
         $d_total = count($d_staffs);
+        $total_target += $d_total;
+
         $d_read = 0;
+        $d_ok = 0;
+        $d_question = 0;
+        $d_absence = 0;
         $d_unread = [];
+        $d_responses = [];
+
         foreach ($d_staffs as $st) {
-            if (isset($read_set[$st['staff_id']])) {
+            $sid = (int)$st['staff_id'];
+            if (isset($read_map[$sid])) {
                 $d_read++;
+                $st_status = $read_map[$sid]['status'];
+                if ($st_status === 'ok') {
+                    $d_ok++;
+                } elseif ($st_status === 'question') {
+                    $d_question++;
+                } elseif ($st_status === 'absence') {
+                    $d_absence++;
+                }
+
+                $d_responses[] = [
+                    'staff_id'   => $sid,
+                    'staff_name' => $st['staff_name'],
+                    'status'     => $st_status,
+                    'at'         => $read_map[$sid]['at'],
+                    'comment'    => $read_map[$sid]['comment']
+                ];
             } else {
                 $d_unread[] = [
-                    'staff_id'   => $st['staff_id'],
+                    'staff_id'   => $sid,
                     'staff_name' => $st['staff_name'],
                     'has_line'   => !empty($st['line_user_id'])
                 ];
             }
         }
+
+        $total_read += $d_read;
+        $total_ok += $d_ok;
+        $total_question += $d_question;
+        $total_absence += $d_absence;
+
         $dept_stats[] = [
-            'dept_id'     => $did,
-            'dept_name'   => $dept['dept_name'],
-            'total'       => $d_total,
-            'read_count'  => $d_read,
-            'percent'     => $d_total > 0 ? round(($d_read / $d_total) * 100) : 0,
-            'unread_list' => $d_unread
+            'dept_id'        => $did,
+            'dept_name'      => $dept['dept_name'],
+            'total'          => $d_total,
+            'read_count'     => $d_read,
+            'ok_count'       => $d_ok,
+            'question_count' => $d_question,
+            'absence_count'  => $d_absence,
+            'percent'        => $d_total > 0 ? round(($d_read / $d_total) * 100) : 0,
+            'unread_list'    => $d_unread,
+            'response_list'  => $d_responses
         ];
     }
+
+    $summary_stats = [
+        'total'          => $total_target,
+        'read_count'     => $total_read,
+        'ok_count'       => $total_ok,
+        'question_count' => $total_question,
+        'absence_count'  => $total_absence,
+        'unread_count'   => $total_target - $total_read,
+        'percent'        => $total_target > 0 ? round(($total_read / $total_target) * 100) : 0
+    ];
 
     // スロット展開
     $slots = [];
@@ -177,8 +235,8 @@ if (isset($_GET['action']) && $_GET['action'] === 'get_post_detail') {
     unset($sl);
 
     echo json_encode([
-        'success'    => true,
-        'post'       => [
+        'success'       => true,
+        'post'          => [
             'post_id'       => $p['post_id'],
             'title'         => $p['title'],
             'content'       => $p['content'],
@@ -188,7 +246,8 @@ if (isset($_GET['action']) && $_GET['action'] === 'get_post_detail') {
             'created_at'    => date('Y/m/d H:i', strtotime($p['created_at'])),
             'slots'         => $slots
         ],
-        'dept_stats' => $dept_stats
+        'dept_stats'    => $dept_stats,
+        'summary_stats' => $summary_stats
     ], JSON_UNESCAPED_UNICODE);
     exit;
 }
@@ -409,10 +468,13 @@ foreach ($all_staff as $st) {
     $dept_staff_counts[$did] = ($dept_staff_counts[$did] ?? 0) + 1;
 }
 
-// 直近の連絡・お知らせ（最新5件）および各記事の既読集計
+// 直近の連絡・お知らせ（最新6件）および各記事の既読・返答集計
 $stmt_recent_posts = $pdo->query("
     SELECT p.post_id, p.title, p.content, p.created_at, c.category_name, c.icon_emoji, s.staff_name,
-           (SELECT COUNT(*) FROM post_reads pr WHERE pr.post_id = p.post_id) AS read_count
+           (SELECT COUNT(*) FROM post_reads pr WHERE pr.post_id = p.post_id) AS read_count,
+           (SELECT COUNT(*) FROM post_reads pr WHERE pr.post_id = p.post_id AND pr.response_status = 'ok') AS ok_count,
+           (SELECT COUNT(*) FROM post_reads pr WHERE pr.post_id = p.post_id AND pr.response_status = 'question') AS question_count,
+           (SELECT COUNT(*) FROM post_reads pr WHERE pr.post_id = p.post_id AND pr.response_status = 'absence') AS absence_count
     FROM posts p
     LEFT JOIN post_categories c ON p.category_id = c.category_id
     LEFT JOIN staff s ON p.author_id = s.staff_id
@@ -421,44 +483,84 @@ $stmt_recent_posts = $pdo->query("
 ");
 $recent_posts = $stmt_recent_posts->fetchAll();
 
-// 部署別既読集計の事前計算（最新または主要記事）
+// 部署別既読・返答集計の事前計算（最新または指定記事）
 $focus_post_id = !empty($recent_posts) ? $recent_posts[0]['post_id'] : 0;
 if (isset($_GET['focus_post'])) {
     $focus_post_id = (int)$_GET['focus_post'];
 }
 
 $dept_read_stats = [];
+$focus_summary = [
+    'total' => 0, 'read' => 0, 'ok' => 0, 'question' => 0, 'absence' => 0, 'unread' => 0, 'percent' => 0
+];
+
 if ($focus_post_id > 0) {
-    // この記事の既読者一覧
-    $stmt_reads = $pdo->prepare("SELECT staff_id FROM post_reads WHERE post_id = :pid");
+    // この記事の既読・返答詳細
+    $stmt_reads = $pdo->prepare("SELECT staff_id, response_status, response_at, response_comment FROM post_reads WHERE post_id = :pid");
     $stmt_reads->execute([':pid' => $focus_post_id]);
-    $read_staff_ids = $stmt_reads->fetchAll(PDO::FETCH_COLUMN);
-    $read_staff_set = array_flip($read_staff_ids);
+    $raw_reads = $stmt_reads->fetchAll();
+    $read_map = [];
+    foreach ($raw_reads as $r) {
+        $read_map[(int)$r['staff_id']] = [
+            'status'  => !empty($r['response_status']) ? $r['response_status'] : 'read',
+            'at'      => $r['response_at'] ? date('m/d H:i', strtotime($r['response_at'])) : '',
+            'comment' => $r['response_comment'] ?? ''
+        ];
+    }
 
     foreach ($departments as $dept) {
         $did = (int)$dept['dept_id'];
-        $d_staffs = array_filter($all_staff, function($s) use ($did) { return (int)$s['dept_id'] === $did; });
+        $d_staffs = array_values(array_filter($all_staff, function($s) use ($did) { return (int)$s['dept_id'] === $did; }));
         $d_total = count($d_staffs);
         $d_read = 0;
+        $d_ok = 0;
+        $d_question = 0;
+        $d_absence = 0;
         $d_unread_list = [];
+        $d_response_list = [];
 
         foreach ($d_staffs as $s) {
-            if (isset($read_staff_set[$s['staff_id']])) {
+            $sid = (int)$s['staff_id'];
+            if (isset($read_map[$sid])) {
                 $d_read++;
+                $st_status = $read_map[$sid]['status'];
+                if ($st_status === 'ok') $d_ok++;
+                elseif ($st_status === 'question') $d_question++;
+                elseif ($st_status === 'absence') $d_absence++;
+
+                $d_response_list[] = [
+                    'staff_id'   => $sid,
+                    'staff_name' => $s['staff_name'],
+                    'status'     => $st_status,
+                    'at'         => $read_map[$sid]['at'],
+                    'comment'    => $read_map[$sid]['comment']
+                ];
             } else {
                 $d_unread_list[] = $s;
             }
         }
 
+        $focus_summary['total'] += $d_total;
+        $focus_summary['read'] += $d_read;
+        $focus_summary['ok'] += $d_ok;
+        $focus_summary['question'] += $d_question;
+        $focus_summary['absence'] += $d_absence;
+
         $pct = $d_total > 0 ? round(($d_read / $d_total) * 100) : 0;
         $dept_read_stats[$did] = [
-            'dept_name'   => $dept['dept_name'],
-            'total'       => $d_total,
-            'read_count'  => $d_read,
-            'percent'     => $pct,
-            'unread_list' => $d_unread_list
+            'dept_name'      => $dept['dept_name'],
+            'total'          => $d_total,
+            'read_count'     => $d_read,
+            'ok_count'       => $d_ok,
+            'question_count' => $d_question,
+            'absence_count'  => $d_absence,
+            'percent'        => $pct,
+            'unread_list'    => $d_unread_list,
+            'response_list'  => $d_response_list
         ];
     }
+    $focus_summary['unread'] = $focus_summary['total'] - $focus_summary['read'];
+    $focus_summary['percent'] = $focus_summary['total'] > 0 ? round(($focus_summary['read'] / $focus_summary['total']) * 100) : 0;
 }
 ?>
 <!DOCTYPE html>
@@ -1319,6 +1421,45 @@ if ($focus_post_id > 0) {
             font-weight: 600;
             font-size: 0.75rem;
         }
+        .response-pill {
+            padding: 2px 7px;
+            border-radius: 4px;
+            font-weight: 600;
+            font-size: 0.75rem;
+            display: inline-flex;
+            align-items: center;
+            gap: 3px;
+            border: 1px solid transparent;
+        }
+        .response-pill-ok {
+            background: #dcfce7;
+            color: #166534;
+            border-color: #bbf7d0;
+        }
+        .response-pill-question {
+            background: #fef3c7;
+            color: #92400e;
+            border-color: #fde68a;
+        }
+        .response-pill-absence {
+            background: #ede9fe;
+            color: #5b21b6;
+            border-color: #ddd6fe;
+        }
+        .response-pill-read {
+            background: #f1f5f9;
+            color: #475569;
+            border-color: #e2e8f0;
+        }
+        .status-badge-mini {
+            display: inline-flex;
+            align-items: center;
+            gap: 2px;
+            padding: 1px 6px;
+            border-radius: 9999px;
+            font-size: 0.72rem;
+            font-weight: 700;
+        }
 
         /* モーダル */
         .modal-overlay {
@@ -1763,6 +1904,9 @@ if ($today_status['is_pre_off_day']) {
                                 <button type="button" class="btn-action-sm" onclick="openEventDetailModal(<?= $ev['post_id'] ?>, '<?= $selected_date ?>')">
                                     📋 全日程・既読
                                 </button>
+                                <button type="button" class="btn-action-sm" onclick="openLineNotifyModal(<?= $ev['post_id'] ?>)" style="background:#16a34a; color:#fff; border-color:#15803d; font-weight:bold;">
+                                    💬 LINE通知
+                                </button>
                                 <button type="button" class="btn-action-sm btn-action-print" onclick="openPrintDispatchModal(<?= $ev['post_id'] ?>, '<?= htmlspecialchars(addslashes($ev['title'])) ?>', '<?= $selected_date ?>')">
                                     🚀 部署別PowerShell排紙
                                 </button>
@@ -1780,45 +1924,128 @@ if ($today_status['is_pre_off_day']) {
 
             <!-- タブ2: 連絡・部署別既読集計 -->
             <div id="tab-reads" class="tab-content">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-                    <div style="font-size:0.95rem; font-weight:800;">
-                        📢 対象記事: <?= htmlspecialchars($recent_posts[0]['title'] ?? 'お知らせ') ?>
+                <!-- 記事セレクター＆アクションバー -->
+                <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:10px 14px; margin-bottom:14px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+                    <div style="display:flex; align-items:center; gap:8px; flex:1; min-width:260px;">
+                        <span style="font-size:0.85rem; font-weight:bold; color:#475569; white-space:nowrap;">📢 集計対象記事:</span>
+                        <select onchange="location.href='jimucho_dashboard.php?date=<?= urlencode($selected_date) ?>&view=<?= urlencode($view_mode) ?>&focus_post=' + this.value" style="padding:6px 10px; border:1px solid #cbd5e1; border-radius:6px; font-size:0.88rem; font-weight:600; color:#0f172a; flex:1; max-width:400px; background:#fff;">
+                            <?php foreach ($recent_posts as $rp): ?>
+                                <option value="<?= (int)$rp['post_id'] ?>" <?= ((int)$rp['post_id'] === (int)$focus_post_id) ? 'selected' : '' ?>>
+                                    #<?= (int)$rp['post_id'] ?> <?= htmlspecialchars($rp['title']) ?> (<?= $rp['read_count'] ?>名確認)
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
                     </div>
-                    <?php if (!empty($recent_posts[0])): ?>
-                        <button type="button" class="btn-action-sm" onclick="triggerLineReminder(<?= (int)$recent_posts[0]['post_id'] ?>)" style="background:#059669; color:#fff; border-color:#047857;">
-                            📲 未読者へLINE催促
-                        </button>
+                    <?php if ($focus_post_id > 0): ?>
+                        <div style="display:flex; gap:6px;">
+                            <button type="button" class="btn-action-sm" onclick="openEventDetailModal(<?= (int)$focus_post_id ?>, '<?= $selected_date ?>')" style="background:#fff; color:#334155; border-color:#cbd5e1;">
+                                📋 詳細モーダル
+                            </button>
+                            <button type="button" class="btn-action-sm" onclick="openLineNotifyModal(<?= (int)$focus_post_id ?>)" style="background:#059669; color:#fff; border-color:#047857; font-weight:bold;">
+                                💬 LINE通知プレビュー・送信
+                            </button>
+                        </div>
                     <?php endif; ?>
                 </div>
 
-                <!-- 部署別プログレスバー一覧 -->
-                <?php foreach ($dept_read_stats as $did => $stat): ?>
-                    <div class="dept-stat-card">
-                        <div class="dept-stat-header">
-                            <span><?= htmlspecialchars($stat['dept_name']) ?></span>
-                            <span>
-                                <b><?= $stat['read_count'] ?></b> / <?= $stat['total'] ?> 人既読 (<?= $stat['percent'] ?>%)
-                            </span>
-                        </div>
-                        <div class="progress-bar-bg">
-                            <div class="progress-bar-fill" style="width: <?= $stat['percent'] ?>%;"></div>
-                        </div>
-                        <?php if (!empty($stat['unread_list'])): ?>
-                            <div class="unread-tags-box">
-                                <span style="font-weight:bold; margin-right:4px;">未読:</span>
-                                <?php foreach ($stat['unread_list'] as $un_staff): ?>
-                                    <span class="unread-staff-pill">
-                                        <?= htmlspecialchars($un_staff['staff_name']) ?>
+                <?php if ($focus_post_id > 0): ?>
+                    <!-- 全体レスポンスサマリーカード -->
+                    <div style="background:#ffffff; border:1px solid #e2e8f0; border-radius:8px; padding:12px 16px; margin-bottom:14px; box-shadow:0 1px 3px rgba(0,0,0,0.03);">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; flex-wrap:wrap; gap:8px;">
+                            <div style="font-size:0.85rem; font-weight:800; color:#334155;">
+                                📊 全体確認状況: <span style="font-size:1.1rem; color:#0f172a;"><?= $focus_summary['read'] ?></span> / <?= $focus_summary['total'] ?>名 (<?= $focus_summary['percent'] ?>%)
+                            </div>
+                            <!-- 内訳バッジ -->
+                            <div style="display:flex; gap:6px; flex-wrap:wrap;">
+                                <span class="status-badge-mini" style="background:#dcfce7; color:#166534; border:1px solid #bbf7d0;">
+                                    👍 了解: <b><?= $focus_summary['ok'] ?></b>名
+                                </span>
+                                <?php if ($focus_summary['question'] > 0): ?>
+                                    <span class="status-badge-mini" style="background:#fef3c7; color:#92400e; border:1px solid #fde68a;">
+                                        ❓ 質問: <b><?= $focus_summary['question'] ?></b>名
                                     </span>
-                                <?php endforeach; ?>
+                                <?php endif; ?>
+                                <?php if ($focus_summary['absence'] > 0): ?>
+                                    <span class="status-badge-mini" style="background:#ede9fe; color:#5b21b6; border:1px solid #ddd6fe;">
+                                        ⚠️ 不在: <b><?= $focus_summary['absence'] ?></b>名
+                                    </span>
+                                <?php endif; ?>
+                                <span class="status-badge-mini" style="background:#fee2e2; color:#991b1b; border:1px solid #fecaca;">
+                                    ⏳ 未読・未返答: <b><?= $focus_summary['unread'] ?></b>名
+                                </span>
                             </div>
-                        <?php else: ?>
-                            <div style="font-size:0.75rem; color:#059669; font-weight:bold; margin-top:4px;">
-                                ✓ 全員既読完了
-                            </div>
-                        <?php endif; ?>
+                        </div>
+                        <div class="progress-bar-bg" style="height:8px;">
+                            <div class="progress-bar-fill" style="width: <?= $focus_summary['percent'] ?>%;"></div>
+                        </div>
                     </div>
-                <?php endforeach; ?>
+
+                    <!-- 部署別カード一覧 -->
+                    <?php foreach ($dept_read_stats as $did => $stat): ?>
+                        <div class="dept-stat-card" style="margin-bottom:10px;">
+                            <div class="dept-stat-header" style="margin-bottom:6px;">
+                                <div style="display:flex; align-items:center; gap:8px;">
+                                    <span style="font-weight:800; color:#0f172a;"><?= htmlspecialchars($stat['dept_name']) ?></span>
+                                    <!-- 部署内ステータスカウント -->
+                                    <div style="display:flex; gap:4px;">
+                                        <?php if ($stat['ok_count'] > 0): ?>
+                                            <span class="status-badge-mini" style="background:#dcfce7; color:#166534;">👍 <?= $stat['ok_count'] ?></span>
+                                        <?php endif; ?>
+                                        <?php if ($stat['question_count'] > 0): ?>
+                                            <span class="status-badge-mini" style="background:#fef3c7; color:#92400e;">❓ <?= $stat['question_count'] ?></span>
+                                        <?php endif; ?>
+                                        <?php if ($stat['absence_count'] > 0): ?>
+                                            <span class="status-badge-mini" style="background:#ede9fe; color:#5b21b6;">⚠️ <?= $stat['absence_count'] ?></span>
+                                        <?php endif; ?>
+                                    </div>
+                                </div>
+                                <span style="font-size:0.85rem;">
+                                    <b><?= $stat['read_count'] ?></b> / <?= $stat['total'] ?> 人既読 (<?= $stat['percent'] ?>%)
+                                </span>
+                            </div>
+                            <div class="progress-bar-bg" style="margin-bottom:8px;">
+                                <div class="progress-bar-fill" style="width: <?= $stat['percent'] ?>%;"></div>
+                            </div>
+
+                            <!-- 返答済みスタッフタグ -->
+                            <?php if (!empty($stat['response_list'])): ?>
+                                <div style="display:flex; flex-wrap:wrap; gap:5px; margin-bottom:6px;">
+                                    <?php foreach ($stat['response_list'] as $resp): 
+                                        $p_cls = 'response-pill-read';
+                                        $p_icon = '👀';
+                                        if ($resp['status'] === 'ok') { $p_cls = 'response-pill-ok'; $p_icon = '👍'; }
+                                        elseif ($resp['status'] === 'question') { $p_cls = 'response-pill-question'; $p_icon = '❓'; }
+                                        elseif ($resp['status'] === 'absence') { $p_cls = 'response-pill-absence'; $p_icon = '⚠️'; }
+                                    ?>
+                                        <span class="response-pill <?= $p_cls ?>" title="<?= htmlspecialchars($resp['staff_name']) ?> (<?= $resp['at'] ?>)<?= !empty($resp['comment']) ? ': ' . htmlspecialchars($resp['comment']) : '' ?>">
+                                            <span><?= $p_icon ?></span>
+                                            <span><?= htmlspecialchars($resp['staff_name']) ?></span>
+                                            <?php if (!empty($resp['comment'])): ?>
+                                                <span style="font-size:0.7rem; opacity:0.85; max-width:80px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">💬<?= htmlspecialchars($resp['comment']) ?></span>
+                                            <?php endif; ?>
+                                        </span>
+                                    <?php endforeach; ?>
+                                </div>
+                            <?php endif; ?>
+
+                            <!-- 未読スタッフタグ -->
+                            <?php if (!empty($stat['unread_list'])): ?>
+                                <div class="unread-tags-box" style="margin-top:4px;">
+                                    <span style="font-weight:bold; margin-right:4px; font-size:0.75rem; color:#991b1b;">⏳ 未読:</span>
+                                    <?php foreach ($stat['unread_list'] as $un_staff): ?>
+                                        <span class="unread-staff-pill">
+                                            <?= htmlspecialchars($un_staff['staff_name']) ?>
+                                        </span>
+                                    <?php endforeach; ?>
+                                </div>
+                            <?php else: ?>
+                                <div style="font-size:0.75rem; color:#059669; font-weight:bold; margin-top:2px;">
+                                    ✓ 全員確認完了
+                                </div>
+                            <?php endif; ?>
+                        </div>
+                    <?php endforeach; ?>
+                <?php endif; ?>
             </div>
         </div>
     </div>
@@ -2009,8 +2236,8 @@ if ($today_status['is_pre_off_day']) {
                         <span>📊</span>
                         <span>部署別 既読進捗状況</span>
                     </div>
-                    <button type="button" id="med-btn-line" class="btn-action-sm" onclick="triggerModalLineReminder()" style="background:#059669; color:#fff; border-color:#047857;">
-                        📲 未読者へLINE催促
+                    <button type="button" id="med-btn-line" class="btn-action-sm" onclick="openLineNotifyModal(currentDetailPostId)" style="background:#059669; color:#fff; border-color:#047857; font-weight:bold;">
+                        📲 LINE通知・意思表示配信
                     </button>
                 </div>
                 <div id="med-dept-stats-container" style="display:flex; flex-direction:column; gap:8px; max-height:200px; overflow-y:auto; padding-right:4px;">
@@ -2020,6 +2247,9 @@ if ($today_status['is_pre_off_day']) {
         </div>
         <div class="modal-footer" style="display:flex; justify-content:space-between; align-items:center;">
             <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                <button type="button" class="btn-action-sm" onclick="openLineNotifyModal(currentDetailPostId)" style="background:#16a34a; color:#fff; border-color:#15803d; font-weight:bold;">
+                    💬 LINE通知プレビュー
+                </button>
                 <button type="button" class="btn-action-sm btn-action-print" onclick="openPrintDispatchFromDetail()">
                     🚀 部署別PowerShell排紙
                 </button>
@@ -2037,6 +2267,9 @@ if ($today_status['is_pre_off_day']) {
         </div>
     </div>
 </div>
+
+<!-- LINE通知プレビュー ＆ テスト送信モーダル（共通コンポーネント） -->
+<?php require_once __DIR__ . '/includes/line_notify_modal.php'; ?>
 
 <!-- トースト通知コンテナ -->
 <div id="toast-container"></div>
@@ -2485,12 +2718,9 @@ async function dispatchAbsenceSummaryPS() {
     }
 }
 
-// 未読者LINE催促
-async function triggerLineReminder(postId) {
-    if (!confirm('この記事をまだ読んでいない職員へLINEリマインドメッセージを送信しますか？')) {
-        return;
-    }
-    showToast('✓ 未読スタッフへLINEリマインドを送信しました');
+// 未読者LINE催促 -> LINE通知プレビューモーダルを開く
+function triggerLineReminder(postId) {
+    openLineNotifyModal(postId);
 }
 
 // イベント詳細・全日程スロット・既読モーダル制御
@@ -2578,29 +2808,75 @@ async function openEventDetailModal(postId, targetDate) {
         const deptContainer = document.getElementById('med-dept-stats-container');
         deptContainer.innerHTML = '';
         const deptStats = data.dept_stats || [];
+        const summary = data.summary_stats || null;
+
+        if (summary) {
+            const sumBox = document.createElement('div');
+            sumBox.style.cssText = 'background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:10px 14px; margin-bottom:12px;';
+            sumBox.innerHTML = `
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; flex-wrap:wrap; gap:6px;">
+                    <span style="font-size:0.85rem; font-weight:800; color:#334155;">
+                        📊 全体確認状況: <b style="font-size:1.05rem; color:#0f172a;">${summary.read_count}</b> / ${summary.total}人 (${summary.percent}%)
+                    </span>
+                    <div style="display:flex; gap:5px; flex-wrap:wrap;">
+                        <span class="status-badge-mini" style="background:#dcfce7; color:#166534; border:1px solid #bbf7d0;">👍 了解: <b>${summary.ok_count}</b></span>
+                        ${summary.question_count > 0 ? `<span class="status-badge-mini" style="background:#fef3c7; color:#92400e; border:1px solid #fde68a;">❓ 質問: <b>${summary.question_count}</b></span>` : ''}
+                        ${summary.absence_count > 0 ? `<span class="status-badge-mini" style="background:#ede9fe; color:#5b21b6; border:1px solid #ddd6fe;">⚠️ 不在: <b>${summary.absence_count}</b></span>` : ''}
+                        <span class="status-badge-mini" style="background:#fee2e2; color:#991b1b; border:1px solid #fecaca;">⏳ 未読: <b>${summary.unread_count}</b></span>
+                    </div>
+                </div>
+                <div class="progress-bar-bg" style="height:6px;">
+                    <div class="progress-bar-fill" style="width:${summary.percent}%;"></div>
+                </div>
+            `;
+            deptContainer.appendChild(sumBox);
+        }
 
         deptStats.forEach(stat => {
             const card = document.createElement('div');
             card.className = 'dept-stat-card';
             card.style.padding = '8px 12px';
-            card.style.marginBottom = '6px';
+            card.style.marginBottom = '8px';
+
+            let countBadges = '';
+            if (stat.ok_count > 0) countBadges += `<span class="status-badge-mini" style="background:#dcfce7; color:#166534;">👍 ${stat.ok_count}</span> `;
+            if (stat.question_count > 0) countBadges += `<span class="status-badge-mini" style="background:#fef3c7; color:#92400e;">❓ ${stat.question_count}</span> `;
+            if (stat.absence_count > 0) countBadges += `<span class="status-badge-mini" style="background:#ede9fe; color:#5b21b6;">⚠️ ${stat.absence_count}</span> `;
+
+            let respHtml = '';
+            if (stat.response_list && stat.response_list.length > 0) {
+                const respPills = stat.response_list.map(r => {
+                    let cls = 'response-pill-read';
+                    let icon = '👀';
+                    if (r.status === 'ok') { cls = 'response-pill-ok'; icon = '👍'; }
+                    else if (r.status === 'question') { cls = 'response-pill-question'; icon = '❓'; }
+                    else if (r.status === 'absence') { cls = 'response-pill-absence'; icon = '⚠️'; }
+                    const cmt = r.comment ? ` 💬${escapeHtml(r.comment)}` : '';
+                    return `<span class="response-pill ${cls}" title="${escapeHtml(r.staff_name)} (${r.at})${cmt}"><span>${icon}</span><span>${escapeHtml(r.staff_name)}</span></span>`;
+                }).join(' ');
+                respHtml = `<div style="display:flex; flex-wrap:wrap; gap:4px; margin-top:6px; margin-bottom:4px;">${respPills}</div>`;
+            }
 
             let unreadHtml = '';
             if (stat.unread_list && stat.unread_list.length > 0) {
                 const pills = stat.unread_list.map(u => `<span class="unread-staff-pill">${escapeHtml(u.staff_name)}</span>`).join(' ');
-                unreadHtml = `<div class="unread-tags-box" style="margin-top:4px; padding-top:4px;"><span style="font-weight:bold; margin-right:4px;">未読:</span>${pills}</div>`;
+                unreadHtml = `<div class="unread-tags-box" style="margin-top:4px; padding-top:4px;"><span style="font-weight:bold; margin-right:4px; font-size:0.75rem; color:#991b1b;">⏳ 未読:</span>${pills}</div>`;
             } else {
-                unreadHtml = `<div style="font-size:0.75rem; color:#059669; font-weight:bold; margin-top:2px;">✓ 全員既読完了</div>`;
+                unreadHtml = `<div style="font-size:0.75rem; color:#059669; font-weight:bold; margin-top:4px;">✓ 全員確認完了</div>`;
             }
 
             card.innerHTML = `
                 <div class="dept-stat-header" style="font-size:0.88rem; margin-bottom:4px;">
-                    <span>${escapeHtml(stat.dept_name)}</span>
+                    <div style="display:flex; align-items:center; gap:6px;">
+                        <span>${escapeHtml(stat.dept_name)}</span>
+                        ${countBadges}
+                    </div>
                     <span style="font-size:0.82rem;"><b>${stat.read_count}</b> / ${stat.total}人 (${stat.percent}%)</span>
                 </div>
                 <div class="progress-bar-bg" style="height:6px; margin-bottom:4px;">
                     <div class="progress-bar-fill" style="width:${stat.percent}%;"></div>
                 </div>
+                ${respHtml}
                 ${unreadHtml}
             `;
             deptContainer.appendChild(card);
