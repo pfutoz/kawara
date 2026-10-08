@@ -1,0 +1,2 @@
+# 外部からの直接Webアクセスを遮断
+Deny from all

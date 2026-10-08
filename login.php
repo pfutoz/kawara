@@ -5,20 +5,8 @@
  */
 require_once __DIR__ . '/includes/auth_helper.php';
 
-// 1. DB接続設定
-$host = 'localhost';
-$dbname = 'kawara';
-$user = 'postgres';
-$password = 'postgres';
-
-try {
-    $pdo = new PDO("pgsql:host={$host};dbname={$dbname}", $user, $password, [
-        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC
-    ]);
-} catch (PDOException $e) {
-    exit('DB接続エラー: ' . $e->getMessage());
-}
+// 1. DB接続
+require_once __DIR__ . '/includes/db.php';
 
 $is_switch_user = isset($_GET['switch_user']) && $_GET['switch_user'] === '1';
 

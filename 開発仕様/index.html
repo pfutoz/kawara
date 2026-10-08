@@ -611,13 +611,27 @@
                     ⚡ 現在の開発・実装進捗ステータス
                 </div>
                 <div class="badge-live-status">
-                    🟢 Phase 1〜4 本番稼働中（192.168.1.16完全同期）
+                    🟢 Phase 1〜6 本番稼働中（192.168.1.16完全同期）
                 </div>
             </div>
             <p style="font-size:0.88rem; color:#334155; margin-bottom:10px;">
-                LINE Messaging API 双方向連携、現場貼り出しポスター印刷、不在日カバーまとめ印刷、事務長統制ダッシュボード、および院内ネットワークプリンタ自動排紙システム（PowerShell ✕ SumatraPDF）の全中核機能が実装完了し、本番サーバー（<code>192.168.1.16</code>）にて実機検証・安定稼働中です。
+                LINE Messaging API 双方向連携、現場貼り出しポスター印刷、不在日カバーまとめ印刷、事務長統制ダッシュボード（1週・2週・月間ビュー・縦圧縮・重点メモ）、Googleカレンダー双方向マルチ同期、公的暦（二十四節気・六曜）、および院内ネットワークプリンタ自動排紙システムの全中核機能が実装完了し、本番サーバー（<code>192.168.1.16</code>）にて実機検証・安定稼働中です。
             </p>
             <div class="pd-grid">
+                <div class="pd-card highlight">
+                    <span class="pd-card-tag">✅ 本番稼働中</span>
+                    <div class="pd-card-title">Googleカレンダー双方向マルチ同期 ＆ 公的暦</div>
+                    <div class="pd-card-desc">
+                        サービスアカウントOAuth2 JWT連携（APIキー不要）。院内予定・個人予定など複数カレンダーの登録・トグル表示、二十四節気・月の満ち欠け・六曜の統合、DBキャッシュによる高速描画を実現。
+                    </div>
+                </div>
+                <div class="pd-card highlight">
+                    <span class="pd-card-tag">✅ 本番稼働中</span>
+                    <div class="pd-card-title">事務長ダッシュボード拡張（2週間／月間／縦圧縮）</div>
+                    <div class="pd-card-desc">
+                        1週間表示に加え、14日間上下2段の「2週間カード」、Google予定連動「歴月カレンダー」、1画面に収める「🗜️ 縦圧縮モード」、および月・日単位の「重点目標・日付メモ（Ajax即時保存）」を完備。
+                    </div>
+                </div>
                 <div class="pd-card highlight">
                     <span class="pd-card-tag">✅ 本番稼働中</span>
                     <div class="pd-card-title">事務長統制ダッシュボード（jimucho_dashboard.php）</div>
@@ -747,7 +761,7 @@
         <section class="doc-section" id="section3">
             <div class="section-header">
                 <div class="section-num">3</div>
-                <h2>4大中核機能の仕様 ＆ 実装詳細</h2>
+                <h2>中核機能の仕様 ＆ 実装詳細（全7中核機能）</h2>
             </div>
 
             <!-- 機能1 -->
@@ -860,6 +874,35 @@
                     <li><strong>部署別既読・未読リアルタイム集計:</strong> 各記事について「医局: 5/6名 既読」「看護部: 12/15名 既読」を可視化し、未読者をワンクリックで特定。</li>
                     <li><strong>未読者へのLINEリマインド直接送信:</strong> 重要な伝達をまだ読んでいない職員に対し、画面から直接LINEプッシュリマインドを送信可能。</li>
                     <li><strong>複数回開催（マルチスケジュール）対応:</strong> 1つの伝達に対して「第1回 〇月〇日、第2回 〇月〇日…」と複数日程を登録でき、一覧・詳細・ポスター・ダッシュボードすべてに連動。</li>
+            </div>
+
+            <!-- 機能6 -->
+            <div class="feature-block">
+                <span class="feature-badge badge-line">中核機能 6（本番稼働中）</span>
+                <h3>🗓️ Googleカレンダー双方向マルチ連携 ＆ 公的暦（二十四節気・月の満ち欠け・六曜）統合</h3>
+                <p>
+                    院内行事予定や個人予定など、複数のGoogleカレンダーアカウント／カレンダーIDを登録し、事務長ダッシュボード上にシームレスに重ね合わせ表示。
+                </p>
+                <ul style="padding-left:1.2rem; font-size:0.88rem; color:#4a5568;">
+                    <li><strong>サービスアカウント無人連携（OAuth2 JWT）:</strong> ユーザー対話ログインを一切必要とせず、Google Calendar API v3経由で定期自動同期（<code>includes/google_calendar_helper.php</code>）。秘密鍵JSONはセキュア配置。</li>
+                    <li><strong>複数カレンダー（マルチチャンネル）管理:</strong> 院内カレンダー（病院行事）、個人カレンダーなどを自由に登録し、各カレンダーに専用カラーテーマを設定可能。画面上のトグルピルで即座に表示/非表示を切替。</li>
+                    <li><strong>公的カレンダー統合（includes/traditional_calendar_helper.php）:</strong> 国立天文台暦要項に準拠した「二十四節気・月の満ち欠け（新月・上弦・満月・下弦）」および「六曜（大安・友引・仏滅等）」を週間ビューに統合表示。</li>
+                    <li><strong>高速DBキャッシュ設計:</strong> <code>google_calendar_channels</code> および <code>google_calendar_events_cache</code> テーブルにイベントを永続化し、画面表示時のAPI遅延ゼロを実現。</li>
+                </ul>
+            </div>
+
+            <!-- 機能7 -->
+            <div class="feature-block">
+                <span class="feature-badge badge-line">中核機能 7（本番稼働中）</span>
+                <h3>🗜️ 事務長ダッシュボード表示モード拡充（2週間ビュー／歴月ビュー／重点目標メモ／縦圧縮モード）</h3>
+                <p>
+                    事務長の業務特性に合わせ、短期・中期・長期の予定をストレスなく把握・管理するための多彩な表示モードと情報圧縮機構を実装。
+                </p>
+                <ul style="padding-left:1.2rem; font-size:0.88rem; color:#4a5568;">
+                    <li><strong>2週間表示モード（view=2weeks）:</strong> 14日間（今週・次週）を上下2段（各7列）で展開。複数日にまたがる終日帯予定（スパンバー）の週またぎ自動分割描画に対応。</li>
+                    <li><strong>歴月カレンダー（view=month）:</strong> 月間カレンダーグリッド上にGoogleカレンダーの終日・時間指定予定をピル表示し、前月・次月・今日ナビゲーションおよび日別詳細・既読集計パネルに完全連動。</li>
+                    <li><strong>🗜️ 縦圧縮モード（コンパクト表示）:</strong> 縦スクロールを削減し、14日間の予定を標準PCディスプレイの1画面内に収める極薄レイアウト（localStorageで状態永続化）。</li>
+                    <li><strong>重点目標・日付メモ機能（dashboard_notes）:</strong> 「📌 今月の重点目標」および各日ごとの「📝 日付メモ」をワンクリックで入力・即時Ajax保存。</li>
                 </ul>
             </div>
         </section>
@@ -942,15 +985,29 @@
                     </div>
                 </div>
 
+                <div class="timeline-step completed">
+                    <div class="timeline-dot"></div>
+                    <div class="timeline-content">
+                        <div class="timeline-title">
+                            <span>Phase 6: Googleカレンダーマルチ連携 ＆ 事務長ダッシュボード表示拡充（2週間/歴月/メモ/縦圧縮）</span>
+                            <span class="badge-phase phase-done">✅ 完了・稼働中</span>
+                        </div>
+                        <div class="timeline-desc">
+                            <strong>【実績】</strong>
+                            Googleサービスアカウント認証（JWT）によるCalendar API同期エンジン（<code>includes/google_calendar_helper.php</code>）、複数カレンダー管理UI（<code>master_mente.php</code>）、二十四節気・月の満ち欠け・六曜ヘルパー（<code>includes/traditional_calendar_helper.php</code>）、2週間カード表示（<code>view=2weeks</code>）、歴月カレンダー連携（<code>view=month</code>）、月メモ・日メモ（<code>dashboard_notes</code>）、および画面内に情報を凝縮する🗜️縦圧縮モードを完全実装・本番稼働。
+                        </div>
+                    </div>
+                </div>
+
                 <div class="timeline-step">
                     <div class="timeline-dot"></div>
                     <div class="timeline-content">
                         <div class="timeline-title">
-                            <span>Phase 6: ナースステーション用サイネージ巡回モード ＆ 定時無人運用</span>
-                            <span class="badge-phase phase-todo">⏳ 計画・展開中</span>
+                            <span>Phase 7: 医師予定表API連携（外部プロジェクト連携） ＆ ナースステーションサイネージ巡回モード</span>
+                            <span class="badge-phase phase-todo">⏳ 計画・準備中</span>
                         </div>
                         <div class="timeline-desc">
-                            詰所常設モニター用の自動スライド巡回表示画面（<code>signage.php</code>）の設置、およびWindowsタスクスケジューラによる定時無人自動排紙の運用定着。
+                            独立した「医師予定表」プロジェクト側の機能追加およびAPI化（JSONエンドポイント）完了後、事務長ダッシュボードとのリアルタイム取得・統合表示を実施。あわせて詰所常設モニター用の自動スライド巡回表示（<code>signage.php</code>）を運用定着。
                         </div>
                     </div>
                 </div>
@@ -1080,7 +1137,11 @@
                     <li><strong>サイレント印刷エンジン:</strong> <code>scripts/bin/SumatraPDF.exe</code> ＆ <code>SumatraPDF-settings.txt</code></li>
                     <li><strong>印刷ディスパッチAPI:</strong> <code>api/print_api.php</code>（PowerShell Base64 EncodedCommand 安全実行）</li>
                     <li><strong>プリンタ機器設定API:</strong> <code>api/printers_api.php</code>（Windows実プリンタ検出 <code>Get-Printer</code> ＆ <code>department_printers</code> テーブル管理）</li>
-                    <li><strong>データベース設定:</strong> PostgreSQL <code>kawara</code>（各スクリプト冒頭のPDO設定）</li>
+                    <li><strong>Googleカレンダー連携ヘルパー:</strong> <code>includes/google_calendar_helper.php</code>（JWT署名認証、API v3定期同期、DBキャッシュ管理）</li>
+                    <li><strong>公的暦（伝統暦）ヘルパー:</strong> <code>includes/traditional_calendar_helper.php</code>（国立天文台暦要項ベースの二十四節気・月の満ち欠け・六曜計算エンジン）</li>
+                    <li><strong>Googleサービスアカウント秘密鍵:</strong> <code>config/google_service_account.json</code>（セキュリティ保護のためGit非追跡。マスタ管理画面 <code>master_mente.php?tab=gcal</code> から安全にアップロード可能）</li>
+                    <li><strong>ダッシュボードメモ ＆ カレンダーDBテーブル:</strong> <code>dashboard_notes</code>（月・日重点メモ）、<code>google_calendar_channels</code>（登録カレンダー情報）、<code>google_calendar_events_cache</code>（同期キャッシュ）</li>
+                    <li><strong>データベース設定:</strong> PostgreSQL <code>kawara</code>（共通接続モジュール: <code>includes/db.php</code>）</li>
                     <li><strong>職員マスター原本（Single Source of Truth）:</strong> <code>../stf/staff_data.json</code></li>
                     <li><strong>職員マスター管理画面:</strong> <code>../stf/master_mente.php</code>（登録・編集・削除・自動タイムスタンプバックアップ <code>stf/bak/</code>・アトミック保存）</li>
                     <li><strong>自動同期の仕組み:</strong> かわら版（<code>safety_contacts.php</code>）の「🔄 STF同期」ボタン、または <code>stf/master_mente.php</code> の「🔄 かわら版へ即時同期」ボタン1発で、全職員情報が完全同期されます。</li>
@@ -1108,6 +1169,7 @@
                     </p>
                     <ul style="padding-left:1.2rem; margin-bottom:10px; font-size:0.86rem; color:#7f1d1d;">
                         <li><strong>Cloudflare（<code>pfuto07@gmail.com</code>）:</strong> 本番移行時または退職時に、病院公式アドレス（例: <code>it-admin@onokai.or.jp</code>）を Super Administrator として招待し、個人アカウントを管理から外します。</li>
+                        <li><strong>Google Cloud Console（カレンダー連携API）:</strong> Google Calendar API用サービスアカウントを発行したGoogle Cloudプロジェクトのオーナー権限に病院公式Googleアカウントを追加し、鍵の再発行やスコープ変更権限を組織で継承します。</li>
                         <li><strong>LINE公式アカウント（おの肛門科）:</strong> LINE Official Account Manager（<code>manager.line.biz</code>）および LINE Developers で、副管理者（院長・事務長等）を複数名登録して権限を分散します。</li>
                         <li><strong>詳細手順書:</strong> 画面上部のバナーまたは <a href="懸念事項.html" style="color:#dc2626; font-weight:bold; text-decoration:underline;">📄 懸念事項.html</a> に完全な移行手順と認証情報保管ルールをまとめています。</li>
                     </ul>

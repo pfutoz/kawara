@@ -2,15 +2,7 @@
 require_once __DIR__ . '/includes/auth_helper.php';
 
 // 2. DB接続
-$host = 'localhost'; $dbname = 'kawara'; $user = 'postgres'; $password = 'postgres';
-try {
-    $pdo = new PDO("pgsql:host={$host};dbname={$dbname}", $user, $password, [
-        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC
-    ]);
-} catch (PDOException $e) {
-    exit('DB接続エラー: ' . $e->getMessage());
-}
+require_once __DIR__ . '/includes/db.php';
 
 // 📱 端末固定Cookieがあれば自動復元！なければlogin.phpへ
 $current_user = checkAuthOrAutoLogin($pdo, $_SERVER['REQUEST_URI'] ?? '');
@@ -27,13 +19,52 @@ if (!$is_admin && !$is_jimucho) {
     exit;
 }
 
-// 3. 休日ヘルパー読み込み
+// 3. 休日・公的カレンダー・Googleカレンダーヘルパー読み込み
 require_once __DIR__ . '/includes/calendar_helper_jimucho.php';
+require_once __DIR__ . '/includes/traditional_calendar_helper.php';
+require_once __DIR__ . '/includes/google_calendar_helper.php';
 if (file_exists(__DIR__ . '/includes/line_helper.php')) {
     require_once __DIR__ . '/includes/line_helper.php';
 }
 
-// 3.5 Ajax API エンドポイント（イベント詳細・部署別既読・全日程スロット取得）
+// 3.5 Ajax API エンドポイント（イベント詳細・部署別既読・全日程スロット取得・Google同期・ダッシュボードメモ保存）
+if (isset($_GET['action']) && $_GET['action'] === 'sync_gcal') {
+    header('Content-Type: application/json; charset=utf-8');
+    $res = sync_all_google_calendars($pdo, true);
+    echo json_encode($res);
+    exit;
+}
+
+if (isset($_REQUEST['action']) && $_REQUEST['action'] === 'save_dashboard_note') {
+    header('Content-Type: application/json; charset=utf-8');
+    $type    = trim($_REQUEST['target_type'] ?? '');
+    $key     = trim($_REQUEST['target_key'] ?? '');
+    $content = trim($_REQUEST['content'] ?? '');
+
+    if (!in_array($type, ['month', 'date']) || $key === '') {
+        echo json_encode(['success' => false, 'error' => 'パラメータが不正です']);
+        exit;
+    }
+
+    if ($content === '') {
+        $stmt_del = $pdo->prepare("DELETE FROM dashboard_notes WHERE target_type = :type AND target_key = :key");
+        $stmt_del->execute([':type' => $type, ':key' => $key]);
+        echo json_encode(['success' => true, 'action' => 'deleted', 'type' => $type, 'key' => $key]);
+        exit;
+    } else {
+        $stmt_upsert = $pdo->prepare("
+            INSERT INTO dashboard_notes (target_type, target_key, content, updated_at)
+            VALUES (:type, :key, :content, NOW())
+            ON CONFLICT (target_type, target_key) DO UPDATE SET
+                content = EXCLUDED.content,
+                updated_at = NOW()
+        ");
+        $stmt_upsert->execute([':type' => $type, ':key' => $key, ':content' => $content]);
+        echo json_encode(['success' => true, 'action' => 'saved', 'type' => $type, 'key' => $key, 'content' => $content]);
+        exit;
+    }
+}
+
 if (isset($_GET['action']) && $_GET['action'] === 'get_post_detail') {
     header('Content-Type: application/json; charset=utf-8');
     $pid = (int)($_GET['post_id'] ?? 0);
@@ -232,8 +263,11 @@ if (isset($_GET['action']) && $_GET['action'] === 'get_post_detail') {
     exit;
 }
 
-// 4. カレンダー日付パラメータ＆表示モード（デフォルトは週表示）
-$view_mode = (isset($_GET['view']) && $_GET['view'] === 'month') ? 'month' : 'week';
+// 4. カレンダー日付パラメータ＆表示モード（デフォルトは1週表示 'week'、'month'、'2weeks'）
+$view_mode = $_GET['view'] ?? 'week';
+if (!in_array($view_mode, ['month', 'week', '2weeks'])) {
+    $view_mode = 'week';
+}
 
 $year  = isset($_GET['year']) ? (int)$_GET['year'] : (int)date('Y');
 $month = isset($_GET['month']) ? (int)$_GET['month'] : (int)date('n');
@@ -246,18 +280,26 @@ if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $selected_date)) {
     $selected_date = $today_str;
 }
 
-// 週間計算 (月曜始まり 7日間: Mon〜Sun)
+// 週間 / 2週間 計算 (月曜始まり: Mon〜Sun)
 $sel_ts = strtotime($selected_date);
 $dow = (int)date('w', $sel_ts); // 0=Sun, 1=Mon, ..., 6=Sat
 $days_from_mon = ($dow === 0) ? 6 : ($dow - 1);
 $week_monday_ts = strtotime("-{$days_from_mon} days", $sel_ts);
-$week_sunday_ts = strtotime("+6 days", $week_monday_ts);
-$week_start_date = date('Y-m-d', $week_monday_ts);
-$week_end_date   = date('Y-m-d', $week_sunday_ts);
 
-// 週ナビゲーション用リンク日付
-$prev_week_date = date('Y-m-d', strtotime('-7 days', $week_monday_ts));
-$next_week_date = date('Y-m-d', strtotime('+7 days', $week_monday_ts));
+$is_2weeks = ($view_mode === '2weeks');
+$week_count = $is_2weeks ? 2 : 1;
+$total_days = $week_count * 7;
+$period_end_offset = $is_2weeks ? 13 : 6;
+$week_sunday_ts = strtotime("+6 days", $week_monday_ts);
+$period_sunday_ts = strtotime("+{$period_end_offset} days", $week_monday_ts);
+
+$week_start_date = date('Y-m-d', $week_monday_ts);
+$week_end_date   = date('Y-m-d', $period_sunday_ts);
+
+// 週ナビゲーション用リンク日付 (1週なら7日前後、2週なら14日前後)
+$nav_step_days = $is_2weeks ? 14 : 7;
+$prev_week_date = date('Y-m-d', strtotime("-{$nav_step_days} days", $week_monday_ts));
+$next_week_date = date('Y-m-d', strtotime("+{$nav_step_days} days", $week_monday_ts));
 
 // 今日の事務長状態
 $today_status = check_jimucho_calendar($today_str);
@@ -274,6 +316,8 @@ $prev_year  = ($month === 1) ? $year - 1 : $year;
 $prev_month = ($month === 1) ? 12 : $month - 1;
 $next_year  = ($month === 12) ? $year + 1 : $year;
 $next_month = ($month === 12) ? 1 : $month + 1;
+$prev_month_date = sprintf('%04d-%02d-01', $prev_year, $prev_month);
+$next_month_date = sprintf('%04d-%02d-01', $next_year, $next_month);
 
 // 5. 該当月および前後のイベント記事（target_datetime または event_schedules）の取得
 $stmt_events = $pdo->prepare("
@@ -294,7 +338,7 @@ $calendar_start_range = date('Y-m-d 00:00:00', min(
 ));
 $calendar_end_range   = date('Y-m-d 23:59:59', max(
     strtotime('+14 days', strtotime($month_end_date)),
-    strtotime('+7 days', $week_sunday_ts)
+    strtotime('+7 days', $period_sunday_ts)
 ));
 
 $stmt_events->execute([
@@ -411,12 +455,17 @@ foreach ($date_events_map as $d => &$evList) {
 }
 unset($evList);
 
-// 週間カード用の7日間データ生成 (月〜日)
+// 週間 / 2週間 カード用のデータ生成 (月〜日 × 1週または2週)
+$day_count = $is_2weeks ? 14 : 7;
 $week_days = [];
-for ($i = 0; $i < 7; $i++) {
+for ($i = 0; $i < $day_count; $i++) {
     $cur_ts = strtotime("+{$i} days", $week_monday_ts);
     $cur_d_str = date('Y-m-d', $cur_ts);
     $style_info = get_jimucho_cell_style($cur_d_str);
+    
+    // 🌟 公的カレンダー情報（六曜・二十四節気・月の満ち欠け）
+    $traditional_info = get_traditional_calendar_info($cur_d_str);
+
     $week_days[] = [
         'date_str'    => $cur_d_str,
         'ts'          => $cur_ts,
@@ -425,11 +474,98 @@ for ($i = 0; $i < 7; $i++) {
         'dow_text'    => ['日','月','火','水','木','金','土'][(int)date('w', $cur_ts)],
         'style_info'  => $style_info,
         'duty_info'   => $style_info['info'],
+        'traditional' => $traditional_info,
         'events'      => $date_events_map[$cur_d_str] ?? [],
         'is_today'    => ($cur_d_str === $today_str),
         'is_selected' => ($cur_d_str === $selected_date)
     ];
 }
+
+// 週単位グループ化（第1週、第2週）
+$week_groups = [];
+for ($w = 0; $w < $week_count; $w++) {
+    $week_groups[$w] = array_slice($week_days, $w * 7, 7);
+}
+
+// 🌟 Googleカレンダーチャンネル一覧の取得
+$gcal_channels = $pdo->query("SELECT * FROM google_calendar_channels WHERE is_enabled = TRUE ORDER BY display_order ASC, channel_id ASC")->fetchAll(PDO::FETCH_ASSOC);
+
+// 自動同期判定（15分以上経過していればバックグラウンド同期を試行）
+$last_gcal_sync_ts = $pdo->query("SELECT MAX(synced_at) FROM google_calendar_events_cache")->fetchColumn();
+if (!empty($gcal_channels) && (!$last_gcal_sync_ts || (time() - strtotime($last_gcal_sync_ts)) > 900)) {
+    @sync_all_google_calendars($pdo, false);
+}
+
+// キャッシュイベントの取得（月間・週間・2週間の最大範囲をカバー）
+$gcal_query_start = date('Y-m-d', min(strtotime($week_start_date), strtotime(substr($calendar_start_range, 0, 10))));
+$gcal_query_end   = date('Y-m-d', max(strtotime($week_end_date), strtotime(substr($calendar_end_range, 0, 10))));
+$gcal_raw_events  = get_cached_google_events_for_range($pdo, $gcal_query_start, $gcal_query_end);
+
+// イベント分類＆全日マッピング
+$week_span_events = array_fill(0, $week_count, []); // 週ごとの帯イベント
+$gcal_timed_events_by_date = [];                    // 週間用 時間指定イベント
+$gcal_events_by_date = [];                          // 歴月（月間）用 全イベントマッピング
+
+foreach ($gcal_raw_events as $gev) {
+    $ev_start_date = substr($gev['start_datetime'], 0, 10);
+    $ev_end_date   = substr($gev['end_datetime'], 0, 10);
+    $is_all_day    = !empty($gev['is_all_day']);
+    $is_multi_day  = ($ev_start_date !== $ev_end_date);
+
+    // 1. 歴月（月間）カレンダー用マッピング（開始日〜終了日の全日に格納）
+    $cur_loop_ts = strtotime($ev_start_date);
+    $end_loop_ts = strtotime($ev_end_date);
+    // 最大60日間のループリミット（無限ループ防止）
+    $loop_count = 0;
+    while ($cur_loop_ts <= $end_loop_ts && $loop_count < 60) {
+        $d_str = date('Y-m-d', $cur_loop_ts);
+        if (!isset($gcal_events_by_date[$d_str])) {
+            $gcal_events_by_date[$d_str] = [];
+        }
+        $gcal_events_by_date[$d_str][] = $gev;
+        $cur_loop_ts = strtotime('+1 day', $cur_loop_ts);
+        $loop_count++;
+    }
+
+    // 2. 週間/2週間ビュー用
+    if ($is_all_day || $is_multi_day) {
+        // 各週ごとにスパン計算
+        for ($w = 0; $w < $week_count; $w++) {
+            $w_mon_ts = strtotime("+" . ($w * 7) . " days", $week_monday_ts);
+            $start_diff = (int)round((strtotime($ev_start_date) - $w_mon_ts) / 86400);
+            $end_diff   = (int)round((strtotime($ev_end_date) - $w_mon_ts) / 86400);
+
+            $col_start = max(1, $start_diff + 1);
+            $col_end   = min(7, $end_diff + 1);
+
+            if ($col_start <= 7 && $col_end >= 1 && $col_start <= $col_end) {
+                $col_span = $col_end - $col_start + 1;
+                $w_gev = $gev;
+                $w_gev['start_col'] = $col_start;
+                $w_gev['col_span']  = $col_span;
+                $w_gev['is_clipped_start'] = ($start_diff < 0);
+                $w_gev['is_clipped_end']   = ($end_diff > 6);
+                $week_span_events[$w][] = $w_gev;
+            }
+        }
+    } else {
+        // 時間指定（同日）
+        if (!isset($gcal_timed_events_by_date[$ev_start_date])) {
+            $gcal_timed_events_by_date[$ev_start_date] = [];
+        }
+        $gcal_timed_events_by_date[$ev_start_date][] = $gev;
+    }
+}
+
+// 🌟 メモ（月メモ・日メモ）の取得
+$cur_month_key = sprintf('%04d-%02d', $year, $month);
+$stmt_m_note = $pdo->prepare("SELECT content FROM dashboard_notes WHERE target_type = 'month' AND target_key = :k");
+$stmt_m_note->execute([':k' => $cur_month_key]);
+$month_note = $stmt_m_note->fetchColumn() ?: '';
+
+$stmt_d_notes = $pdo->prepare("SELECT target_key, content FROM dashboard_notes WHERE target_type = 'date' AND target_key >= :s AND target_key <= :e");
+$stmt_d_notes->execute([':s' => $gcal_query_start, ':e' => $gcal_query_end]);
+$date_notes_map = $stmt_d_notes->fetchAll(PDO::FETCH_KEY_PAIR); // ['2026-10-08' => 'メモ内容', ...]
 
 // 6. 選択された日のイベント一覧
 $selected_day_events = $date_events_map[$selected_date] ?? [];
@@ -549,6 +685,12 @@ if ($focus_post_id > 0) {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>👔 事務長モード - かわら版</title>
+    <script>
+        // 🗜️ 縦圧縮モードの先行適用（画面チラつき防止）
+        if (localStorage.getItem('jimucho_compact_mode') === '1') {
+            document.documentElement.classList.add('compact-mode');
+        }
+    </script>
     <style>
         :root {
             --primary: #0284c7;
@@ -1187,6 +1329,207 @@ if ($focus_post_id > 0) {
             align-self: flex-start;
             margin-top: 2px;
         }
+
+        /* 🌟 公的カレンダーバッジ群（六曜・二十四節気・月の満ち欠け） */
+        .week-traditional-row {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            flex-wrap: wrap;
+            margin-top: 2px;
+            margin-bottom: 2px;
+        }
+        .trad-badge {
+            font-size: 0.72rem;
+            font-weight: 700;
+            padding: 1px 6px;
+            border-radius: 4px;
+            line-height: 1.3;
+            display: inline-flex;
+            align-items: center;
+            gap: 2px;
+            white-space: nowrap;
+        }
+        .trad-rokuyo.rokuyo-taian {
+            background: #fee2e2;
+            color: #b91c1c;
+            border: 1px solid #fecaca;
+        }
+        .trad-rokuyo.rokuyo-tomobiki {
+            background: #ffedd5;
+            color: #c2410c;
+            border: 1px solid #fed7aa;
+        }
+        .trad-rokuyo.rokuyo-butsumetsu {
+            background: #f1f5f9;
+            color: #64748b;
+            border: 1px solid #cbd5e1;
+        }
+        .trad-rokuyo.rokuyo-default {
+            background: #f8fafc;
+            color: #475569;
+            border: 1px solid #e2e8f0;
+        }
+        .trad-solar {
+            background: #ecfdf5;
+            color: #047857;
+            border: 1px solid #a7f3d0;
+            font-weight: 800;
+        }
+        .trad-moon {
+            background: #fefce8;
+            color: #a16207;
+            border: 1px solid #fef08a;
+            font-weight: 800;
+        }
+        .trad-moon-mini {
+            font-size: 0.72rem;
+            color: #64748b;
+            display: inline-flex;
+            align-items: center;
+            gap: 2px;
+            opacity: 0.85;
+        }
+
+        /* 🌟 Googleカレンダー用スタイル */
+        .btn-gcal-sync {
+            background: #1a73e8;
+            color: #fff;
+            border: none;
+            padding: 6px 14px;
+            border-radius: 6px;
+            font-size: 0.84rem;
+            font-weight: bold;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.2s;
+        }
+        .btn-gcal-sync:hover { background: #1557b0; }
+        .btn-gcal-sync:disabled { opacity: 0.6; cursor: not-allowed; }
+
+        .gcal-toggle-bar {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: #ffffff;
+            border: 1px solid var(--border);
+            padding: 8px 16px;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+            flex-wrap: wrap;
+        }
+        .gcal-toggle-label {
+            font-size: 0.82rem;
+            font-weight: 800;
+            color: #475569;
+        }
+        .gcal-toggle-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        .gcal-toggle-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 10px;
+            border-radius: 20px;
+            border: 1px solid var(--border-dark);
+            background: #f8fafc;
+            font-size: 0.8rem;
+            font-weight: 700;
+            color: #334155;
+            cursor: pointer;
+            user-select: none;
+            transition: all 0.15s;
+        }
+        .gcal-toggle-pill:hover { background: #f1f5f9; }
+        .gcal-toggle-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+        .gcal-toggle-acct {
+            font-size: 0.72rem;
+            color: #64748b;
+        }
+
+        /* 終日・複数日 帯レーン */
+        .week-span-container {
+            background: #ffffff;
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 10px 12px;
+            box-shadow: var(--shadow);
+        }
+        .week-span-grid {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            gap: 8px 12px;
+            grid-auto-flow: row dense;
+        }
+        .week-span-bar {
+            color: #ffffff;
+            border-radius: 5px;
+            padding: 4px 8px;
+            font-size: 0.8rem;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            cursor: pointer;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.12);
+            transition: transform 0.15s, opacity 0.15s;
+            overflow: hidden;
+            white-space: nowrap;
+            text-overflow: ellipsis;
+        }
+        .week-span-bar:hover {
+            transform: translateY(-1px);
+            opacity: 0.95;
+            box-shadow: 0 3px 6px rgba(0,0,0,0.18);
+        }
+        .span-icon { font-size: 0.85rem; flex-shrink: 0; }
+        .span-title {
+            flex: 1;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .span-cal-badge {
+            font-size: 0.68rem;
+            background: rgba(0,0,0,0.22);
+            padding: 1px 5px;
+            border-radius: 3px;
+            flex-shrink: 0;
+        }
+
+        /* 時間指定Google予定カード */
+        .week-gcal-card {
+            background: #ffffff;
+            border: 1px solid #cbd5e1;
+            border-left-width: 4px;
+        }
+        .week-gcal-card:hover {
+            border-color: #94a3b8;
+        }
+        .gcal-cal-tag {
+            color: #ffffff;
+            font-size: 0.65rem;
+            font-weight: 800;
+            padding: 1px 6px;
+            border-radius: 3px;
+            flex-shrink: 0;
+            max-width: 90px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
         .empty-day-placeholder {
             flex: 1;
             display: flex;
@@ -1198,6 +1541,200 @@ if ($focus_post_id > 0) {
             font-weight: 600;
             padding: 30px 10px;
             gap: 6px;
+        }
+
+        /* 🌟 月メモ・日メモ スタイル */
+        .month-note-banner {
+            background: #fffbeb;
+            border: 1px solid #fef08a;
+            border-left: 5px solid #f59e0b;
+            border-radius: 8px;
+            padding: 10px 14px;
+            margin-bottom: 12px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .month-note-banner:hover {
+            background: #fefce8;
+            border-color: #f59e0b;
+        }
+        .month-note-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+        }
+        .month-note-title {
+            font-size: 0.88rem;
+            font-weight: 800;
+            color: #92400e;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .month-note-body {
+            margin-top: 4px;
+        }
+        .month-note-text {
+            font-size: 0.92rem;
+            font-weight: 700;
+            color: #1e293b;
+            line-height: 1.45;
+        }
+        .month-note-placeholder {
+            font-size: 0.82rem;
+            color: #b45309;
+            opacity: 0.85;
+            font-weight: 600;
+        }
+        .btn-note-edit {
+            background: #ffffff;
+            border: 1px solid #fde68a;
+            color: #b45309;
+            font-size: 0.74rem;
+            font-weight: 700;
+            padding: 2px 8px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .btn-note-edit:hover {
+            background: #f59e0b;
+            color: #ffffff;
+            border-color: #f59e0b;
+        }
+
+        /* 歴月カレンダー用 日メモ */
+        .cal-note-pill {
+            background: #fef3c7;
+            border: 1px solid #fde68a;
+            color: #92400e;
+            border-radius: 4px;
+            padding: 2px 6px;
+            font-size: 0.72rem;
+            font-weight: 700;
+            margin-top: 3px;
+            cursor: pointer;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            display: flex;
+            align-items: center;
+            gap: 3px;
+            transition: all 0.15s;
+        }
+        .cal-note-pill:hover {
+            background: #fde68a;
+            transform: translateY(-1px);
+        }
+        .btn-day-note-add {
+            background: none;
+            border: none;
+            font-size: 0.82rem;
+            cursor: pointer;
+            padding: 1px 3px;
+            border-radius: 3px;
+            opacity: 0.45;
+            transition: all 0.15s;
+            line-height: 1;
+        }
+        .btn-day-note-add:hover {
+            opacity: 1;
+            background: #fef3c7;
+            transform: scale(1.15);
+        }
+
+        /* 週間／2週間用 日メモボタン＆カード */
+        .week-btn-note {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            background: #f8fafc;
+            color: #64748b;
+            font-size: 0.85rem;
+            cursor: pointer;
+            border: 1px solid #e2e8f0;
+            transition: all 0.15s;
+            line-height: 1;
+        }
+        .week-btn-note:hover {
+            background: #fef3c7;
+            color: #b45309;
+            border-color: #fde68a;
+            transform: scale(1.1);
+        }
+        .week-btn-note.has-note {
+            background: #fef3c7;
+            color: #b45309;
+            border-color: #fde68a;
+            font-weight: bold;
+        }
+        .week-note-card {
+            background: #fffbeb;
+            border: 1px solid #fef08a;
+            border-left: 4px solid #f59e0b;
+            border-radius: 6px;
+            padding: 6px 8px;
+            font-size: 0.78rem;
+            color: #78350f;
+            cursor: pointer;
+            display: flex;
+            align-items: flex-start;
+            gap: 4px;
+            line-height: 1.35;
+            margin-bottom: 4px;
+            font-weight: 600;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.03);
+            transition: all 0.15s;
+        }
+        .week-note-card:hover {
+            background: #fefce8;
+            border-color: #f59e0b;
+            transform: translateY(-1px);
+        }
+
+        /* 歴月カレンダー用 Google予定ピル */
+        .cal-event-pill-gcal {
+            background: #ffffff;
+            border: 1px solid #e2e8f0;
+            border-left: 3px solid #1a73e8;
+            border-radius: 4px;
+            padding: 2px 5px;
+            font-size: 0.72rem;
+            display: flex;
+            align-items: center;
+            gap: 3px;
+            cursor: pointer;
+            margin-top: 2px;
+            overflow: hidden;
+            white-space: nowrap;
+            text-overflow: ellipsis;
+            transition: all 0.15s;
+        }
+        .cal-event-pill-gcal:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 2px 5px rgba(0,0,0,0.08);
+            border-color: #cbd5e1;
+        }
+
+        /* 2週間表示ブロック見出し */
+        .week-block-header {
+            background: #f1f5f9;
+            border: 1px solid #cbd5e1;
+            color: #334155;
+            font-weight: 800;
+            font-size: 0.92rem;
+            padding: 8px 14px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-top: 6px;
+            margin-bottom: 2px;
         }
 
         /* スロット一覧テーブル */
@@ -1507,6 +2044,350 @@ if ($focus_post_id > 0) {
             gap: 10px;
             animation: slide-in 0.3s ease;
         }
+        /* ========================================================
+           🗜️ 縦圧縮モード（Compact / Dense Mode）
+           縦方向の余白・パディング・高さを極限まで圧縮し、1画面内に多くの情報を表示
+           ======================================================== */
+        .compact-mode .top-navbar {
+            padding: 4px 16px;
+            min-height: 36px;
+        }
+        .compact-mode .brand-title {
+            font-size: 0.95rem;
+        }
+        .compact-mode .btn-switch-timeline {
+            padding: 3px 10px;
+            font-size: 0.78rem;
+        }
+
+        /* ステータスアラートバーを1行極薄化 */
+        .compact-mode .status-alert-bar {
+            padding: 3px 16px;
+            font-size: 0.78rem;
+            min-height: 24px;
+        }
+
+        /* クイックツールバー圧縮 */
+        .compact-mode .quick-toolbar {
+            padding: 3px 14px;
+            gap: 6px;
+        }
+        .compact-mode .view-switcher {
+            padding: 2px;
+        }
+        .compact-mode .view-switch-btn {
+            padding: 3px 8px;
+            font-size: 0.78rem;
+            gap: 4px;
+        }
+        .compact-mode .tool-btn {
+            padding: 3px 8px;
+            font-size: 0.76rem;
+            gap: 4px;
+        }
+
+        /* 週間・2週間ラッパー圧縮 */
+        .compact-mode .week-view-wrapper {
+            padding: 6px 12px;
+            gap: 6px;
+        }
+
+        /* ナビゲーションバー圧縮 */
+        .compact-mode .week-navbar {
+            padding: 4px 12px;
+            gap: 6px;
+            border-radius: 6px;
+        }
+        .compact-mode .week-nav-title {
+            font-size: 0.95rem;
+        }
+        .compact-mode .cal-nav-btn {
+            padding: 3px 8px;
+            font-size: 0.76rem;
+        }
+        .compact-mode .btn-gcal-sync {
+            padding: 3px 8px;
+            font-size: 0.75rem;
+            gap: 4px;
+        }
+
+        /* 月メモバナーを極薄1行バナー化 */
+        .compact-mode .month-note-banner {
+            padding: 3px 10px;
+            margin-bottom: 4px;
+            border-left-width: 3px;
+            border-radius: 5px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+        }
+        .compact-mode .month-note-header {
+            display: inline-flex;
+            flex-shrink: 0;
+            gap: 4px;
+        }
+        .compact-mode .month-note-title {
+            font-size: 0.78rem;
+            white-space: nowrap;
+        }
+        .compact-mode .month-note-body {
+            margin-top: 0;
+            flex: 1;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .compact-mode .month-note-text {
+            font-size: 0.8rem;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            line-height: 1.2;
+        }
+        .compact-mode .month-note-placeholder {
+            font-size: 0.76rem;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .compact-mode .btn-note-edit {
+            padding: 1px 6px;
+            font-size: 0.68rem;
+            flex-shrink: 0;
+        }
+
+        /* Googleカレンダー表示トグルバー圧縮 */
+        .compact-mode .gcal-toggle-bar {
+            padding: 3px 10px;
+            gap: 6px;
+            margin-bottom: 4px;
+            border-radius: 6px;
+            font-size: 0.74rem;
+        }
+        .compact-mode .gcal-toggle-label {
+            font-size: 0.72rem;
+        }
+        .compact-mode .gcal-toggle-pill {
+            padding: 1px 6px;
+            font-size: 0.7rem;
+            gap: 4px;
+        }
+        .compact-mode .gcal-toggle-dot {
+            width: 7px;
+            height: 7px;
+        }
+
+        /* 帯レーン圧縮 */
+        .compact-mode .week-span-container {
+            padding: 3px 8px;
+            border-radius: 6px;
+            margin-bottom: 2px;
+        }
+        .compact-mode .week-span-grid {
+            gap: 3px 8px;
+        }
+        .compact-mode .week-span-bar {
+            padding: 1px 6px;
+            font-size: 0.72rem;
+            border-radius: 3px;
+        }
+
+        /* 2週間見出しブロック圧縮 */
+        .compact-mode .week-block-header {
+            padding: 3px 10px;
+            font-size: 0.8rem;
+            margin-top: 4px;
+            margin-bottom: 2px;
+            border-radius: 6px;
+        }
+
+        /* 7列カードグリッド圧縮 */
+        .compact-mode .week-grid-7cols {
+            gap: 6px;
+        }
+        .compact-mode .week-day-col {
+            min-height: 180px !important;
+            border-radius: 6px;
+        }
+
+        /* 日ヘッダー圧縮 */
+        .compact-mode .week-day-header {
+            padding: 3px 6px;
+            gap: 2px;
+        }
+        .compact-mode .week-day-date {
+            font-size: 0.86rem;
+            gap: 4px;
+        }
+        .compact-mode .badge-today {
+            font-size: 0.6rem;
+            padding: 0 4px;
+        }
+        .compact-mode .week-btn-add,
+        .compact-mode .week-btn-note {
+            width: 19px;
+            height: 19px;
+            font-size: 0.72rem;
+        }
+        .compact-mode .week-traditional-row {
+            margin: 1px 0;
+            gap: 2px;
+        }
+        .compact-mode .trad-badge {
+            font-size: 0.65rem;
+            padding: 0px 4px;
+            line-height: 1.2;
+        }
+        .compact-mode .trad-moon-mini {
+            font-size: 0.65rem;
+        }
+        .compact-mode .badge-duty {
+            font-size: 0.62rem;
+            padding: 0px 3px;
+            line-height: 1.2;
+        }
+
+        /* 日ボディ圧縮 */
+        .compact-mode .week-day-body {
+            padding: 4px;
+            gap: 3px;
+        }
+        .compact-mode .week-note-card {
+            padding: 2px 5px;
+            font-size: 0.72rem;
+            margin-bottom: 2px;
+            line-height: 1.2;
+            border-left-width: 3px;
+            border-radius: 4px;
+        }
+
+        /* イベントカード圧縮 */
+        .compact-mode .week-event-card {
+            padding: 3px 6px;
+            gap: 2px;
+            border-radius: 4px;
+            border-left-width: 3px;
+        }
+        .compact-mode .wec-header {
+            font-size: 0.70rem;
+        }
+        .compact-mode .wec-time {
+            font-size: 0.70rem;
+        }
+        .compact-mode .wec-title {
+            font-size: 0.76rem;
+            line-height: 1.2;
+            margin-top: 1px;
+        }
+        .compact-mode .wec-loc,
+        .compact-mode .wec-memo {
+            font-size: 0.66rem;
+            padding: 1px 3px;
+            line-height: 1.15;
+        }
+        .compact-mode .wec-slot-badge,
+        .compact-mode .wec-badge-cont {
+            font-size: 0.58rem;
+            padding: 0 3px;
+        }
+        .compact-mode .wec-warn-pill {
+            font-size: 0.62rem;
+            padding: 0 4px;
+        }
+        .compact-mode .gcal-cal-tag {
+            font-size: 0.58rem;
+            padding: 0 4px;
+        }
+        .compact-mode .empty-day-placeholder {
+            padding: 6px 2px;
+            font-size: 0.7rem;
+            gap: 2px;
+        }
+        .compact-mode .empty-day-placeholder span:first-child {
+            display: none;
+        }
+
+        /* 月間カレンダー圧縮 */
+        .compact-mode .dashboard-body {
+            padding: 6px 12px;
+            gap: 8px;
+        }
+        .compact-mode .calendar-card {
+            padding: 8px;
+            border-radius: 8px;
+        }
+        .compact-mode .calendar-header {
+            padding: 4px 8px;
+            margin-bottom: 4px;
+        }
+        .compact-mode .cal-title {
+            font-size: 0.95rem;
+        }
+        .compact-mode .cal-th {
+            padding: 2px;
+            font-size: 0.72rem;
+        }
+        .compact-mode .cal-grid {
+            gap: 2px;
+        }
+        .compact-mode .cal-day-cell {
+            min-height: 60px;
+            padding: 2px 4px;
+            border-radius: 4px;
+        }
+        .compact-mode .cal-day-header {
+            margin-bottom: 1px;
+        }
+        .compact-mode .cal-day-num {
+            font-size: 0.8rem;
+        }
+        .compact-mode .cal-events-list {
+            gap: 1px;
+        }
+        .compact-mode .cal-event-pill,
+        .compact-mode .cal-event-pill-gcal {
+            font-size: 0.62rem;
+            padding: 1px 3px;
+            border-radius: 2px;
+            border-left-width: 2px;
+            line-height: 1.15;
+            margin-top: 1px;
+        }
+        .compact-mode .cal-note-pill {
+            font-size: 0.62rem;
+            padding: 1px 3px;
+            border-radius: 2px;
+            margin-top: 1px;
+            line-height: 1.15;
+        }
+        .compact-mode .panel-header-box {
+            padding: 8px 14px;
+        }
+        .compact-mode .panel-date-title {
+            font-size: 0.95rem;
+        }
+        .compact-mode .panel-tabs {
+            padding: 0 10px;
+        }
+        .compact-mode .panel-tab {
+            padding: 6px 12px;
+            font-size: 0.8rem;
+        }
+        .compact-mode .event-detail-item {
+            padding: 6px 10px;
+            margin-bottom: 6px;
+        }
+
+        /* 🗜️ 縦圧縮ボタンのアクティブ状態 */
+        .tool-btn.btn-compact-active {
+            background: #fef3c7 !important;
+            color: #92400e !important;
+            border-color: #f59e0b !important;
+            font-weight: 800 !important;
+            box-shadow: 0 0 0 1px #f59e0b;
+        }
+
         /* 📱 スマホ最適化レスポンシブスタイル */
         @media (max-width: 768px) {
             .top-navbar { padding: 8px 12px !important; }
@@ -1540,6 +2421,9 @@ if ($focus_post_id > 0) {
         <span style="font-size:0.84rem; color:#cbd5e1;">
             👤 <b><?= htmlspecialchars($current_user['staff_name']) ?></b>
         </span>
+        <a href="master_mente.php" class="btn-switch-timeline" style="padding:5px 12px; font-size:0.8rem;" title="システムマスタ管理（スタッフ・Googleカレンダー連携設定）">
+            ⚙️ マスタ管理
+        </a>
         <a href="index.php" class="btn-switch-timeline" style="padding:5px 12px; font-size:0.8rem;">
             📜 かわら版
         </a>
@@ -1583,163 +2467,407 @@ if ($today_status['is_pre_off_day']) {
         <a href="?view=week&date=<?= $selected_date ?>" class="view-switch-btn <?= $view_mode === 'week' ? 'active' : '' ?>">
             📆 1週間カード
         </a>
+        <a href="?view=2weeks&date=<?= $selected_date ?>" class="view-switch-btn <?= $view_mode === '2weeks' ? 'active' : '' ?>">
+            🗓️ 2週間カード
+        </a>
     </div>
+
+    <!-- 🗜️ 縦圧縮モード切替ボタン -->
+    <button type="button" class="tool-btn" id="btnToggleCompact" onclick="toggleCompactMode()" title="縦の余白・パディングを極限まで圧縮し、1画面内に多くの情報を表示します">
+        🗜️ 縦圧縮
+    </button>
 
     <div style="height:24px; width:1px; background:#cbd5e1; margin:0 4px;"></div>
 
-    <a href="create_post.php" class="tool-btn tool-btn-primary">
+    <a href="create_post.php?return_to=jimucho" class="tool-btn tool-btn-primary">
         ➕ 予定・工事の登録
     </a>
     <button type="button" class="tool-btn tool-btn-warning" onclick="openAbsenceSummaryModal()">
         📄 不在期間まとめ印刷（伝達シート）
     </button>
     <button type="button" class="tool-btn" onclick="openPrinterSettingsModal()">
-        ⚙️ 部署別プリンタ設定
+        🖨️ 部署別プリンタ設定
     </button>
     <a href="safety_contacts.php" class="tool-btn">
         🚨 安否確認・緊急連絡網
     </a>
+    <a href="master_mente.php" class="tool-btn" title="システムマスタ管理（スタッフ・Googleカレンダー連携設定）">
+        ⚙️ マスタ管理
+    </a>
 </div>
 
-<?php if ($view_mode === 'week'): ?>
-<!-- 4. メインコンテナ（1週間カード表示: 7列全幅グリッド） -->
+<?php if ($view_mode === 'week' || $view_mode === '2weeks'): ?>
+<!-- 4. メインコンテナ（1週間 / 2週間カード表示: 7列全幅グリッド） -->
 <div class="week-view-wrapper">
     <!-- 週間ナビゲーションバー -->
     <div class="week-navbar">
-        <div style="display:flex; align-items:center; gap:10px;">
-            <a href="?view=week&date=<?= $prev_week_date ?>" class="cal-nav-btn">
-                ◀ 前週
+        <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+            <a href="?view=<?= $view_mode ?>&date=<?= $prev_week_date ?>" class="cal-nav-btn">
+                ◀ <?= $is_2weeks ? '前2週' : '前週' ?>
             </a>
             <div class="week-nav-title">
-                📆 <?= date('Y年n月j日', $week_monday_ts) ?>(月) 〜 <?= date('n月j日', $week_sunday_ts) ?>(日)
+                📆 <?= date('Y年n月j日', $week_monday_ts) ?>(月) 〜 <?= date('n月j日', $period_sunday_ts) ?>(日)
+                <?php if ($is_2weeks): ?>
+                    <span style="font-size:0.82rem; color:#2563eb; background:#dbeafe; padding:2px 8px; border-radius:12px; margin-left:6px; font-weight:800;">🗓️ 2週間カード表示</span>
+                <?php endif; ?>
             </div>
-            <a href="?view=week&date=<?= $next_week_date ?>" class="cal-nav-btn">
-                翌週 ▶
+            <a href="?view=<?= $view_mode ?>&date=<?= $next_week_date ?>" class="cal-nav-btn">
+                <?= $is_2weeks ? '翌2週' : '翌週' ?> ▶
             </a>
-            <a href="?view=week&date=<?= $today_str ?>" class="cal-nav-btn" style="background:#e0f2fe; color:#0369a1; margin-left:6px;">
+            <a href="?view=<?= $view_mode ?>&date=<?= $today_str ?>" class="cal-nav-btn" style="background:#e0f2fe; color:#0369a1; margin-left:6px;">
                 今週へ
             </a>
+
+            <?php if (!empty($gcal_channels)): ?>
+                <!-- Google手動同期ボタン -->
+                <button type="button" class="btn-gcal-sync" id="btnGcalSync" onclick="syncGoogleCalendar()">
+                    <span id="gcalSyncIcon">🔄</span> Google同期
+                </button>
+            <?php endif; ?>
         </div>
-        <div style="font-size:0.85rem; color:#64748b; font-weight:600;">
-            💡 各カードをクリックすると【全日程一覧・部署別既読・PowerShell排紙】が開きます
+        <div style="font-size:0.82rem; color:#64748b; font-weight:600;">
+            💡 各カードをクリックすると詳細表示・部署別既読が開きます
         </div>
     </div>
 
-    <!-- 7列カードグリッド (月曜〜日曜) -->
-    <div class="week-grid-7cols">
-        <?php foreach ($week_days as $wd): 
-            $duty = $wd['duty_info'];
-            $has_absence_warn = ($duty['is_closed'] && count($wd['events']) > 0);
-        ?>
-            <div class="week-day-col <?= $wd['is_today'] ? 'is-today' : '' ?>">
-                <!-- カラムヘッダー -->
-                <div class="week-day-header">
-                    <div class="week-day-header-top">
-                        <div class="week-day-date">
-                            <span><?= $wd['month_num'] ?>/<?= $wd['day_num'] ?></span>
-                            <span style="font-size:0.85rem; color:<?= (int)date('w', $wd['ts']) === 0 ? '#dc2626' : ((int)date('w', $wd['ts']) === 4 ? '#0284c7' : ((int)date('w', $wd['ts']) === 6 ? '#7c3aed' : '#334155')) ?>;">(<?= $wd['dow_text'] ?>)</span>
-                            <?php if ($wd['is_today']): ?>
-                                <span class="badge-today">今日</span>
-                            <?php endif; ?>
-                        </div>
-                        <a href="create_post.php?date=<?= $wd['date_str'] ?>" class="week-btn-add" title="この日に新しい予定・工事を登録">
-                            ＋
-                        </a>
-                    </div>
-                    <div class="week-day-badges">
-                        <span class="badge-duty badge-duty-<?= $duty['badge_type'] ?>">
-                            <?= htmlspecialchars($duty['badge_label']) ?>
-                        </span>
-                        <?php if ($duty['is_pre_off_day']): ?>
-                            <span class="badge-duty" style="background:#fef3c7; color:#b45309; border:1px solid #fde68a;">
-                                🔔 不在前日
-                            </span>
-                        <?php endif; ?>
-                        <?php if ($has_absence_warn): ?>
-                            <span class="badge-duty" style="background:#fee2e2; color:#b91c1c; border:1px solid #fecaca;">
-                                ⚠️ 不在日作業
-                            </span>
-                        <?php endif; ?>
-                    </div>
-                </div>
+    <!-- 📌 今月の重点目標・重要メモ（週間／2週間表示共通） -->
+    <div class="month-note-banner" 
+         data-note-type="month"
+         data-note-key="<?= htmlspecialchars($cur_month_key, ENT_QUOTES) ?>"
+         data-note-content="<?= htmlspecialchars($month_note ?? '', ENT_QUOTES) ?>"
+         data-note-label="<?= htmlspecialchars("{$year}年{$month}月", ENT_QUOTES) ?>"
+         onclick="openNoteModal(this, null, null, null, event)">
+        <div class="month-note-header">
+            <span class="month-note-title">
+                <span>📌</span> <?= $year ?>年<?= $month ?>月の重点目標・重要メモ
+            </span>
+            <button type="button" class="btn-note-edit" 
+                    data-note-type="month"
+                    data-note-key="<?= htmlspecialchars($cur_month_key, ENT_QUOTES) ?>"
+                    data-note-content="<?= htmlspecialchars($month_note ?? '', ENT_QUOTES) ?>"
+                    data-note-label="<?= htmlspecialchars("{$year}年{$month}月", ENT_QUOTES) ?>"
+                    onclick="event.stopPropagation(); openNoteModal(this, null, null, null, event);">
+                ✏️ 編集
+            </button>
+        </div>
+        <div class="month-note-body">
+            <?php if (!empty($month_note)): ?>
+                <div class="month-note-text"><?= nl2br(htmlspecialchars($month_note)) ?></div>
+            <?php else: ?>
+                <div class="month-note-placeholder">＋ 今月の重点目標・重要メモを追加（例：10月内視鏡システム最終レビュー、ISO更新審査対応）</div>
+            <?php endif; ?>
+        </div>
+    </div>
 
-                <!-- イベント一覧リスト -->
-                <div class="week-day-body">
-                    <?php if (empty($wd['events'])): ?>
-                        <div class="empty-day-placeholder">
-                            <span style="font-size:1.4rem; opacity:0.35;">☕</span>
-                            <span>予定なし</span>
-                        </div>
-                    <?php else: ?>
-                        <?php foreach ($wd['events'] as $ev): ?>
-                            <?php if ($ev['is_continuation']): ?>
-                                <!-- 2回目以降の日程：(続) カード -->
-                                <div class="week-event-card week-event-card-continuation" onclick="openEventDetailModal(<?= $ev['post_id'] ?>, '<?= $wd['date_str'] ?>')">
-                                    <div class="wec-header">
-                                        <span class="wec-badge-cont">続</span>
-                                        <span class="wec-time"><?= $ev['start_time'] ?><?= !empty($ev['end_time']) ? '〜' . $ev['end_time'] : '' ?></span>
-                                    </div>
-                                    <div class="wec-title">
-                                        <?= htmlspecialchars($ev['title']) ?>
-                                        <span class="wec-slot-badge"><?= $ev['slot_badge'] ?></span>
-                                    </div>
-                                    <?php if (!empty($ev['location'])): ?>
-                                        <div class="wec-loc">📍 <?= htmlspecialchars($ev['location']) ?></div>
-                                    <?php endif; ?>
-                                    <?php if (!empty($ev['memo'])): ?>
-                                        <div class="wec-memo">📝 <?= htmlspecialchars($ev['memo']) ?></div>
-                                    <?php endif; ?>
-                                    <?php if ($duty['is_closed']): ?>
-                                        <div class="wec-warn-pill">⚠️ 不在日作業</div>
-                                    <?php endif; ?>
-                                </div>
-                            <?php else: ?>
-                                <!-- 初日または単一日程：メインカード -->
-                                <div class="week-event-card" onclick="openEventDetailModal(<?= $ev['post_id'] ?>, '<?= $wd['date_str'] ?>')">
-                                    <div class="wec-header">
-                                        <span style="font-size:1.05rem;"><?= htmlspecialchars($ev['icon']) ?></span>
-                                        <span class="wec-time"><?= $ev['start_time'] ?><?= !empty($ev['end_time']) ? '〜' . $ev['end_time'] : '' ?></span>
-                                    </div>
-                                    <div class="wec-title"><?= htmlspecialchars($ev['title']) ?></div>
-                                    <?php if (!empty($ev['location'])): ?>
-                                        <div class="wec-loc">📍 <?= htmlspecialchars($ev['location']) ?></div>
-                                    <?php endif; ?>
-                                    <?php if (!empty($ev['memo'])): ?>
-                                        <div class="wec-memo">📝 <?= htmlspecialchars($ev['memo']) ?></div>
-                                    <?php endif; ?>
-                                    <?php if ($ev['total_slots'] > 1): ?>
-                                        <div class="wec-slot-badge">全<?= $ev['total_slots'] ?>日程 (第1回)</div>
-                                    <?php endif; ?>
-                                    <?php if ($duty['is_closed']): ?>
-                                        <div class="wec-warn-pill">⚠️ 不在日作業</div>
-                                    <?php endif; ?>
-                                </div>
-                            <?php endif; ?>
-                        <?php endforeach; ?>
+    <?php if (!empty($gcal_channels)): ?>
+    <!-- Googleカレンダー表示切り替えバー -->
+    <div class="gcal-toggle-bar">
+        <span class="gcal-toggle-label">📅 Googleカレンダー表示:</span>
+        <div class="gcal-toggle-group">
+            <?php foreach ($gcal_channels as $ch): ?>
+                <label class="gcal-toggle-pill" style="--pill-color: <?= htmlspecialchars($ch['color_theme']) ?>;">
+                    <input type="checkbox" class="gcal-channel-chk" data-channel-id="<?= $ch['channel_id'] ?>" checked onchange="toggleGcalChannel(<?= $ch['channel_id'] ?>, this.checked)">
+                    <span class="gcal-toggle-dot" style="background: <?= htmlspecialchars($ch['color_theme']) ?>;"></span>
+                    <span class="gcal-toggle-name"><?= htmlspecialchars($ch['calendar_name']) ?></span>
+                    <?php if (!empty($ch['account_name'])): ?>
+                        <span class="gcal-toggle-acct">(<?= htmlspecialchars($ch['account_name']) ?>)</span>
                     <?php endif; ?>
-                </div>
-            </div>
-        <?php endforeach; ?>
+                </label>
+            <?php endforeach; ?>
+        </div>
+        <a href="master_mente.php?tab=gcal" style="font-size:0.76rem; color:#2563eb; text-decoration:none; margin-left:auto; display:inline-flex; align-items:center; gap:4px; font-weight:700;">
+            ⚙️ カレンダー管理
+        </a>
     </div>
+    <?php endif; ?>
+
+    <!-- 週グループ展開（1週モードなら1週、2週モードなら2週連続描画） -->
+    <?php foreach ($week_groups as $w_idx => $w_days): 
+        $w_span_events = $week_span_events[$w_idx] ?? [];
+    ?>
+        <?php if ($is_2weeks): ?>
+            <div class="week-block-header">
+                <span>🗓️ 第<?= $w_idx + 1 ?>週：<?= date('Y/n/j', $w_days[0]['ts']) ?>(月) 〜 <?= date('n/j', $w_days[6]['ts']) ?>(日)</span>
+                <span style="font-size:0.78rem; font-weight:normal; color:#64748b;">7日間</span>
+            </div>
+        <?php endif; ?>
+
+        <?php if (!empty($w_span_events)): ?>
+        <!-- 🌟 Googleカレンダー 終日・複数日 帯レーン -->
+        <div class="week-span-container">
+            <div class="week-span-grid">
+                <?php foreach ($w_span_events as $gev): ?>
+                    <div class="week-span-bar gcal-item gcal-ch-<?= $gev['channel_id'] ?>"
+                         style="grid-column: <?= $gev['start_col'] ?> / span <?= $gev['col_span'] ?>; background-color: <?= htmlspecialchars($gev['color_theme']) ?>;"
+                         onclick='openGcalDetailModal(<?= json_encode($gev, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP) ?>)'
+                         title="<?= htmlspecialchars($gev['title']) ?> (<?= htmlspecialchars($gev['calendar_name']) ?>)">
+                        <span class="span-icon">🗓️</span>
+                        <span class="span-title"><?= htmlspecialchars($gev['title']) ?></span>
+                        <span class="span-cal-badge"><?= htmlspecialchars($gev['calendar_name']) ?></span>
+                    </div>
+                <?php endforeach; ?>
+            </div>
+        </div>
+        <?php endif; ?>
+
+        <!-- 7列カードグリッド (月曜〜日曜) -->
+        <div class="week-grid-7cols">
+            <?php foreach ($w_days as $wd): 
+                $duty = $wd['duty_info'];
+                $has_absence_warn = ($duty['is_closed'] && count($wd['events']) > 0);
+                $cur_day_note = $date_notes_map[$wd['date_str']] ?? '';
+            ?>
+                <div class="week-day-col <?= $wd['is_today'] ? 'is-today' : '' ?>">
+                    <!-- カラムヘッダー -->
+                    <div class="week-day-header">
+                        <div class="week-day-header-top">
+                            <div class="week-day-date">
+                                <span><?= $wd['month_num'] ?>/<?= $wd['day_num'] ?></span>
+                                <span style="font-size:0.85rem; color:<?= (int)date('w', $wd['ts']) === 0 ? '#dc2626' : ((int)date('w', $wd['ts']) === 4 ? '#0284c7' : ((int)date('w', $wd['ts']) === 6 ? '#7c3aed' : '#334155')) ?>;">(<?= $wd['dow_text'] ?>)</span>
+                                <?php if ($wd['is_today']): ?>
+                                    <span class="badge-today">今日</span>
+                                <?php endif; ?>
+                            </div>
+                            <div style="display:flex; align-items:center; gap:4px;">
+                                <button type="button" 
+                                        class="week-btn-note <?= !empty($cur_day_note) ? 'has-note' : '' ?>" 
+                                        title="この日のメモを入力・編集"
+                                        data-note-type="date"
+                                        data-note-key="<?= htmlspecialchars($wd['date_str'], ENT_QUOTES) ?>"
+                                        data-note-content="<?= htmlspecialchars($cur_day_note ?? '', ENT_QUOTES) ?>"
+                                        data-note-label="<?= htmlspecialchars($wd['date_str'], ENT_QUOTES) ?>"
+                                        onclick="openNoteModal(this, null, null, null, event);">
+                                    📝
+                                </button>
+                                <a href="create_post.php?date=<?= $wd['date_str'] ?>&return_to=jimucho" class="week-btn-add" title="この日に新しい予定・工事を登録">
+                                    ＋
+                                </a>
+                            </div>
+                        </div>
+
+                        <!-- 🌟 公的カレンダーバッジ群（六曜・二十四節気・月の満ち欠け） -->
+                        <?php 
+                            $trad = $wd['traditional'] ?? null;
+                            if ($trad):
+                                $rokuyo = $trad['rokuyo'];
+                                $r_class = 'rokuyo-default';
+                                if ($rokuyo === '大安') $r_class = 'rokuyo-taian';
+                                elseif ($rokuyo === '友引') $r_class = 'rokuyo-tomobiki';
+                                elseif ($rokuyo === '仏滅') $r_class = 'rokuyo-butsumetsu';
+                        ?>
+                            <div class="week-traditional-row">
+                                <span class="trad-badge trad-rokuyo <?= $r_class ?>" title="六曜: <?= htmlspecialchars($rokuyo) ?>">
+                                    <?= htmlspecialchars($rokuyo) ?>
+                                </span>
+
+                                <?php if (!empty($trad['solar_term'])): ?>
+                                    <span class="trad-badge trad-solar" title="二十四節気: <?= htmlspecialchars($trad['solar_term']) ?>">
+                                        🌿 <?= htmlspecialchars($trad['solar_term']) ?>
+                                    </span>
+                                <?php endif; ?>
+
+                                <?php if (!empty($trad['moon_phase_name'])): ?>
+                                    <span class="trad-badge trad-moon" title="<?= htmlspecialchars($trad['moon_phase_name']) ?> (月齢 <?= $trad['moon_age'] ?>)">
+                                        <?= $trad['moon_phase_emoji'] ?> <?= htmlspecialchars($trad['moon_phase_name']) ?>
+                                    </span>
+                                <?php else: ?>
+                                    <span class="trad-moon-mini" title="月齢 <?= $trad['moon_age'] ?>">
+                                        <?= $trad['moon_phase_emoji'] ?><small><?= $trad['moon_age'] ?></small>
+                                    </span>
+                                <?php endif; ?>
+                            </div>
+                        <?php endif; ?>
+
+                        <div class="week-day-badges">
+                            <span class="badge-duty badge-duty-<?= $duty['badge_type'] ?>">
+                                <?= htmlspecialchars($duty['badge_label']) ?>
+                            </span>
+                            <?php if ($duty['is_pre_off_day']): ?>
+                                <span class="badge-duty" style="background:#fef3c7; color:#b45309; border:1px solid #fde68a;">
+                                    🔔 不在前日
+                                </span>
+                            <?php endif; ?>
+                            <?php if ($has_absence_warn): ?>
+                                <span class="badge-duty" style="background:#fee2e2; color:#b91c1c; border:1px solid #fecaca;">
+                                    ⚠️ 不在日作業
+                                </span>
+                            <?php endif; ?>
+                        </div>
+                    </div>
+
+                    <!-- イベント一覧リスト -->
+                    <div class="week-day-body">
+                        <!-- 🌟 日付メモ（登録されている場合、最上部に付箋表示） -->
+                        <?php if (!empty($cur_day_note)): ?>
+                            <div class="week-note-card" 
+                                 data-note-type="date"
+                                 data-note-key="<?= htmlspecialchars($wd['date_str'], ENT_QUOTES) ?>"
+                                 data-note-content="<?= htmlspecialchars($cur_day_note, ENT_QUOTES) ?>"
+                                 data-note-label="<?= htmlspecialchars($wd['date_str'], ENT_QUOTES) ?>"
+                                 onclick="openNoteModal(this, null, null, null, event);" 
+                                 title="クリックしてメモを編集">
+                                <span style="font-size:0.85rem; flex-shrink:0;">📌</span>
+                                <span style="flex:1; word-break:break-word;"><?= nl2br(htmlspecialchars($cur_day_note)) ?></span>
+                            </div>
+                        <?php endif; ?>
+
+                        <!-- 🌟 Googleカレンダー 時間指定予定（同日） -->
+                        <?php if (!empty($gcal_timed_events_by_date[$wd['date_str']])): ?>
+                            <?php foreach ($gcal_timed_events_by_date[$wd['date_str']] as $gte): ?>
+                                <div class="week-event-card week-gcal-card gcal-item gcal-ch-<?= $gte['channel_id'] ?>"
+                                     style="border-left-color: <?= htmlspecialchars($gte['color_theme']) ?>;"
+                                     onclick='openGcalDetailModal(<?= json_encode($gte, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP) ?>)'
+                                     title="<?= htmlspecialchars($gte['title']) ?> (<?= htmlspecialchars($gte['calendar_name']) ?>)">
+                                    <div class="wec-header">
+                                        <span style="font-size:0.95rem;">🗓️</span>
+                                        <span class="wec-time"><?= date('H:i', strtotime($gte['start_datetime'])) ?><?= !empty($gte['end_datetime']) ? '〜' . date('H:i', strtotime($gte['end_datetime'])) : '' ?></span>
+                                        <span class="gcal-cal-tag" style="background-color: <?= htmlspecialchars($gte['color_theme']) ?>;">
+                                            <?= htmlspecialchars($gte['calendar_name']) ?>
+                                        </span>
+                                    </div>
+                                    <div class="wec-title"><?= htmlspecialchars($gte['title']) ?></div>
+                                    <?php if (!empty($gte['location'])): ?>
+                                        <div class="wec-loc">📍 <?= htmlspecialchars($gte['location']) ?></div>
+                                    <?php endif; ?>
+                                </div>
+                            <?php endforeach; ?>
+                        <?php endif; ?>
+
+                        <?php 
+                            $has_any_events = !empty($wd['events']) || !empty($gcal_timed_events_by_date[$wd['date_str']]);
+                        ?>
+                        <?php if (empty($wd['events']) && empty($gcal_timed_events_by_date[$wd['date_str']])): ?>
+                            <div class="empty-day-placeholder">
+                                <span style="font-size:1.4rem; opacity:0.35;">☕</span>
+                                <span>予定なし</span>
+                            </div>
+                        <?php else: ?>
+                            <?php foreach ($wd['events'] as $ev): ?>
+                                <?php if ($ev['is_continuation']): ?>
+                                    <!-- 2回目以降の日程：(続) カード -->
+                                    <div class="week-event-card week-event-card-continuation" onclick="openEventDetailModal(<?= $ev['post_id'] ?>, '<?= $wd['date_str'] ?>')">
+                                        <div class="wec-header">
+                                            <span class="wec-badge-cont">続</span>
+                                            <span class="wec-time"><?= $ev['start_time'] ?><?= !empty($ev['end_time']) ? '〜' . $ev['end_time'] : '' ?></span>
+                                        </div>
+                                        <div class="wec-title">
+                                            <?= htmlspecialchars($ev['title']) ?>
+                                            <span class="wec-slot-badge"><?= $ev['slot_badge'] ?></span>
+                                        </div>
+                                        <?php if (!empty($ev['location'])): ?>
+                                            <div class="wec-loc">📍 <?= htmlspecialchars($ev['location']) ?></div>
+                                        <?php endif; ?>
+                                        <?php if (!empty($ev['memo'])): ?>
+                                            <div class="wec-memo">📝 <?= htmlspecialchars($ev['memo']) ?></div>
+                                        <?php endif; ?>
+                                        <?php if ($duty['is_closed']): ?>
+                                            <div class="wec-warn-pill">⚠️ 不在日作業</div>
+                                        <?php endif; ?>
+                                    </div>
+                                <?php else: ?>
+                                    <!-- 初日または単一日程：メインカード -->
+                                    <div class="week-event-card" onclick="openEventDetailModal(<?= $ev['post_id'] ?>, '<?= $wd['date_str'] ?>')">
+                                        <div class="wec-header">
+                                            <span style="font-size:1.05rem;"><?= htmlspecialchars($ev['icon']) ?></span>
+                                            <span class="wec-time"><?= $ev['start_time'] ?><?= !empty($ev['end_time']) ? '〜' . $ev['end_time'] : '' ?></span>
+                                        </div>
+                                        <div class="wec-title"><?= htmlspecialchars($ev['title']) ?></div>
+                                        <?php if (!empty($ev['location'])): ?>
+                                            <div class="wec-loc">📍 <?= htmlspecialchars($ev['location']) ?></div>
+                                        <?php endif; ?>
+                                        <?php if (!empty($ev['memo'])): ?>
+                                            <div class="wec-memo">📝 <?= htmlspecialchars($ev['memo']) ?></div>
+                                        <?php endif; ?>
+                                        <?php if ($ev['total_slots'] > 1): ?>
+                                            <div class="wec-slot-badge">全<?= $ev['total_slots'] ?>日程 (第1回)</div>
+                                        <?php endif; ?>
+                                        <?php if ($duty['is_closed']): ?>
+                                            <div class="wec-warn-pill">⚠️ 不在日作業</div>
+                                        <?php endif; ?>
+                                    </div>
+                                <?php endif; ?>
+                            <?php endforeach; ?>
+                        <?php endif; ?>
+                    </div>
+                </div>
+            <?php endforeach; ?>
+        </div>
+    <?php endforeach; ?>
 </div>
 <?php else: ?>
 <!-- 4. メインコンテナ（左右2分割 月間表示） -->
 <div class="dashboard-body">
     <!-- 左カラム：月間業務カレンダー -->
     <div class="left-col">
+        <?php if (!empty($gcal_channels)): ?>
+        <!-- Googleカレンダー表示切り替えバー（月間表示用） -->
+        <div class="gcal-toggle-bar" style="margin-bottom:12px;">
+            <span class="gcal-toggle-label">📅 Googleカレンダー表示:</span>
+            <div class="gcal-toggle-group">
+                <?php foreach ($gcal_channels as $ch): ?>
+                    <label class="gcal-toggle-pill" style="--pill-color: <?= htmlspecialchars($ch['color_theme']) ?>;">
+                        <input type="checkbox" class="gcal-channel-chk" data-channel-id="<?= $ch['channel_id'] ?>" checked onchange="toggleGcalChannel(<?= $ch['channel_id'] ?>, this.checked)">
+                        <span class="gcal-toggle-dot" style="background: <?= htmlspecialchars($ch['color_theme']) ?>;"></span>
+                        <span class="gcal-toggle-name"><?= htmlspecialchars($ch['calendar_name']) ?></span>
+                        <?php if (!empty($ch['account_name'])): ?>
+                            <span class="gcal-toggle-acct">(<?= htmlspecialchars($ch['account_name']) ?>)</span>
+                        <?php endif; ?>
+                    </label>
+                <?php endforeach; ?>
+            </div>
+            <div style="display:flex; align-items:center; gap:8px; margin-left:auto;">
+                <button type="button" class="btn-gcal-sync" id="btnGcalSyncMonth" onclick="syncGoogleCalendar()">
+                    <span id="gcalSyncIconMonth">🔄</span> Google同期
+                </button>
+                <a href="master_mente.php?tab=gcal" style="font-size:0.76rem; color:#2563eb; text-decoration:none; font-weight:700;">
+                    ⚙️ カレンダー管理
+                </a>
+            </div>
+        </div>
+        <?php endif; ?>
+
+        <!-- 📌 今月の重点目標・重要メモ（月間カレンダー用） -->
+        <div class="month-note-banner" 
+             data-note-type="month"
+             data-note-key="<?= htmlspecialchars($cur_month_key, ENT_QUOTES) ?>"
+             data-note-content="<?= htmlspecialchars($month_note ?? '', ENT_QUOTES) ?>"
+             data-note-label="<?= htmlspecialchars("{$year}年{$month}月", ENT_QUOTES) ?>"
+             onclick="openNoteModal(this, null, null, null, event)">
+            <div class="month-note-header">
+                <span class="month-note-title">
+                    <span>📌</span> <?= $year ?>年<?= $month ?>月の重点目標・重要メモ
+                </span>
+                <button type="button" class="btn-note-edit" 
+                        data-note-type="month"
+                        data-note-key="<?= htmlspecialchars($cur_month_key, ENT_QUOTES) ?>"
+                        data-note-content="<?= htmlspecialchars($month_note ?? '', ENT_QUOTES) ?>"
+                        data-note-label="<?= htmlspecialchars("{$year}年{$month}月", ENT_QUOTES) ?>"
+                        onclick="event.stopPropagation(); openNoteModal(this, null, null, null, event);">
+                    ✏️ 編集
+                </button>
+            </div>
+            <div class="month-note-body">
+                <?php if (!empty($month_note)): ?>
+                    <div class="month-note-text"><?= nl2br(htmlspecialchars($month_note)) ?></div>
+                <?php else: ?>
+                    <div class="month-note-placeholder">＋ 今月の重点目標・重要メモを追加（例：10月内視鏡システム最終レビュー、ISO更新審査対応）</div>
+                <?php endif; ?>
+            </div>
+        </div>
+
         <div class="calendar-card">
             <div class="calendar-header">
-                <a href="?year=<?= $prev_year ?>&month=<?= $prev_month ?>&date=<?= $selected_date ?>" class="cal-nav-btn">
+                <a href="?view=month&year=<?= $prev_year ?>&month=<?= $prev_month ?>&date=<?= $prev_month_date ?>" class="cal-nav-btn">
                     ◀ 前月
                 </a>
                 <div class="cal-title">
                     🗓 <?= $year ?>年 <?= $month ?>月 業務カレンダー
                 </div>
                 <div style="display:flex; gap:6px; align-items:center;">
-                    <a href="?year=<?= date('Y') ?>&month=<?= date('n') ?>&date=<?= $today_str ?>" class="cal-nav-btn" style="background:#e0f2fe; color:#0369a1;">
+                    <a href="?view=month&year=<?= date('Y') ?>&month=<?= date('n') ?>&date=<?= $today_str ?>" class="cal-nav-btn" style="background:#e0f2fe; color:#0369a1;">
                         今日へ
                     </a>
-                    <a href="?year=<?= $next_year ?>&month=<?= $next_month ?>&date=<?= $selected_date ?>" class="cal-nav-btn">
+                    <a href="?view=month&year=<?= $next_year ?>&month=<?= $next_month ?>&date=<?= $next_month_date ?>" class="cal-nav-btn">
                         翌月 ▶
                     </a>
                     <button type="button" class="cal-nav-btn" onclick="toggleCalendarExpand()" id="btn-toggle-expand" title="カレンダーの全幅/分割表示を切替">
@@ -1772,9 +2900,11 @@ if ($today_status['is_pre_off_day']) {
                     $duty_info  = $style_info['info'];
                     $is_selected = ($cur_date_str === $selected_date);
                     $day_events  = $date_events_map[$cur_date_str] ?? [];
+                    $day_gcal_events = $gcal_events_by_date[$cur_date_str] ?? [];
+                    $day_note    = $date_notes_map[$cur_date_str] ?? '';
 
                     // 不在日作業警告フラグ
-                    $has_absence_warn = ($duty_info['is_closed'] && count($day_events) > 0);
+                    $has_absence_warn = ($duty_info['is_closed'] && (count($day_events) > 0 || count($day_gcal_events) > 0));
 
                     // 短縮バッジラベル（幅圧迫を防ぐ）
                     $raw_badge_label = $duty_info['badge_label'];
@@ -1793,24 +2923,50 @@ if ($today_status['is_pre_off_day']) {
                         
                         <div class="cal-day-header">
                             <span class="cal-day-num"><?= $d ?></span>
-                            <span class="badge-duty badge-duty-<?= $duty_info['badge_type'] ?>" title="<?= htmlspecialchars($raw_badge_label) ?>">
-                                <?= htmlspecialchars($short_badge_label) ?>
-                            </span>
+                                <button type="button" 
+                                        class="btn-day-note-add" 
+                                        title="この日のメモを入力・編集"
+                                        data-note-type="date"
+                                        data-note-key="<?= htmlspecialchars($cur_date_str, ENT_QUOTES) ?>"
+                                        data-note-content="<?= htmlspecialchars($day_note ?? '', ENT_QUOTES) ?>"
+                                        data-note-label="<?= htmlspecialchars($cur_date_str, ENT_QUOTES) ?>"
+                                        onclick="event.preventDefault(); event.stopPropagation(); openNoteModal(this, null, null, null, event);">
+                                    📝
+                                </button>
+                                <span class="badge-duty badge-duty-<?= $duty_info['badge_type'] ?>" title="<?= htmlspecialchars($raw_badge_label) ?>">
+                                    <?= htmlspecialchars($short_badge_label) ?>
+                                </span>
+                            </div>
                         </div>
 
                         <!-- 予定リスト -->
                         <div class="cal-events-list">
+                            <!-- 🌟 日付メモピル -->
+                            <?php if (!empty($day_note)): ?>
+                                <div class="cal-note-pill" 
+                                     title="メモ: <?= htmlspecialchars($day_note) ?>"
+                                     data-note-type="date"
+                                     data-note-key="<?= htmlspecialchars($cur_date_str, ENT_QUOTES) ?>"
+                                     data-note-content="<?= htmlspecialchars($day_note, ENT_QUOTES) ?>"
+                                     data-note-label="<?= htmlspecialchars($cur_date_str, ENT_QUOTES) ?>"
+                                     onclick="event.preventDefault(); event.stopPropagation(); openNoteModal(this, null, null, null, event);">
+                                    <span style="font-size:0.75rem;">📝</span> <?= htmlspecialchars($day_note) ?>
+                                </div>
+                            <?php endif; ?>
+
                             <?php if ($has_absence_warn): ?>
-                                <div class="cal-event-pill-warn" title="事務長不在日の作業予定が入っています (<?= count($day_events) ?>件)">
-                                    ⚠️ 不在日 (<?= count($day_events) ?>件)
+                                <div class="cal-event-pill-warn" title="事務長不在日の作業・予定が入っています">
+                                    ⚠️ 不在日 (<?= count($day_events) + count($day_gcal_events) ?>件)
                                 </div>
                             <?php endif; ?>
 
                             <?php 
                             $disp_count = 0;
+                            // 瓦版イベントの表示
                             foreach ($day_events as $ev): 
                                 if ($disp_count >= 2) {
-                                    echo '<div style="font-size:0.62rem; color:#64748b; font-weight:bold; padding-left:2px;">＋他 ' . (count($day_events) - 2) . ' 件</div>';
+                                    $rem = (count($day_events) + count($day_gcal_events)) - 2;
+                                    echo '<div style="font-size:0.62rem; color:#64748b; font-weight:bold; padding-left:2px;">＋他 ' . $rem . ' 件</div>';
                                     break;
                                 }
                                 $disp_count++;
@@ -1829,6 +2985,26 @@ if ($today_status['is_pre_off_day']) {
                                     </div>
                                 <?php endif; ?>
                             <?php endforeach; ?>
+
+                            <!-- 🌟 Googleカレンダー予定の表示 -->
+                            <?php foreach ($day_gcal_events as $gev): 
+                                if ($disp_count >= 3) {
+                                    $rem = (count($day_events) + count($day_gcal_events)) - 3;
+                                    echo '<div style="font-size:0.62rem; color:#64748b; font-weight:bold; padding-left:2px;">＋他 ' . $rem . ' 件</div>';
+                                    break;
+                                }
+                                $disp_count++;
+                                $gev_time = !empty($gev['is_all_day']) ? '終日' : date('H:i', strtotime($gev['start_datetime']));
+                            ?>
+                                <div class="cal-event-pill cal-event-pill-gcal gcal-item gcal-ch-<?= $gev['channel_id'] ?>"
+                                     style="border-left-color: <?= htmlspecialchars($gev['color_theme']) ?>;"
+                                     title="<?= htmlspecialchars($gev['title']) ?> (<?= htmlspecialchars($gev['calendar_name']) ?>)"
+                                     onclick='event.preventDefault(); event.stopPropagation(); openGcalDetailModal(<?= json_encode($gev, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP) ?>);'>
+                                    <span class="span-icon" style="font-size:0.72rem;">🗓️</span>
+                                    <span class="ev-time" style="color:<?= htmlspecialchars($gev['color_theme']) ?>; font-weight:800; font-size:0.68rem;"><?= $gev_time ?></span>
+                                    <span class="ev-title" style="color:#0f172a; font-weight:700;"><?= htmlspecialchars($gev['title']) ?></span>
+                                </div>
+                            <?php endforeach; ?>
                         </div>
                     </a>
                 <?php } ?>
@@ -1840,17 +3016,30 @@ if ($today_status['is_pre_off_day']) {
     <div class="right-col">
         <div class="detail-panel-card">
             <!-- パネルヘッダー -->
+            <?php $sel_day_note = $date_notes_map[$selected_date] ?? ''; ?>
             <div class="panel-header-box">
-                <div class="panel-date-title">
-                    <span>🗓 <?= date('Y/m/d', strtotime($selected_date)) ?> (<?= ['日','月','火','水','木','金','土'][(int)date('w', strtotime($selected_date))] ?>)</span>
-                    <span class="badge-duty badge-duty-<?= $selected_status['badge_type'] ?>" style="font-size:0.8rem; padding:3px 8px;">
-                        <?= htmlspecialchars($selected_status['badge_label']) ?>
-                    </span>
-                    <?php if ($selected_status['is_closed'] && count($selected_day_events) > 0): ?>
-                        <span style="background:#fee2e2; color:#b91c1c; font-size:0.75rem; font-weight:bold; padding:2px 8px; border-radius:4px;">
-                            ⚠️ 不在日作業
+                <div class="panel-date-title" style="display:flex; align-items:center; justify-content:space-between; width:100%; flex-wrap:wrap; gap:6px;">
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <span>🗓 <?= date('Y/m/d', strtotime($selected_date)) ?> (<?= ['日','月','火','水','木','金','土'][(int)date('w', strtotime($selected_date))] ?>)</span>
+                        <span class="badge-duty badge-duty-<?= $selected_status['badge_type'] ?>" style="font-size:0.8rem; padding:3px 8px;">
+                            <?= htmlspecialchars($selected_status['badge_label']) ?>
                         </span>
-                    <?php endif; ?>
+                        <?php if ($selected_status['is_closed'] && count($selected_day_events) > 0): ?>
+                            <span style="background:#fee2e2; color:#b91c1c; font-size:0.75rem; font-weight:bold; padding:2px 8px; border-radius:4px;">
+                                ⚠️ 不在日作業
+                            </span>
+                        <?php endif; ?>
+                    </div>
+                    <button type="button" 
+                            class="tool-btn" 
+                            style="font-size:0.78rem; padding:3px 10px; background:#fffbeb; color:#b45309; border:1px solid #fde68a; display:inline-flex; align-items:center; gap:4px; font-weight:700; cursor:pointer;"
+                            data-note-type="date"
+                            data-note-key="<?= htmlspecialchars($selected_date, ENT_QUOTES) ?>"
+                            data-note-content="<?= htmlspecialchars($sel_day_note ?? '', ENT_QUOTES) ?>"
+                            data-note-label="<?= htmlspecialchars($selected_date, ENT_QUOTES) ?>"
+                            onclick="openNoteModal(this, null, null, null, event);">
+                        📝 日付メモ<?= !empty($sel_day_note) ? '編集' : '追加' ?>
+                    </button>
                 </div>
             </div>
 
@@ -1866,54 +3055,124 @@ if ($today_status['is_pre_off_day']) {
 
             <!-- タブ1: 選択日の予定・工事 -->
             <div id="tab-events" class="tab-content active">
-                <?php if (empty($selected_day_events)): ?>
+                <!-- 🌟 選択日のメモ（登録されていれば表示、未登録なら追加用プレースホルダーを表示） -->
+                <?php if (!empty($sel_day_note)): ?>
+                    <div class="week-note-card" 
+                         style="margin-bottom:12px; font-size:0.86rem; padding:8px 12px; cursor:pointer;" 
+                         data-note-type="date"
+                         data-note-key="<?= htmlspecialchars($selected_date, ENT_QUOTES) ?>"
+                         data-note-content="<?= htmlspecialchars($sel_day_note, ENT_QUOTES) ?>"
+                         data-note-label="<?= htmlspecialchars($selected_date, ENT_QUOTES) ?>"
+                         onclick="openNoteModal(this, null, null, null, event);" 
+                         title="クリックしてメモを編集">
+                        <span style="font-size:1.1rem; flex-shrink:0;">📌</span>
+                        <div style="flex:1;">
+                            <div style="font-size:0.75rem; color:#b45309; font-weight:bold;">この日のメモ（クリックして編集）:</div>
+                            <div style="color:#0f172a; margin-top:2px; font-weight:600;"><?= nl2br(htmlspecialchars($sel_day_note)) ?></div>
+                        </div>
+                    </div>
+                <?php else: ?>
+                    <div class="week-note-card-placeholder" 
+                         style="margin-bottom:12px; font-size:0.84rem; padding:8px 12px; border:1px dashed #f59e0b; background:#fffbeb; color:#b45309; border-radius:8px; cursor:pointer; display:flex; align-items:center; gap:8px;"
+                         data-note-type="date"
+                         data-note-key="<?= htmlspecialchars($selected_date, ENT_QUOTES) ?>"
+                         data-note-content=""
+                         data-note-label="<?= htmlspecialchars($selected_date, ENT_QUOTES) ?>"
+                         onclick="openNoteModal(this, null, null, null, event);" 
+                         title="クリックしてメモを追加">
+                        <span style="font-size:1rem;">📝</span>
+                        <span style="font-weight:600;">＋ この日に日付メモを追加（クリック）</span>
+                    </div>
+                <?php endif; ?>
+
+                <?php 
+                $sel_gcal_events = $gcal_events_by_date[$selected_date] ?? [];
+                $has_any_sel = !empty($selected_day_events) || !empty($sel_gcal_events);
+                ?>
+
+                <?php if (!$has_any_sel): ?>
                     <div style="text-align:center; padding:50px 20px; color:#64748b;">
                         <div style="font-size:2.5rem; margin-bottom:10px;">📋</div>
                         <div style="font-weight:bold; font-size:1rem;">この日の予定・工事はありません</div>
                         <p style="font-size:0.85rem; margin-top:6px;">新しい工事や設備点検、行事の予定を追加するには上の「予定・工事の登録」ボタンをご利用ください。</p>
                     </div>
                 <?php else: ?>
-                    <?php foreach ($selected_day_events as $ev): 
-                        $raw = $ev['raw_post'];
-                    ?>
-                        <div class="event-detail-item">
-                            <div class="event-detail-title">
-                                <span>
-                                    <?php if ($ev['is_continuation']): ?>
-                                        <span style="background:#8b5cf6; color:#fff; font-size:0.72rem; padding:2px 5px; border-radius:4px; font-weight:800; margin-right:4px;">続</span>
-                                    <?php endif; ?>
-                                    <?= htmlspecialchars($ev['icon']) ?> <?= htmlspecialchars($ev['title']) ?> <?= $ev['slot_badge'] ?>
-                                </span>
-                                <span style="font-size:0.8rem; color:#64748b; font-weight:normal;">#<?= $ev['post_id'] ?></span>
-                            </div>
-                            <div class="event-detail-time">
-                                ⏰ <?= $ev['start_time'] ?><?= !empty($ev['end_time']) ? ' 〜 ' . $ev['end_time'] : '' ?>
-                                <?= !empty($ev['location']) ? ' | 📍 ' . htmlspecialchars($ev['location']) : '' ?>
-                            </div>
-                            <div style="font-size:0.88rem; color:#334155; line-height:1.5; margin-bottom:8px;">
-                                <?= mb_strimwidth(strip_tags($raw['content']), 0, 160, '…') ?>
-                            </div>
+                    <!-- 瓦版（院内予定・工事）一覧 -->
+                    <?php if (!empty($selected_day_events)): ?>
+                        <?php foreach ($selected_day_events as $ev): 
+                            $raw = $ev['raw_post'];
+                        ?>
+                            <div class="event-detail-item">
+                                <div class="event-detail-title">
+                                    <span>
+                                        <?php if ($ev['is_continuation']): ?>
+                                            <span style="background:#8b5cf6; color:#fff; font-size:0.72rem; padding:2px 5px; border-radius:4px; font-weight:800; margin-right:4px;">続</span>
+                                        <?php endif; ?>
+                                        <?= htmlspecialchars($ev['icon']) ?> <?= htmlspecialchars($ev['title']) ?> <?= $ev['slot_badge'] ?>
+                                    </span>
+                                    <span style="font-size:0.8rem; color:#64748b; font-weight:normal;">#<?= $ev['post_id'] ?></span>
+                                </div>
+                                <div class="event-detail-time">
+                                    ⏰ <?= $ev['start_time'] ?><?= !empty($ev['end_time']) ? ' 〜 ' . $ev['end_time'] : '' ?>
+                                    <?= !empty($ev['location']) ? ' | 📍 ' . htmlspecialchars($ev['location']) : '' ?>
+                                </div>
+                                <div style="font-size:0.88rem; color:#334155; line-height:1.5; margin-bottom:8px;">
+                                    <?= mb_strimwidth(strip_tags($raw['content']), 0, 160, '…') ?>
+                                </div>
 
-                            <!-- アクションボタン群 -->
-                            <div class="event-actions">
-                                <button type="button" class="btn-action-sm" onclick="openEventDetailModal(<?= $ev['post_id'] ?>, '<?= $selected_date ?>')">
-                                    📋 全日程・既読
-                                </button>
-                                <button type="button" class="btn-action-sm" onclick="openLineNotifyModal(<?= $ev['post_id'] ?>)" style="background:#16a34a; color:#fff; border-color:#15803d; font-weight:bold;">
-                                    💬 LINE通知
-                                </button>
-                                <button type="button" class="btn-action-sm btn-action-print" onclick="openPrintDispatchModal(<?= $ev['post_id'] ?>, '<?= htmlspecialchars(addslashes($ev['title'])) ?>', '<?= $selected_date ?>')">
-                                    🚀 部署別PowerShell排紙
-                                </button>
-                                <a href="print_dept_poster.php?id=<?= $ev['post_id'] ?>&date=<?= $selected_date ?>" target="_blank" class="btn-action-sm">
-                                    🖨️ ポスタープレビュー
-                                </a>
-                                <a href="view_post.php?id=<?= $ev['post_id'] ?>" class="btn-action-sm">
-                                    🔍 記事詳細
-                                </a>
+                                <!-- アクションボタン群 -->
+                                <div class="event-actions">
+                                    <button type="button" class="btn-action-sm" onclick="openEventDetailModal(<?= $ev['post_id'] ?>, '<?= $selected_date ?>')">
+                                        📋 全日程・既読
+                                    </button>
+                                    <button type="button" class="btn-action-sm" onclick="openLineNotifyModal(<?= $ev['post_id'] ?>)" style="background:#16a34a; color:#fff; border-color:#15803d; font-weight:bold;">
+                                        💬 LINE通知
+                                    </button>
+                                    <button type="button" class="btn-action-sm btn-action-print" onclick="openPrintDispatchModal(<?= $ev['post_id'] ?>, '<?= htmlspecialchars(addslashes($ev['title'])) ?>', '<?= $selected_date ?>')">
+                                        🚀 部署別PowerShell排紙
+                                    </button>
+                                    <a href="print_dept_poster.php?id=<?= $ev['post_id'] ?>&date=<?= $selected_date ?>" target="_blank" class="btn-action-sm">
+                                        🖨️ ポスタープレビュー
+                                    </a>
+                                    <a href="view_post.php?id=<?= $ev['post_id'] ?>" class="btn-action-sm">
+                                        🔍 記事詳細
+                                    </a>
+                                </div>
+                            </div>
+                        <?php endforeach; ?>
+                    <?php endif; ?>
+
+                    <!-- 🌟 Googleカレンダー予定一覧（選択日） -->
+                    <?php if (!empty($sel_gcal_events)): ?>
+                        <div style="margin-top:14px; padding-top:12px; border-top:1px dashed #cbd5e1;">
+                            <div style="font-size:0.85rem; font-weight:800; color:#475569; margin-bottom:8px; display:flex; align-items:center; gap:6px;">
+                                <span>📅 Googleカレンダー予定 (<?= count($sel_gcal_events) ?>件)</span>
+                            </div>
+                            <div style="display:flex; flex-direction:column; gap:8px;">
+                                <?php foreach ($sel_gcal_events as $gev): 
+                                    $g_time_str = !empty($gev['is_all_day']) ? '終日' : (date('H:i', strtotime($gev['start_datetime'])) . (!empty($gev['end_datetime']) ? ' 〜 ' . date('H:i', strtotime($gev['end_datetime'])) : ''));
+                                ?>
+                                    <div class="event-detail-item gcal-item gcal-ch-<?= $gev['channel_id'] ?>" style="border-left: 4px solid <?= htmlspecialchars($gev['color_theme']) ?>; cursor:pointer;" onclick='openGcalDetailModal(<?= json_encode($gev, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP) ?>)'>
+                                        <div class="event-detail-title" style="display:flex; justify-content:space-between; align-items:center;">
+                                            <span style="font-size:0.95rem; font-weight:800;">🗓️ <?= htmlspecialchars($gev['title']) ?></span>
+                                            <span style="background:<?= htmlspecialchars($gev['color_theme']) ?>; color:#fff; font-size:0.72rem; padding:2px 8px; border-radius:10px; font-weight:bold;">
+                                                <?= htmlspecialchars($gev['calendar_name']) ?>
+                                            </span>
+                                        </div>
+                                        <div class="event-detail-time" style="color:<?= htmlspecialchars($gev['color_theme']) ?>; font-weight:700;">
+                                            ⏰ <?= $g_time_str ?>
+                                            <?= !empty($gev['location']) ? ' | 📍 ' . htmlspecialchars($gev['location']) : '' ?>
+                                        </div>
+                                        <?php if (!empty($gev['description'])): ?>
+                                            <div style="font-size:0.84rem; color:#475569; margin-top:4px; line-height:1.4;">
+                                                <?= mb_strimwidth(strip_tags($gev['description']), 0, 140, '…') ?>
+                                            </div>
+                                        <?php endif; ?>
+                                    </div>
+                                <?php endforeach; ?>
                             </div>
                         </div>
-                    <?php endforeach; ?>
+                    <?php endif; ?>
                 <?php endif; ?>
             </div>
 
@@ -2263,6 +3522,85 @@ if ($today_status['is_pre_off_day']) {
     </div>
 </div>
 
+<!-- モーダル: Googleカレンダー予定詳細モーダル -->
+<div id="modal-gcal-detail" class="modal-overlay">
+    <div class="modal-box" style="max-width:580px;">
+        <div class="modal-header" style="border-bottom: 2px solid #1a73e8;">
+            <div class="modal-title" style="display:flex; align-items:center; gap:8px;">
+                <span style="font-size:1.3rem;">🗓️</span>
+                <span id="gcal-detail-title">Googleカレンダーの予定</span>
+            </div>
+            <button type="button" onclick="closeModal('modal-gcal-detail')" style="border:none; background:none; font-size:1.4rem; cursor:pointer;">&times;</button>
+        </div>
+        <div class="modal-body" style="display:flex; flex-direction:column; gap:14px;">
+            <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                <span id="gcal-detail-cal-badge" style="background:#1a73e8; color:#fff; font-size:0.8rem; font-weight:bold; padding:3px 10px; border-radius:12px;">カレンダー名</span>
+                <span id="gcal-detail-acct" style="font-size:0.82rem; color:#64748b;">(アカウント名)</span>
+            </div>
+
+            <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:12px 16px;">
+                <div style="font-size:0.82rem; font-weight:bold; color:#64748b; margin-bottom:4px;">日時:</div>
+                <div id="gcal-detail-time" style="font-size:1rem; font-weight:bold; color:#1e293b;"></div>
+            </div>
+
+            <div id="gcal-detail-loc-box" style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:12px 16px; display:none;">
+                <div style="font-size:0.82rem; font-weight:bold; color:#64748b; margin-bottom:4px;">場所:</div>
+                <div id="gcal-detail-location" style="font-size:0.92rem; color:#1e293b;"></div>
+            </div>
+
+            <div id="gcal-detail-desc-box" style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:12px 16px; display:none;">
+                <div style="font-size:0.82rem; font-weight:bold; color:#64748b; margin-bottom:4px;">説明・詳細メモ:</div>
+                <div id="gcal-detail-desc" style="font-size:0.88rem; color:#334155; line-height:1.6; white-space:pre-wrap; max-height:180px; overflow-y:auto;"></div>
+            </div>
+        </div>
+        <div class="modal-footer" style="display:flex; justify-content:space-between; align-items:center;">
+            <a id="gcal-detail-link" href="#" target="_blank" class="tool-btn" style="background:#1a73e8; color:#fff; text-decoration:none; display:inline-flex; align-items:center; gap:6px;">
+                <span>🌐</span> Googleカレンダーで開く
+            </a>
+            <button type="button" class="tool-btn" onclick="closeModal('modal-gcal-detail')">閉じる</button>
+        </div>
+    </div>
+</div>
+
+<!-- モーダル: ダッシュボードメモ（月・日）編集モーダル -->
+<div id="modal-dashboard-note" class="modal-overlay">
+    <div class="modal-box" style="max-width:520px;">
+        <div class="modal-header" style="border-bottom: 2px solid #f59e0b;">
+            <div class="modal-title" style="display:flex; align-items:center; gap:8px;">
+                <span style="font-size:1.3rem;">📝</span>
+                <span id="note-modal-title">メモの編集</span>
+            </div>
+            <button type="button" onclick="closeModal('modal-dashboard-note')" style="border:none; background:none; font-size:1.4rem; cursor:pointer;">&times;</button>
+        </div>
+        <div class="modal-body" style="display:flex; flex-direction:column; gap:12px;">
+            <input type="hidden" id="note-modal-type" value="">
+            <input type="hidden" id="note-modal-key" value="">
+            
+            <div style="font-size:0.86rem; color:#64748b;" id="note-modal-desc">
+                対象: <b id="note-modal-target-label" style="color:#0f172a;"></b>
+            </div>
+
+            <div>
+                <textarea id="note-modal-content" rows="4" style="width:100%; border:1px solid #cbd5e1; border-radius:8px; padding:10px; font-size:0.92rem; line-height:1.5; box-sizing:border-box; resize:vertical; font-family:inherit;" placeholder="メモ内容を入力してください（例：10月内視鏡システム最終レビュー、ISO更新審査）"></textarea>
+            </div>
+            <div style="font-size:0.75rem; color:#94a3b8;">
+                💡 空欄にして「保存」または「削除」を押すとメモが消去されます。
+            </div>
+        </div>
+        <div class="modal-footer" style="display:flex; justify-content:space-between; align-items:center;">
+            <button type="button" class="btn-action-sm" onclick="clearDashboardNote()" style="background:#fee2e2; color:#b91c1c; border-color:#fecaca;">
+                🗑️ 削除
+            </button>
+            <div style="display:flex; gap:8px;">
+                <button type="button" class="tool-btn" onclick="closeModal('modal-dashboard-note')">キャンセル</button>
+                <button type="button" class="tool-btn tool-btn-primary" id="btn-save-note" onclick="saveDashboardNote()">
+                    💾 保存する
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- LINE通知プレビュー ＆ テスト送信モーダル（共通コンポーネント） -->
 <?php require_once __DIR__ . '/includes/line_notify_modal.php'; ?>
 
@@ -2290,6 +3628,252 @@ function showToast(message, type = 'info') {
     toast.innerHTML = `<span>${type === 'error' ? '⚠️' : '✓'}</span><span>${message}</span>`;
     container.appendChild(toast);
     setTimeout(() => { toast.remove(); }, 5000);
+}
+
+// 🌟 ダッシュボードメモ（月・日）モーダル制御
+function openNoteModal(typeOrEl, key, currentContent, label, ev) {
+    if (ev && typeof ev.preventDefault === 'function') {
+        ev.preventDefault();
+        ev.stopPropagation();
+    }
+    if (window.event) {
+        if (typeof window.event.preventDefault === 'function') window.event.preventDefault();
+        if (typeof window.event.stopPropagation === 'function') window.event.stopPropagation();
+    }
+
+    let type = 'date';
+    let targetKey = '';
+    let content = '';
+    let targetText = '';
+
+    if (typeOrEl && typeof typeOrEl === 'object' && (typeOrEl.dataset || typeOrEl.getAttribute)) {
+        // HTMLElement (data-* 属性から安全に取得)
+        type = typeOrEl.dataset?.noteType || typeOrEl.getAttribute('data-note-type') || 'date';
+        targetKey = typeOrEl.dataset?.noteKey || typeOrEl.getAttribute('data-note-key') || '';
+        content = typeOrEl.dataset?.noteContent || typeOrEl.getAttribute('data-note-content') || '';
+        targetText = typeOrEl.dataset?.noteLabel || typeOrEl.getAttribute('data-note-label') || targetKey;
+    } else {
+        // 直接引数
+        type = typeOrEl || 'date';
+        targetKey = key || '';
+        content = currentContent || '';
+        targetText = label || targetKey;
+    }
+
+    const typeInput = document.getElementById('note-modal-type');
+    const keyInput = document.getElementById('note-modal-key');
+    const contentArea = document.getElementById('note-modal-content');
+    const titleEl = document.getElementById('note-modal-title');
+    const targetLabel = document.getElementById('note-modal-target-label');
+
+    if (!typeInput || !keyInput || !contentArea) {
+        console.error('Note modal elements missing');
+        return;
+    }
+
+    typeInput.value = type;
+    keyInput.value = targetKey;
+    contentArea.value = content || '';
+
+    if (type === 'month') {
+        if (titleEl) titleEl.textContent = '📌 今月の重点目標・重要メモ';
+        if (targetLabel) targetLabel.textContent = targetText ? `${targetText} の重点メモ` : targetKey;
+        contentArea.placeholder = '例：10月内視鏡システム最終レビュー、ISO更新審査、新電子カルテ導入説明会';
+    } else {
+        if (titleEl) titleEl.textContent = '📝 日付メモの編集';
+        if (targetLabel) targetLabel.textContent = targetText ? `${targetText} のメモ` : targetKey;
+        contentArea.placeholder = '例：午前中に消防署立ち入り検査、薬品棚卸し、医師ミーティングなど';
+    }
+
+    openModal('modal-dashboard-note');
+    setTimeout(() => {
+        contentArea.focus();
+    }, 150);
+}
+
+function clearDashboardNote() {
+    if (!confirm('このメモを削除しますか？')) return;
+    document.getElementById('note-modal-content').value = '';
+    saveDashboardNote();
+}
+
+function saveDashboardNote() {
+    const type = document.getElementById('note-modal-type').value;
+    const key = document.getElementById('note-modal-key').value;
+    const content = document.getElementById('note-modal-content').value.trim();
+    const btn = document.getElementById('btn-save-note');
+    
+    if (btn) btn.disabled = true;
+    
+    const formData = new FormData();
+    formData.append('action', 'save_dashboard_note');
+    formData.append('target_type', type);
+    formData.append('target_key', key);
+    formData.append('content', content);
+    
+    fetch('jimucho_dashboard.php', {
+        method: 'POST',
+        body: formData
+    })
+    .then(res => res.json())
+    .then(data => {
+        if (data.success) {
+            closeModal('modal-dashboard-note');
+            showToast(content === '' ? 'メモを削除しました' : 'メモを保存しました', 'success');
+            setTimeout(() => {
+                location.reload();
+            }, 400);
+        } else {
+            if (btn) btn.disabled = false;
+            alert('⚠️ メモ保存エラー: ' + (data.error || '不明なエラー'));
+        }
+    })
+    .catch(err => {
+        if (btn) btn.disabled = false;
+        alert('⚠️ 通信エラー: ' + err.message);
+    });
+}
+
+// 🗜️ 縦圧縮モード（コンパクト表示）切替制御
+function initCompactMode() {
+    const isCompact = localStorage.getItem('jimucho_compact_mode') === '1';
+    if (isCompact) {
+        document.documentElement.classList.add('compact-mode');
+        document.body.classList.add('compact-mode');
+        updateCompactButton(true);
+    }
+}
+
+function toggleCompactMode() {
+    const isNowCompact = document.documentElement.classList.toggle('compact-mode');
+    document.body.classList.toggle('compact-mode', isNowCompact);
+    localStorage.setItem('jimucho_compact_mode', isNowCompact ? '1' : '0');
+    updateCompactButton(isNowCompact);
+    showToast(isNowCompact ? '🗜️ 縦圧縮モードを有効にしました（余白を最小化）' : '📏 標準表示に戻しました', 'info');
+}
+
+function updateCompactButton(isCompact) {
+    const btn = document.getElementById('btnToggleCompact');
+    if (!btn) return;
+    if (isCompact) {
+        btn.classList.add('btn-compact-active');
+        btn.innerHTML = '📏 標準表示に戻す';
+        btn.title = '標準のゆったりしたレイアウトに戻します';
+    } else {
+        btn.classList.remove('btn-compact-active');
+        btn.innerHTML = '🗜️ 縦圧縮';
+        btn.title = '縦の余白を極限まで圧縮し、1画面内に多くの情報を表示します';
+    }
+}
+
+// 画面読み込み時に初期化
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initCompactMode);
+} else {
+    initCompactMode();
+}
+
+// 🌟 Googleカレンダー チャンネル表示ON/OFF切り替え
+function toggleGcalChannel(channelId, isChecked) {
+    const items = document.querySelectorAll(`.gcal-ch-${channelId}`);
+    items.forEach(el => {
+        el.style.display = isChecked ? '' : 'none';
+    });
+}
+
+// 🌟 Googleカレンダー手動同期
+function syncGoogleCalendar() {
+    const btn = document.getElementById('btnGcalSync');
+    const icon = document.getElementById('gcalSyncIcon');
+    if (btn) btn.disabled = true;
+    if (icon) icon.textContent = '⏳';
+    showToast('Googleカレンダーと同期中...', 'info');
+
+    fetch('jimucho_dashboard.php?action=sync_gcal')
+        .then(res => res.json())
+        .then(data => {
+            if (data.success) {
+                showToast(data.message || '同期が完了しました', 'success');
+                setTimeout(() => location.reload(), 800);
+            } else {
+                if (btn) btn.disabled = false;
+                if (icon) icon.textContent = '🔄';
+                const err = data.errors ? data.errors.join('\n') : (data.message || '同期に失敗しました');
+                alert('⚠️ Googleカレンダー同期エラー:\n' + err);
+            }
+        })
+        .catch(err => {
+            if (btn) btn.disabled = false;
+            if (icon) icon.textContent = '🔄';
+            showToast('通信エラーが発生しました: ' + err.message, 'error');
+        });
+}
+
+// 🌟 Googleカレンダー予定詳細モーダルを開く
+function openGcalDetailModal(ev) {
+    if (!ev) return;
+    document.getElementById('gcal-detail-title').textContent = ev.title || '(無題の予定)';
+    
+    const badge = document.getElementById('gcal-detail-cal-badge');
+    badge.textContent = ev.calendar_name || 'Googleカレンダー';
+    badge.style.backgroundColor = ev.color_theme || '#1a73e8';
+
+    const acct = document.getElementById('gcal-detail-acct');
+    acct.textContent = ev.account_name ? `(${ev.account_name})` : '';
+
+    // 日時文字列整形
+    let timeStr = '';
+    const sDate = ev.start_datetime ? ev.start_datetime.substring(0, 10).replace(/-/g, '/') : '';
+    const eDate = ev.end_datetime ? ev.end_datetime.substring(0, 10).replace(/-/g, '/') : '';
+    const isAllDay = (ev.is_all_day == 1 || ev.is_all_day === true || ev.is_all_day === 'true');
+
+    if (isAllDay) {
+        if (sDate === eDate || !eDate) {
+            timeStr = `${sDate} 終日`;
+        } else {
+            timeStr = `${sDate} 〜 ${eDate} 終日`;
+        }
+    } else {
+        const sTime = ev.start_datetime ? ev.start_datetime.substring(11, 16) : '';
+        const eTime = ev.end_datetime ? ev.end_datetime.substring(11, 16) : '';
+        if (sDate === eDate) {
+            timeStr = `${sDate} ${sTime} 〜 ${eTime}`;
+        } else {
+            timeStr = `${sDate} ${sTime} 〜 ${eDate} ${eTime}`;
+        }
+    }
+    document.getElementById('gcal-detail-time').textContent = timeStr;
+
+    // 場所
+    const locBox = document.getElementById('gcal-detail-loc-box');
+    const locEl = document.getElementById('gcal-detail-location');
+    if (ev.location && ev.location.trim() !== '') {
+        locEl.textContent = ev.location;
+        locBox.style.display = 'block';
+    } else {
+        locBox.style.display = 'none';
+    }
+
+    // 説明
+    const descBox = document.getElementById('gcal-detail-desc-box');
+    const descEl = document.getElementById('gcal-detail-desc');
+    if (ev.description && ev.description.trim() !== '') {
+        descEl.textContent = ev.description;
+        descBox.style.display = 'block';
+    } else {
+        descBox.style.display = 'none';
+    }
+
+    // Googleカレンダーリンク
+    const linkBtn = document.getElementById('gcal-detail-link');
+    if (ev.html_link) {
+        linkBtn.href = ev.html_link;
+        linkBtn.style.display = 'inline-flex';
+    } else {
+        linkBtn.style.display = 'none';
+    }
+
+    openModal('modal-gcal-detail');
 }
 
 // 部署プリンタ設定の読み込み
@@ -2757,8 +4341,8 @@ async function openEventDetailModal(postId, targetDate) {
 
         // リンク設定
         document.getElementById('med-link-poster').href = `print_dept_poster.php?id=${post.post_id}${targetDate ? '&date=' + encodeURIComponent(targetDate) : ''}`;
-        document.getElementById('med-link-edit').href = `create_post.php?edit_id=${post.post_id}`;
-        document.getElementById('med-link-view').href = `view_post.php?id=${post.post_id}`;
+        document.getElementById('med-link-edit').href = `create_post.php?id=${post.post_id}&return_to=jimucho`;
+        document.getElementById('med-link-view').href = `view_post.php?id=${post.post_id}&return_to=jimucho`;
 
         // 全日程スロットテーブル描画
         const slots = post.slots || [];

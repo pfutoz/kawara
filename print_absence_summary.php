@@ -3,13 +3,7 @@ if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
-$host = 'localhost'; $dbname = 'kawara'; $user = 'postgres'; $password = 'postgres';
-try {
-    $pdo = new PDO("pgsql:host={$host};dbname={$dbname}", $user, $password, [
-        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC
-    ]);
-} catch (PDOException $e) { exit('DB接続エラー'); }
+require_once __DIR__ . '/includes/db.php';
 
 require_once __DIR__ . '/includes/calendar_helper_jimucho.php';
 

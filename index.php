@@ -1,16 +1,8 @@
 <?php
 require_once __DIR__ . '/includes/auth_helper.php';
 
-// 2. DB接続設定 ＆ LINEヘルパー読み込み
-$host = 'localhost'; $dbname = 'kawara'; $user = 'postgres'; $password = 'postgres';
-try {
-    $pdo = new PDO("pgsql:host={$host};dbname={$dbname}", $user, $password, [
-        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC
-    ]);
-} catch (PDOException $e) {
-    exit('DB接続エラー: ' . $e->getMessage());
-}
+// 2. DB接続 ＆ LINEヘルパー読み込み
+require_once __DIR__ . '/includes/db.php';
 
 if (file_exists('includes/line_helper.php')) {
     require_once 'includes/line_helper.php';

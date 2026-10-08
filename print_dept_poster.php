@@ -3,13 +3,7 @@ if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
-$host = 'localhost'; $dbname = 'kawara'; $user = 'postgres'; $password = 'postgres';
-try {
-    $pdo = new PDO("pgsql:host={$host};dbname={$dbname}", $user, $password, [
-        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC
-    ]);
-} catch (PDOException $e) { exit('DB接続エラー'); }
+require_once __DIR__ . '/includes/db.php';
 
 $post_id = (int)($_GET['id'] ?? 0);
 $dept_id = (int)($_GET['dept_id'] ?? 0);
@@ -438,14 +432,13 @@ if ($line_count > 16 || $text_len > 400) {
         <?php endif; ?>
     </div>
 
-    <!-- フッター＆現場受領印欄 -->
+    <!-- フッター -->
     <div class="footer-bar">
         <div class="author-info">
             発信: 事務部（<?= htmlspecialchars($post['staff_name'] ?? '山本 太') ?>） / 医療法人小野会 かわら版
         </div>
-        <div class="sign-area">
-            <div class="sign-box">朝礼伝達済<br><br>[　　] チェック</div>
-            <div class="sign-box">現場リーダー受領印<br><br>[　　　　] 印</div>
+        <div style="font-size:10pt; color:#64748b;">
+            印刷日時: <?= date('Y/m/d H:i') ?>
         </div>
     </div>
 </div>

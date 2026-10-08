@@ -14,3 +14,7 @@ Desktop.ini
 .DS_Store
 .vscode/
 .idea/
+
+# Google Service Account Credentials
+config/*.json
+!config/*.json.example

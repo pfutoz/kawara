@@ -366,7 +366,23 @@
                             <li>開発者コンソールに誰もログインできず、API仕様変更時の追従が不能になる。</li>
                         </ul>
                     </td>
-                    <td><span class="badge badge-danger">重大（開発保守不能）</span></td>
+                <tr>
+                    <td>
+                        <strong style="color: #2563eb;">Google Cloud Console</strong><br>
+                        <small>Google Calendar API ＆ サービスアカウント秘密鍵</small>
+                    </td>
+                    <td>
+                        <strong>開発用Googleアカウント</strong><br>
+                        <code>kawara-calendar-sync@...</code>
+                    </td>
+                    <td>
+                        <ul>
+                            <li>担当者変更時にGoogle Cloud Consoleへログインできず、APIクォータ確認や新秘密鍵の再発行が不能になる。</li>
+                            <li>病院公式アカウントをプロジェクトの「オーナー」に招待して二重化していないと、鍵失効時の復旧が遅延する。</li>
+                            <li>秘密鍵JSONファイルのローカル保管場所やバックアップ体制が属人化するリスク。</li>
+                        </ul>
+                    </td>
+                    <td><span class="badge badge-warn">中〜高（カレンダー同期停止リスク）</span></td>
                 </tr>
             </tbody>
         </table>

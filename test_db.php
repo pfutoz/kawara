@@ -1,18 +1,6 @@
 <?php
-// DB接続設定
-$host = 'localhost';
-$dbname = 'kawara';
-$user = 'postgres';
-$password = 'postgres';
-
-try {
-    $pdo = new PDO("pgsql:host={$host};dbname={$dbname}", $user, $password, [
-        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC
-    ]);
-} catch (PDOException $e) {
-    exit('DB接続エラー: ' . $e->getMessage());
-}
+// DB接続共通モジュール読み込み
+require_once __DIR__ . '/includes/db.php';
 
 // 全スタッフを取得
 $stmt = $pdo->query("SELECT staff_id, staff_name, kana, kana_row, role FROM staff WHERE is_deleted = FALSE ORDER BY kana ASC");

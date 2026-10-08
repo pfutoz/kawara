@@ -12,13 +12,9 @@ if (isset($_SERVER['REQUEST_METHOD']) && $_SERVER['REQUEST_METHOD'] === 'OPTIONS
     exit;
 }
 
-$host = 'localhost'; $dbname = 'kawara'; $user = 'postgres'; $password = 'postgres';
+require_once __DIR__ . '/../includes/db.php';
 
 try {
-    $pdo = new PDO("pgsql:host={$host};dbname={$dbname}", $user, $password, [
-        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC
-    ]);
 
     // 1. アクティブな点呼イベント・災害モードの取得
     $stmt = $pdo->query("SELECT * FROM safety_events WHERE is_active = TRUE ORDER BY event_id DESC LIMIT 1");

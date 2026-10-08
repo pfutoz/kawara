@@ -1,13 +1,7 @@
 <?php
 require_once __DIR__ . '/includes/auth_helper.php';
 
-$host = 'localhost'; $dbname = 'kawara'; $user = 'postgres'; $password = 'postgres';
-try {
-    $pdo = new PDO("pgsql:host={$host};dbname={$dbname}", $user, $password, [
-        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC
-    ]);
-} catch (PDOException $e) { exit('DB接続エラー: ' . $e->getMessage()); }
+require_once __DIR__ . '/includes/db.php';
 
 if (file_exists(__DIR__ . '/includes/line_helper.php')) {
     require_once __DIR__ . '/includes/line_helper.php';
@@ -425,7 +419,7 @@ foreach ($target_members as $tm) {
                 </button>
             <?php endif; ?>
             <?php if ($can_edit): ?>
-                <a href="create_post.php?id=<?= $post_id ?>" class="btn-edit">✏️ 記事を編集する（投稿者/管理者専用）</a>
+                <a href="create_post.php?id=<?= $post_id ?>&return_to=view" class="btn-edit">✏️ 記事を編集する（投稿者/管理者専用）</a>
             <?php endif; ?>
         </div>
 

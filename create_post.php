@@ -1,20 +1,8 @@
 <?php
 require_once __DIR__ . '/includes/auth_helper.php';
 
-// 2. DB接続設定
-$host = 'localhost';
-$dbname = 'kawara';
-$user = 'postgres';
-$password = 'postgres';
-
-try {
-    $pdo = new PDO("pgsql:host={$host};dbname={$dbname}", $user, $password, [
-        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC
-    ]);
-} catch (PDOException $e) {
-    exit('DB接続エラー: ' . $e->getMessage());
-}
+// 2. DB接続
+require_once __DIR__ . '/includes/db.php';
 
 // 📱 端末固定Cookieがあれば自動復元！なければlogin.phpへ
 $login_user = checkAuthOrAutoLogin($pdo, $_SERVER['REQUEST_URI'] ?? '');
@@ -26,25 +14,13 @@ if (file_exists(__DIR__ . '/includes/calendar_helper_jimucho.php')) {
     require_once __DIR__ . '/includes/calendar_helper_jimucho.php';
 }
 
-// 3. 各種マスター ＆ スタッフ ＆ 直近の登録済みイベント（コピー元用）の取得
+// 3. 各種マスター ＆ スタッフ情報の取得
 $categories  = $pdo->query("SELECT * FROM post_categories WHERE is_active = TRUE ORDER BY display_order")->fetchAll();
 $departments = $pdo->query("SELECT * FROM target_departments WHERE is_active = TRUE ORDER BY display_order")->fetchAll();
 $staff_members = $pdo->query("SELECT staff_id, staff_name, role, kana, kana_row FROM staff WHERE is_deleted = FALSE ORDER BY kana ASC")->fetchAll();
 
-// 📋 登録済みイベント・お知らせの取得（コピー流用用：直近40件）
-$recent_source_posts = $pdo->query("
-    SELECT p.post_id, p.title, p.category_id, p.content, p.event_schedules, p.target_datetime, p.target_end_datetime,
-           c.category_name, c.icon_emoji, p.created_at,
-           (SELECT array_to_json(array_agg(dept_id)) FROM post_target_departments WHERE post_id = p.post_id) AS depts_json,
-           (SELECT array_to_json(array_agg(staff_id)) FROM post_target_staff WHERE post_id = p.post_id) AS staff_json
-    FROM posts p
-    LEFT JOIN post_categories c ON p.category_id = c.category_id
-    ORDER BY p.post_id DESC
-    LIMIT 40
-")->fetchAll();
-
-// 4. 編集モード判定と既存データの読み込み
-$post_id = isset($_GET['id']) ? (int)$_GET['id'] : 0;
+// 4. 編集モード判定と既存データの読み込み (id または edit_id に対応)
+$post_id = isset($_GET['id']) ? (int)$_GET['id'] : (isset($_GET['edit_id']) ? (int)$_GET['edit_id'] : 0);
 $post_data = null;
 $selected_depts = [];
 $selected_staff = [];
@@ -94,6 +70,57 @@ if ($post_id > 0) {
 $is_edit = ($post_data !== null);
 $page_title = $is_edit ? '✏️ お知らせ・予定の編集（修正モード）' : '📝 新規お知らせ・予定の作成';
 $is_unlimited = empty($post_data['display_until'] ?? '');
+
+// 📋 登録済みイベント・お知らせの取得（完全新規作成時のみ取得して誤操作を防止）
+$recent_source_posts = [];
+if (!$is_edit) {
+    $recent_source_posts = $pdo->query("
+        SELECT p.post_id, p.title, p.category_id, p.content, p.event_schedules, p.target_datetime, p.target_end_datetime,
+               c.category_name, c.icon_emoji, p.created_at,
+               (SELECT array_to_json(array_agg(dept_id)) FROM post_target_departments WHERE post_id = p.post_id) AS depts_json,
+               (SELECT array_to_json(array_agg(staff_id)) FROM post_target_staff WHERE post_id = p.post_id) AS staff_json
+        FROM posts p
+        LEFT JOIN post_categories c ON p.category_id = c.category_id
+        ORDER BY p.post_id DESC
+        LIMIT 40
+    ")->fetchAll();
+}
+
+// 🔙 呼び出し元（return_to）の判定と適切な戻り先・ラベルの決定
+$return_to = $_GET['return_to'] ?? '';
+if (empty($return_to) && !empty($_SERVER['HTTP_REFERER'])) {
+    $ref = $_SERVER['HTTP_REFERER'];
+    if (strpos($ref, 'jimucho_dashboard.php') !== false) {
+        $return_to = 'jimucho';
+    } elseif (strpos($ref, 'view_post.php') !== false) {
+        $return_to = 'view';
+    } elseif (strpos($ref, 'index.php') !== false) {
+        $return_to = 'index';
+    }
+}
+
+if ($return_to === 'jimucho' || $return_to === 'jimucho_dashboard.php') {
+    $back_url = 'jimucho_dashboard.php';
+    $back_label = '👔 事務長ダッシュボードへ戻る';
+} elseif (($return_to === 'view' || strpos($return_to, 'view_post.php') !== false) && $post_id > 0) {
+    $back_url = "view_post.php?id={$post_id}";
+    $back_label = '🔍 記事詳細へ戻る';
+} else {
+    $back_url = 'index.php';
+    $back_label = '🏠 かわら版一覧へ戻る';
+}
+
+// 掲載終了予定日の初期プレビュー表示（曜日付き）
+$until_preview = '♾️ 無期限';
+if (!$is_unlimited && !empty($post_data['display_until'])) {
+    $u_ts = strtotime($post_data['display_until']);
+    if ($u_ts) {
+        $dows = ['日', '月', '火', '水', '木', '金', '土'];
+        $until_preview = date('Y/m/d', $u_ts) . '(' . $dows[(int)date('w', $u_ts)] . ') ' . date('H:i', $u_ts);
+    } else {
+        $until_preview = htmlspecialchars($post_data['display_until']);
+    }
+}
 
 // デフォルトの日程が空の場合
 if (empty($existing_schedules)) {
@@ -559,12 +586,13 @@ if (empty($existing_schedules)) {
             <span><?= $is_edit ? '✏️' : '📝' ?></span>
             <span><?= $page_title ?></span>
         </h1>
-        <a href="jimucho_dashboard.php" style="color:#0284c7; text-decoration:none; font-weight:bold; font-size:0.9rem;">
-            👔 事務長ダッシュボードへ戻る
+        <a href="<?= htmlspecialchars($back_url) ?>" style="color:#0284c7; text-decoration:none; font-weight:bold; font-size:0.9rem;">
+            <?= htmlspecialchars($back_label) ?>
         </a>
     </div>
 
-    <!-- 1. 📋 過去のお知らせ・イベントからコピーして作成バー -->
+    <!-- 1. 📋 過去のお知らせ・イベントからコピーして作成バー（完全新規作成時のみ表示） -->
+    <?php if (!$is_edit): ?>
     <div class="copy-source-bar">
         <div class="copy-source-label">
             <span>📋 登録済みのイベント・お知らせをコピーして作成:</span>
@@ -584,6 +612,7 @@ if (empty($existing_schedules)) {
             </button>
         </div>
     </div>
+    <?php endif; ?>
 
     <!-- 2. 📝 修正モード専用：変更検知差分パネル（リアルタイム監視） -->
     <?php if ($is_edit): ?>
@@ -600,6 +629,7 @@ if (empty($existing_schedules)) {
     <form action="confirm_post.php" method="POST" enctype="multipart/form-data" id="postForm" onkeydown="return preventEnterSubmit(event);">
         <input type="hidden" name="post_id" value="<?= $post_id ?>">
         <input type="hidden" name="mode" id="f_mode" value="<?= $is_edit ? 'update' : 'create' ?>">
+        <input type="hidden" name="return_to" value="<?= htmlspecialchars($return_to) ?>">
         
         <!-- 複数日程 JSON データ格納用 -->
         <input type="hidden" name="event_schedules" id="f_event_schedules" value="<?= htmlspecialchars(json_encode($existing_schedules)) ?>">
@@ -725,7 +755,7 @@ if (empty($existing_schedules)) {
                     <button type="button" class="btn-period" onclick="selectPeriod(30, this)">1ヶ月</button>
                 </div>
                 <div style="font-size:0.9rem; font-weight:bold; color:#475569; background:#fff; padding:6px 14px; border:1px solid #cbd5e1; border-radius:6px;">
-                    掲載終了予定: <span id="lbl_display_until_preview" style="color:#0284c7;"><?= $is_unlimited ? '♾️ 無期限' : htmlspecialchars($post_data['display_until']) ?></span>
+                    掲載終了予定: <span id="lbl_display_until_preview" style="color:#0284c7;"><?= $until_preview ?></span>
                 </div>
                 <input type="hidden" name="display_until" id="f_display_until" value="<?= htmlspecialchars($post_data['display_until'] ?? '') ?>">
             </div>
@@ -781,7 +811,7 @@ if (empty($existing_schedules)) {
         <!-- アクションボタンバー -->
         <div class="btn-bar">
             <div>
-                <a href="jimucho_dashboard.php" style="color:#64748b; text-decoration:none; margin-right:15px; font-weight:bold;">
+                <a href="<?= htmlspecialchars($back_url) ?>" style="color:#64748b; text-decoration:none; margin-right:15px; font-weight:bold;">
                     ← キャンセル
                 </a>
                 <?php if ($is_edit): ?>
@@ -879,8 +909,45 @@ function showToast(msg) {
 }
 
 // -------------------------------------------------------------
-// 🗓️ 複数日程スロットのレンダリング ＆ 操作
+// 🗓️ 複数日程スロットのレンダリング ＆ 操作（曜日表示付き）
 // -------------------------------------------------------------
+function formatDowBadge(dateStr) {
+    if (!dateStr) return '<span style="color:#94a3b8; font-size:0.78rem; font-weight:normal;">(日付未指定)</span>';
+    const parts = dateStr.split('-');
+    if (parts.length !== 3) return '';
+    const y = parseInt(parts[0], 10);
+    const m = parseInt(parts[1], 10) - 1;
+    const d = parseInt(parts[2], 10);
+    const dt = new Date(y, m, d);
+    if (isNaN(dt.getTime())) return '';
+
+    const dows = ['日', '月', '火', '水', '木', '金', '土'];
+    const w = dt.getDay();
+    const dowText = dows[w];
+
+    let style = 'background:#f1f5f9; color:#334155; border:1px solid #cbd5e1;';
+    let extra = '';
+    if (w === 0) {
+        style = 'background:#fee2e2; color:#b91c1c; border:1px solid #fca5a5;';
+        extra = ' (休診)';
+    } else if (w === 6) {
+        style = 'background:#dbeafe; color:#1d4ed8; border:1px solid #93c5fd;';
+    } else if (w === 3) {
+        style = 'background:#fef3c7; color:#b45309; border:1px solid #fde68a;';
+        extra = ' (水曜)';
+    }
+
+    return `<span style="${style} font-size:0.78rem; font-weight:800; padding:2px 7px; border-radius:5px; display:inline-flex; align-items:center; gap:2px;">📅 (${dowText})${extra}</span>`;
+}
+
+function updateSlotDate(index, value) {
+    updateSlot(index, 'date', value);
+    const badge = document.getElementById(`slot-dow-badge-${index}`);
+    if (badge) {
+        badge.innerHTML = formatDowBadge(value);
+    }
+}
+
 function renderScheduleSlots() {
     const container = document.getElementById('schedule-slots-container');
     container.innerHTML = '';
@@ -903,8 +970,11 @@ function renderScheduleSlots() {
 
             <div class="slot-grid-row">
                 <div>
-                    <label style="font-size:0.8rem; font-weight:bold; margin-bottom:3px; display:block;">実施日 <span style="color:red;">*</span></label>
-                    <input type="date" class="form-control slot-input-date" value="${slot.date || ''}" onchange="updateSlot(${index}, 'date', this.value)">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:3px; gap:6px;">
+                        <label style="font-size:0.8rem; font-weight:bold; margin-bottom:0;">実施日 <span style="color:red;">*</span></label>
+                        <span id="slot-dow-badge-${index}">${formatDowBadge(slot.date)}</span>
+                    </div>
+                    <input type="date" class="form-control slot-input-date" value="${slot.date || ''}" onchange="updateSlotDate(${index}, this.value)" oninput="updateSlotDate(${index}, this.value)">
                 </div>
 
                 <div class="slot-time-start-box" style="${isAllDay ? 'display:none;' : ''}">
@@ -1277,9 +1347,10 @@ function selectPeriod(days, btn) {
         d.setDate(d.getDate() + days);
         const yyyy = d.getFullYear();
         const mm = String(d.getMonth() + 1).padStart(2, '0');
-        const dd = String(d.getDate()).padStart(2, '0');
+        const dows = ['日', '月', '火', '水', '木', '金', '土'];
+        const dow = dows[d.getDay()];
         document.getElementById('f_display_until').value = `${yyyy}-${mm}-${dd} 23:59:00`;
-        document.getElementById('lbl_display_until_preview').textContent = `${yyyy}/${mm}/${dd} 23:59`;
+        document.getElementById('lbl_display_until_preview').textContent = `${yyyy}/${mm}/${dd}(${dow}) 23:59`;
     }
     onFieldChange();
 }

@@ -1,18 +1,6 @@
 <?php
-// DB接続設定
-$host = 'localhost';
-$dbname = 'kawara';
-$user = 'postgres';
-$password = 'postgres';
-
-try {
-    $pdo = new PDO("pgsql:host={$host};dbname={$dbname}", $user, $password, [
-        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC
-    ]);
-} catch (PDOException $e) {
-    exit('DB接続エラー: ' . $e->getMessage());
-}
+// DB接続共通モジュール読み込み
+require_once __DIR__ . '/includes/db.php';
 
 // LINEヘルパーサブルーチンの読み込み
 if (file_exists(__DIR__ . '/includes/line_helper.php')) {
@@ -24,6 +12,7 @@ $mode = $_POST['mode'] ?? 'create'; // create, update, delete
 $post_id = (int)($_POST['post_id'] ?? 0);
 $action = $_POST['action'] ?? 'confirm'; // confirm (表示), save (確定実行)
 $send_line = isset($_POST['send_line']) && $_POST['send_line'] === '1';
+$return_to = $_POST['return_to'] ?? '';
 
 // 画像の一時保存ディレクトリ作成
 $tmp_dir = __DIR__ . '/uploads/tmp/';
@@ -69,7 +58,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'save') {
         if ($mode === 'delete' && $post_id > 0) {
             $pdo->prepare("DELETE FROM posts WHERE post_id = :post_id")->execute([':post_id' => $post_id]);
             $pdo->commit();
-            header('Location: /kawara/index.php?msg=deleted');
+            $del_dest = ($return_to === 'jimucho' || $return_to === 'jimucho_dashboard.php') ? 'jimucho_dashboard.php?msg=deleted' : '/kawara/index.php?msg=deleted';
+            header("Location: {$del_dest}");
             exit;
         }
 
@@ -213,7 +203,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'save') {
             $_SESSION['notice_msg'] = "投稿を保存しました。（※LINE通知は送信されませんでした）";
         }
 
-        header('Location: /kawara/index.php?msg=saved');
+        if ($return_to === 'jimucho' || $return_to === 'jimucho_dashboard.php') {
+            $dest = 'jimucho_dashboard.php?msg=saved';
+        } elseif (($return_to === 'view' || strpos($return_to, 'view_post.php') !== false) && $post_id > 0) {
+            $dest = "view_post.php?id={$post_id}&msg=saved";
+        } else {
+            $dest = '/kawara/index.php?msg=saved';
+        }
+        header("Location: {$dest}");
         exit;
     } catch (Exception $e) {
         $pdo->rollBack();
@@ -463,6 +460,7 @@ $btn_class = ($mode === 'delete') ? 'btn-delete-submit' : 'btn-save';
         <input type="hidden" name="action" value="save">
         <input type="hidden" name="mode" value="<?= htmlspecialchars($mode) ?>">
         <input type="hidden" name="post_id" value="<?= htmlspecialchars($post_id) ?>">
+        <input type="hidden" name="return_to" value="<?= htmlspecialchars($return_to) ?>">
         <input type="hidden" name="send_line" value="<?= $send_line ? '1' : '0' ?>">
         <input type="hidden" name="category_id" value="<?= htmlspecialchars($_POST['category_id'] ?? '1') ?>">
         <input type="hidden" name="is_pinned" value="<?= htmlspecialchars($_POST['is_pinned'] ?? '0') ?>">
