@@ -326,6 +326,21 @@ foreach ($target_members as $tm) {
                 $multi_schedules = $dec;
             }
         }
+
+        // 📅 Googleカレンダー詳細欄用にお知らせ本文をプレーンテキスト整形
+        $raw_body = $post['content'] ?? '';
+        $clean_body = str_replace(["\r\n", "\r"], "\n", $raw_body);
+        $clean_body = preg_replace('/<br\s*\/?>/i', "\n", $clean_body);
+        $clean_body = preg_replace('/<\/p>/i', "\n", $clean_body);
+        $clean_body = preg_replace('/<\/div>/i', "\n", $clean_body);
+        $clean_body = strip_tags($clean_body);
+        $clean_body = html_entity_decode($clean_body, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $clean_body = preg_replace("/\n{3,}/", "\n\n", trim($clean_body));
+        if (mb_strlen($clean_body) > 1000) {
+            $clean_body = mb_substr($clean_body, 0, 1000) . "\n…(以下省略)";
+        }
+        $host = $_SERVER['HTTP_HOST'] ?? '192.168.1.16';
+        $post_url = "http://" . $host . "/kawara/view_post.php?id=" . $post_id;
         ?>
 
         <?php if (!empty($multi_schedules)): ?>
@@ -351,8 +366,22 @@ foreach ($target_members as $tm) {
                         if (!$sch_is_all_day && !empty($sch['end_time'])) {
                             $end_val = date('Y-m-d', $s_ts) . ' ' . $sch['end_time'] . ':00';
                         }
-                        $host = $_SERVER['HTTP_HOST'] ?? '192.168.1.16';
-                        $dtl = "【院内かわら版】" . $post['title'] . "\n" . ($memo ? "メモ: " . $memo . "\n" : "") . "http://" . $host . "/kawara/view_post.php?id=" . $post_id;
+                        
+                        $dtl_lines = [];
+                        $dtl_lines[] = "【院内かわら版】" . $post['title'] . " (第" . ($idx + 1) . "回)";
+                        if ($memo) {
+                            $dtl_lines[] = "※メモ: " . $memo;
+                        }
+                        if ($clean_body !== '') {
+                            $dtl_lines[] = "";
+                            $dtl_lines[] = "【お知らせ本文】";
+                            $dtl_lines[] = $clean_body;
+                        }
+                        $dtl_lines[] = "";
+                        $dtl_lines[] = "▼ かわら版で確認・意思表示する：";
+                        $dtl_lines[] = $post_url;
+                        $dtl = implode("\n", $dtl_lines);
+
                         $gcal_url = build_google_calendar_add_url($post['title'] . " (第" . ($idx + 1) . "回)", $start_val, $end_val, $sch_is_all_day, $dtl, $loc);
                     }
                 ?>
@@ -374,14 +403,24 @@ foreach ($target_members as $tm) {
             <?php
             $single_gcal_url = '#';
             if (function_exists('build_google_calendar_add_url') && $start_dt) {
-                $host = $_SERVER['HTTP_HOST'] ?? '192.168.1.16';
-                $dtl = "【院内かわら版】" . $post['title'] . "\nhttp://" . $host . "/kawara/view_post.php?id=" . $post_id;
+                $dtl_lines = [];
+                $dtl_lines[] = "【院内かわら版】" . $post['title'];
+                if ($clean_body !== '') {
+                    $dtl_lines[] = "";
+                    $dtl_lines[] = "【お知らせ本文】";
+                    $dtl_lines[] = $clean_body;
+                }
+                $dtl_lines[] = "";
+                $dtl_lines[] = "▼ かわら版で確認・意思表示する：";
+                $dtl_lines[] = $post_url;
+                $single_dtl = implode("\n", $dtl_lines);
+
                 $single_gcal_url = build_google_calendar_add_url(
                     $post['title'], 
                     $start_dt->format('Y-m-d H:i:s'), 
                     $end_dt ? $end_dt->format('Y-m-d H:i:s') : null, 
                     false, 
-                    $dtl, 
+                    $single_dtl, 
                     ''
                 );
             }
