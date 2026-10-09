@@ -80,7 +80,7 @@ function get_google_access_token(): array {
     $header = ['alg' => 'RS256', 'typ' => 'JWT'];
     $claims = [
         'iss'   => $key_data['client_email'],
-        'scope' => 'https://www.googleapis.com/auth/calendar.readonly',
+        'scope' => 'https://www.googleapis.com/auth/calendar',
         'aud'   => 'https://oauth2.googleapis.com/token',
         'exp'   => $now + 3600,
         'iat'   => $now
@@ -480,4 +480,294 @@ function build_google_calendar_add_url(
 
     return 'https://calendar.google.com/calendar/render?' . http_build_query($params);
 }
+
+/**
+ * 📅 Googleカレンダーに予定を新規作成（API書き込み）
+ * 
+ * @param string $calendarId GoogleカレンダーID
+ * @param array  $eventData 予定情報
+ *   - summary: (string) タイトル
+ *   - start: (string|array) 開始日時 ('YYYY-MM-DD', 'YYYY-MM-DD HH:MM:SS', またはGoogle形式 ['dateTime'=>..., 'timeZone'=>...])
+ *   - end: (string|array|null) 終了日時
+ *   - is_all_day: (bool) 終日フラグ
+ *   - description: (string) 本文・メモ
+ *   - location: (string) 場所
+ * @return array ['success' => bool, 'event_id' => string, 'html_link' => string, 'message' => string, 'data' => array, 'error' => string]
+ */
+function create_google_calendar_event(string $calendarId, array $eventData): array {
+    $token_res = get_google_access_token();
+    if (!$token_res['success']) {
+        return ['success' => false, 'event_id' => '', 'html_link' => '', 'error' => $token_res['error']];
+    }
+
+    $payload = build_gcal_api_payload($eventData);
+    if (empty($payload['summary'])) {
+        return ['success' => false, 'event_id' => '', 'html_link' => '', 'error' => '予定タイトル(summary)が指定されていません'];
+    }
+
+    $url = "https://www.googleapis.com/calendar/v3/calendars/" . urlencode($calendarId) . "/events";
+
+    $ch = curl_init($url);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_POST, true);
+    curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload, JSON_UNESCAPED_UNICODE));
+    curl_setopt($ch, CURLOPT_HTTPHEADER, [
+        "Authorization: Bearer {$token_res['access_token']}",
+        "Content-Type: application/json"
+    ]);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 15);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
+
+    $response = curl_exec($ch);
+    $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $curl_error = curl_error($ch);
+
+    if ($curl_error) {
+        return ['success' => false, 'event_id' => '', 'html_link' => '', 'error' => "通信エラー: {$curl_error}"];
+    }
+
+    $res_data = json_decode($response, true);
+    if ($http_code !== 200 && $http_code !== 201) {
+        $err_msg = $res_data['error']['message'] ?? "HTTP {$http_code}";
+        return ['success' => false, 'event_id' => '', 'html_link' => '', 'error' => "Google APIエラー ({$http_code}): {$err_msg}", 'data' => $res_data];
+    }
+
+    return [
+        'success'   => true,
+        'event_id'  => $res_data['id'] ?? '',
+        'html_link' => $res_data['htmlLink'] ?? '',
+        'message'   => 'Googleカレンダーに予定を登録しました',
+        'data'      => $res_data
+    ];
+}
+
+/**
+ * 📅 Googleカレンダーの予定を更新（API書き込み・PATCH）
+ * 
+ * @param string $calendarId GoogleカレンダーID
+ * @param string $eventId    GoogleイベントID
+ * @param array  $eventData  更新するフィールド情報
+ * @return array ['success' => bool, 'event_id' => string, 'html_link' => string, 'message' => string, 'data' => array, 'error' => string]
+ */
+function update_google_calendar_event(string $calendarId, string $eventId, array $eventData): array {
+    $token_res = get_google_access_token();
+    if (!$token_res['success']) {
+        return ['success' => false, 'event_id' => $eventId, 'html_link' => '', 'error' => $token_res['error']];
+    }
+
+    $payload = build_gcal_api_payload($eventData, true);
+
+    $url = "https://www.googleapis.com/calendar/v3/calendars/" . urlencode($calendarId) . "/events/" . urlencode($eventId);
+
+    $ch = curl_init($url);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'PATCH');
+    curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload, JSON_UNESCAPED_UNICODE));
+    curl_setopt($ch, CURLOPT_HTTPHEADER, [
+        "Authorization: Bearer {$token_res['access_token']}",
+        "Content-Type: application/json"
+    ]);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 15);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
+
+    $response = curl_exec($ch);
+    $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $curl_error = curl_error($ch);
+
+    if ($curl_error) {
+        return ['success' => false, 'event_id' => $eventId, 'html_link' => '', 'error' => "通信エラー: {$curl_error}"];
+    }
+
+    $res_data = json_decode($response, true);
+    if ($http_code !== 200) {
+        $err_msg = $res_data['error']['message'] ?? "HTTP {$http_code}";
+        return ['success' => false, 'event_id' => $eventId, 'html_link' => '', 'error' => "Google API更新エラー ({$http_code}): {$err_msg}", 'data' => $res_data];
+    }
+
+    return [
+        'success'   => true,
+        'event_id'  => $res_data['id'] ?? $eventId,
+        'html_link' => $res_data['htmlLink'] ?? '',
+        'message'   => 'Googleカレンダーの予定を更新しました',
+        'data'      => $res_data
+    ];
+}
+
+/**
+ * 🗑️ Googleカレンダーの予定を削除（API書き込み・DELETE）
+ * 
+ * @param string $calendarId GoogleカレンダーID
+ * @param string $eventId    GoogleイベントID
+ * @return array ['success' => bool, 'message' => string, 'error' => string]
+ */
+function delete_google_calendar_event(string $calendarId, string $eventId): array {
+    $token_res = get_google_access_token();
+    if (!$token_res['success']) {
+        return ['success' => false, 'error' => $token_res['error']];
+    }
+
+    $url = "https://www.googleapis.com/calendar/v3/calendars/" . urlencode($calendarId) . "/events/" . urlencode($eventId);
+
+    $ch = curl_init($url);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'DELETE');
+    curl_setopt($ch, CURLOPT_HTTPHEADER, ["Authorization: Bearer {$token_res['access_token']}"]);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 15);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
+
+    $response = curl_exec($ch);
+    $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $curl_error = curl_error($ch);
+
+    if ($curl_error) {
+        return ['success' => false, 'error' => "通信エラー: {$curl_error}"];
+    }
+
+    if ($http_code !== 204 && $http_code !== 200 && $http_code !== 410 && $http_code !== 404) {
+        $res_data = json_decode($response, true);
+        $err_msg = $res_data['error']['message'] ?? "HTTP {$http_code}";
+        return ['success' => false, 'error' => "Google API削除エラー ({$http_code}): {$err_msg}"];
+    }
+
+    return ['success' => true, 'message' => 'Googleカレンダーから予定を削除しました'];
+}
+
+/**
+ * GoogleカレンダーAPI用ペイロード生成ヘルパー
+ */
+function build_gcal_api_payload(array $data, bool $is_patch = false): array {
+    $payload = [];
+
+    if (isset($data['summary'])) {
+        $payload['summary'] = trim($data['summary']);
+    }
+    if (isset($data['description'])) {
+        $payload['description'] = (string)$data['description'];
+    }
+    if (isset($data['location'])) {
+        $payload['location'] = (string)$data['location'];
+    }
+
+    $is_all_day = !empty($data['is_all_day']);
+
+    if (isset($data['start'])) {
+        if (is_array($data['start'])) {
+            $payload['start'] = $data['start'];
+        } elseif ($is_all_day) {
+            $s_date = date('Y-m-d', is_numeric($data['start']) ? (int)$data['start'] : strtotime((string)$data['start']));
+            $payload['start'] = ['date' => $s_date];
+        } else {
+            $s_iso = date('c', is_numeric($data['start']) ? (int)$data['start'] : strtotime((string)$data['start']));
+            $payload['start'] = ['dateTime' => $s_iso, 'timeZone' => 'Asia/Tokyo'];
+        }
+    }
+
+    if (isset($data['end'])) {
+        if (is_array($data['end'])) {
+            $payload['end'] = $data['end'];
+        } elseif ($is_all_day) {
+            $e_ts = is_numeric($data['end']) ? (int)$data['end'] : strtotime((string)$data['end']);
+            // 終日の終了日は翌日（Google仕様）
+            $e_date = date('Y-m-d', strtotime('+1 day', $e_ts));
+            $payload['end'] = ['date' => $e_date];
+        } else {
+            $e_iso = date('c', is_numeric($data['end']) ? (int)$data['end'] : strtotime((string)$data['end']));
+            $payload['end'] = ['dateTime' => $e_iso, 'timeZone' => 'Asia/Tokyo'];
+        }
+    } elseif (isset($data['start']) && !$is_patch) {
+        // endが省略された場合、自動設定
+        if ($is_all_day) {
+            $s_ts = is_numeric($data['start']) ? (int)$data['start'] : strtotime((string)$data['start']);
+            $e_date = date('Y-m-d', strtotime('+1 day', $s_ts));
+            $payload['end'] = ['date' => $e_date];
+        } else {
+            $s_ts = is_numeric($data['start']) ? (int)$data['start'] : strtotime((string)$data['start']);
+            $e_iso = date('c', strtotime('+1 hour', $s_ts));
+            $payload['end'] = ['dateTime' => $e_iso, 'timeZone' => 'Asia/Tokyo'];
+        }
+    }
+
+    return $payload;
+}
+
+/**
+ * 💾 作成・更新したGoogleイベントをローカルキャッシュテーブルに即時保存
+ */
+function save_gcal_event_to_cache(PDO $pdo, int $channelId, string $calendarId, array $item): bool {
+    if (empty($item['id'])) return false;
+
+    $eid     = $item['id'];
+    $summary = trim($item['summary'] ?? '(無題の予定)');
+    $desc    = $item['description'] ?? '';
+    $loc     = $item['location'] ?? '';
+    $link    = $item['htmlLink'] ?? '';
+    $status  = $item['status'] ?? 'confirmed';
+
+    $is_all_day = false;
+    $start_dt = '';
+    $end_dt   = '';
+
+    if (!empty($item['start']['dateTime'])) {
+        $start_dt = date('Y-m-d H:i:s', strtotime($item['start']['dateTime']));
+        $end_dt   = date('Y-m-d H:i:s', strtotime($item['end']['dateTime'] ?? $item['start']['dateTime']));
+    } elseif (!empty($item['start']['date'])) {
+        $is_all_day = true;
+        $start_dt = $item['start']['date'] . ' 00:00:00';
+        $end_raw  = $item['end']['date'] ?? $item['start']['date'];
+        $end_dt   = date('Y-m-d 23:59:59', strtotime($end_raw . ' -1 day'));
+        if (strtotime($end_dt) < strtotime($start_dt)) {
+            $end_dt = $item['start']['date'] . ' 23:59:59';
+        }
+    } else {
+        return false;
+    }
+
+    $stmt = $pdo->prepare("
+        INSERT INTO google_calendar_events_cache (
+            event_id, channel_id, calendar_id, title, description, location,
+            start_datetime, end_datetime, is_all_day, html_link, status, synced_at
+        ) VALUES (
+            :event_id, :channel_id, :calendar_id, :title, :description, :location,
+            :start_datetime, :end_datetime, :is_all_day, :html_link, :status, NOW()
+        )
+        ON CONFLICT (event_id) DO UPDATE SET
+            channel_id     = EXCLUDED.channel_id,
+            calendar_id    = EXCLUDED.calendar_id,
+            title          = EXCLUDED.title,
+            description    = EXCLUDED.description,
+            location       = EXCLUDED.location,
+            start_datetime = EXCLUDED.start_datetime,
+            end_datetime   = EXCLUDED.end_datetime,
+            is_all_day     = EXCLUDED.is_all_day,
+            html_link      = EXCLUDED.html_link,
+            status         = EXCLUDED.status,
+            synced_at      = NOW()
+    ");
+
+    return $stmt->execute([
+        ':event_id'       => $eid,
+        ':channel_id'     => $channelId,
+        ':calendar_id'    => $calendarId,
+        ':title'          => $summary,
+        ':description'    => $desc,
+        ':location'       => $loc,
+        ':start_datetime' => $start_dt,
+        ':end_datetime'   => $end_dt,
+        ':is_all_day'     => $is_all_day ? 'true' : 'false',
+        ':html_link'      => $link,
+        ':status'         => $status
+    ]);
+}
+
+/**
+ * 🗑️ 削除されたGoogleイベントをローカルキャッシュテーブルから即時削除
+ */
+function delete_gcal_event_from_cache(PDO $pdo, string $eventId): bool {
+    $stmt = $pdo->prepare("DELETE FROM google_calendar_events_cache WHERE event_id = :eid");
+    return $stmt->execute([':eid' => $eventId]);
+}
+
 
