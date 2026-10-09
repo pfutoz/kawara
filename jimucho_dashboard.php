@@ -26,6 +26,7 @@ require_once __DIR__ . '/includes/google_calendar_helper.php';
 if (file_exists(__DIR__ . '/includes/line_helper.php')) {
     require_once __DIR__ . '/includes/line_helper.php';
 }
+require_once __DIR__ . '/includes/doctor_schedule_helper.php';
 
 // 3.5 Ajax API エンドポイント（イベント詳細・部署別既読・全日程スロット取得・Google同期・ダッシュボードメモ保存）
 if (isset($_GET['action']) && $_GET['action'] === 'sync_gcal') {
@@ -500,6 +501,15 @@ if (!empty($gcal_channels) && (!$last_gcal_sync_ts || (time() - strtotime($last_
 $gcal_query_start = date('Y-m-d', min(strtotime($week_start_date), strtotime(substr($calendar_start_range, 0, 10))));
 $gcal_query_end   = date('Y-m-d', max(strtotime($week_end_date), strtotime(substr($calendar_end_range, 0, 10))));
 $gcal_raw_events  = get_cached_google_events_for_range($pdo, $gcal_query_start, $gcal_query_end);
+
+// 🌟 医師予定表 (yotei API) データの取得
+$doctor_query_start = $gcal_query_start;
+$doctor_query_end   = $gcal_query_end;
+$doctor_raw_events  = fetch_doctor_events($doctor_query_start, $doctor_query_end, ['expand_period' => 1]);
+$doctor_events_by_date = map_doctor_events_by_date($doctor_raw_events);
+$doctor_today_summary  = fetch_doctor_today_summary($today_str);
+$doctor_selected_summary = ($selected_date === $today_str) ? $doctor_today_summary : fetch_doctor_today_summary($selected_date);
+$doctor_memo = fetch_doctor_memo();
 
 // イベント分類＆全日マッピング
 $week_span_events = array_fill(0, $week_count, []); // 週ごとの帯イベント
@@ -2404,6 +2414,70 @@ if ($focus_post_id > 0) {
             .week-grid-7cols { display: flex !important; flex-direction: column !important; gap: 10px !important; }
             .week-day-col { min-height: auto !important; }
         }
+        /* 🩺 医師予定表連携スタイル */
+        .week-doctor-card {
+            background: #fff;
+            border: 1px solid #e2e8f0;
+            border-left: 4px solid #dc2626;
+            border-radius: 6px;
+            padding: 5px 8px;
+            margin-bottom: 5px;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.03);
+        }
+        .week-doctor-card:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 3px 6px rgba(0,0,0,0.07);
+        }
+        .doctor-badge-tag {
+            font-size: 0.7rem;
+            color: #fff;
+            padding: 1px 5px;
+            border-radius: 3px;
+            font-weight: 700;
+            white-space: nowrap;
+        }
+        .cal-doctor-pill {
+            display: flex;
+            align-items: center;
+            gap: 2px;
+            border-radius: 3px;
+            padding: 1px 4px;
+            font-size: 0.68rem;
+            margin-bottom: 2px;
+            font-weight: 700;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            text-decoration: none;
+            cursor: pointer;
+            line-height: 1.2;
+            transition: opacity 0.15s;
+            max-width: 100%;
+            box-sizing: border-box;
+        }
+        .cal-doctor-pill:hover {
+            opacity: 0.85;
+        }
+        .compact-mode .cal-doctor-pill {
+            font-size: 0.62rem;
+            padding: 1px 3px;
+            margin-bottom: 1px;
+        }
+        .doctor-detail-box {
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-left: 4px solid #b91c1c;
+            border-radius: 6px;
+            padding: 10px 12px;
+            margin-bottom: 8px;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .doctor-detail-box:hover {
+            background: #f1f5f9;
+        }
         @keyframes slide-in {
             from { transform: translateX(100%); opacity: 0; }
             to { transform: translateX(0); opacity: 1; }
@@ -2425,7 +2499,10 @@ if ($focus_post_id > 0) {
             ⚙️ マスタ管理
         </a>
         <a href="index.php" class="btn-switch-timeline" style="padding:5px 12px; font-size:0.8rem;">
-            📜 かわら版
+            🏠 メニュー
+        </a>
+        <a href="kawara_list.php" class="btn-switch-timeline" style="padding:5px 12px; font-size:0.8rem;">
+            📜 かわら版一覧
         </a>
     </div>
 </div>
@@ -2457,6 +2534,32 @@ if ($today_status['is_pre_off_day']) {
     </div>
 </div>
 
+<!-- 🌟 本日の医師予定（休診・全体会）クイック通知バー -->
+<?php if (!empty($doctor_today_summary['absent_doctors'])): ?>
+    <div style="background:#fef2f2; border:1px solid #fecaca; color:#991b1b; padding:7px 16px; border-radius:6px; margin-bottom:12px; display:flex; align-items:center; justify-content:space-between; font-size:0.86rem; font-weight:700; flex-wrap:wrap; gap:8px;">
+        <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+            <span>🩺 <b>【本日 医師休診】</b></span>
+            <?php foreach ($doctor_today_summary['absent_doctors'] as $adoc): ?>
+                <span style="background:#fee2e2; border:1px solid #f87171; color:#b91c1c; padding:2px 8px; border-radius:4px; font-size:0.82rem;">
+                    🔴 <?= htmlspecialchars($adoc['doctor_name']) ?>（<?= htmlspecialchars($adoc['department_name']) ?>: <?= htmlspecialchars($adoc['title']) ?> [<?= htmlspecialchars($adoc['time']) ?>]）
+                </span>
+            <?php endforeach; ?>
+        </div>
+        <a href="../yotei/calendar.php" target="_blank" style="color:#b91c1c; text-decoration:none; font-size:0.8rem; background:#fee2e2; padding:3px 10px; border-radius:4px; border:1px solid #fca5a5;">
+            医師予定表を開く ↗
+        </a>
+    </div>
+<?php elseif (!empty($doctor_today_summary['all_meeting'])): ?>
+    <div style="background:#eff6ff; border:1px solid #bfdbfe; color:#1e40af; padding:7px 16px; border-radius:6px; margin-bottom:12px; display:flex; align-items:center; justify-content:space-between; font-size:0.86rem; font-weight:700; flex-wrap:wrap; gap:8px;">
+        <div style="display:flex; align-items:center; gap:8px;">
+            <span>👥 <b>【本日開催】</b> 小野会全体会が予定されています（<?= htmlspecialchars($doctor_today_summary['all_meeting']['time'] ?? '13:00〜') ?>）</span>
+        </div>
+        <a href="../yotei/calendar.php" target="_blank" style="color:#1e40af; text-decoration:none; font-size:0.8rem; background:#dbeafe; padding:3px 10px; border-radius:4px; border:1px solid #93c5fd;">
+            医師予定表を開く ↗
+        </a>
+    </div>
+<?php endif; ?>
+
 <!-- 3. クイック操作ツールバー -->
 <div class="quick-toolbar">
     <!-- ビュー切り替えスイッチ -->
@@ -2481,6 +2584,9 @@ if ($today_status['is_pre_off_day']) {
 
     <a href="create_post.php?return_to=jimucho" class="tool-btn tool-btn-primary">
         ➕ 予定・工事の登録
+    </a>
+    <a href="../yotei/calendar.php" target="_blank" class="tool-btn" style="background:#f0fdf4; color:#166534; border:1px solid #86efac; font-weight:bold;" title="別タブで小野会 医師予定表システムを開きます">
+        🩺 医師予定表 ↗
     </a>
     <button type="button" class="tool-btn tool-btn-warning" onclick="openAbsenceSummaryModal()">
         📄 不在期間まとめ印刷（伝達シート）
@@ -2711,6 +2817,33 @@ if ($today_status['is_pre_off_day']) {
                             </div>
                         <?php endif; ?>
 
+                        <!-- 🌟 医師予定表（休診・不在・出張・診察） -->
+                        <?php if (!empty($doctor_events_by_date[$wd['date_str']])): ?>
+                            <?php foreach ($doctor_events_by_date[$wd['date_str']] as $dev): 
+                                $d_doc = $dev['doctor'] ?? [];
+                                $d_is_absence = ($dev['event_type'] === 'absence');
+                                $d_time_text = $dev['is_all_day'] ? '終日' : (($dev['start_time'] ?? '') . (!empty($dev['end_time']) ? '〜' . $dev['end_time'] : ''));
+                                $d_card_border = $d_is_absence ? '#dc2626' : ($d_doc['department_color'] ?? '#2563eb');
+                                $d_bg = $d_is_absence ? '#fff5f5' : '#f0f9ff';
+                            ?>
+                                <div class="week-doctor-card"
+                                     style="border-left-color: <?= htmlspecialchars($d_card_border) ?>; background: <?= htmlspecialchars($d_bg) ?>;"
+                                     onclick='openDoctorDetailModal(<?= json_encode($dev, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP) ?>)'
+                                     title="🩺 <?= htmlspecialchars($dev['title']) ?> (<?= htmlspecialchars($d_doc['name'] ?? '') ?>)">
+                                    <div class="wec-header">
+                                        <span style="font-size:0.95rem;"><?= htmlspecialchars($dev['event_icon'] ?? ($d_is_absence ? '🔴' : '🩺')) ?></span>
+                                        <span class="wec-time" style="color:<?= $d_is_absence ? '#b91c1c' : '#0369a1' ?>; font-weight:bold;"><?= htmlspecialchars($d_time_text) ?></span>
+                                        <span class="doctor-badge-tag" style="background:<?= htmlspecialchars($d_doc['department_color'] ?? '#475569') ?>;">
+                                            <?= htmlspecialchars($d_doc['short_name'] ?? $d_doc['name'] ?? '医師') ?>
+                                        </span>
+                                    </div>
+                                    <div class="wec-title" style="color:<?= $d_is_absence ? '#991b1b' : '#0f172a' ?>; font-weight:bold;">
+                                        <?= htmlspecialchars($dev['title']) ?>
+                                    </div>
+                                </div>
+                            <?php endforeach; ?>
+                        <?php endif; ?>
+
                         <!-- 🌟 Googleカレンダー 時間指定予定（同日） -->
                         <?php if (!empty($gcal_timed_events_by_date[$wd['date_str']])): ?>
                             <?php foreach ($gcal_timed_events_by_date[$wd['date_str']] as $gte): ?>
@@ -2734,9 +2867,9 @@ if ($today_status['is_pre_off_day']) {
                         <?php endif; ?>
 
                         <?php 
-                            $has_any_events = !empty($wd['events']) || !empty($gcal_timed_events_by_date[$wd['date_str']]);
+                            $has_any_events = !empty($wd['events']) || !empty($gcal_timed_events_by_date[$wd['date_str']]) || !empty($doctor_events_by_date[$wd['date_str']]);
                         ?>
-                        <?php if (empty($wd['events']) && empty($gcal_timed_events_by_date[$wd['date_str']])): ?>
+                        <?php if (!$has_any_events): ?>
                             <div class="empty-day-placeholder">
                                 <span style="font-size:1.4rem; opacity:0.35;">☕</span>
                                 <span>予定なし</span>
@@ -2923,6 +3056,7 @@ if ($today_status['is_pre_off_day']) {
                         
                         <div class="cal-day-header">
                             <span class="cal-day-num"><?= $d ?></span>
+                            <div style="display:flex; align-items:center; gap:2px;">
                                 <button type="button" 
                                         class="btn-day-note-add" 
                                         title="この日のメモを入力・編集"
@@ -2954,6 +3088,38 @@ if ($today_status['is_pre_off_day']) {
                                 </div>
                             <?php endif; ?>
 
+                            <?php 
+                            $disp_count = 0;
+                            $day_doc_list = $doctor_events_by_date[$cur_date_str] ?? [];
+                            $total_day_items = count($day_events) + count($day_gcal_events) + count($day_doc_list);
+                            $max_disp = 3;
+                            ?>
+
+                            <!-- 🌟 医師予定ピル（休診・不在・診察） -->
+                            <?php if (!empty($day_doc_list)): ?>
+                                <?php foreach ($day_doc_list as $dev): 
+                                    if ($disp_count >= $max_disp) {
+                                        $rem = $total_day_items - $disp_count;
+                                        echo '<div style="font-size:0.62rem; color:#64748b; font-weight:bold; padding-left:2px;">＋他 ' . $rem . ' 件</div>';
+                                        break;
+                                    }
+                                    $disp_count++;
+                                    $d_doc = $dev['doctor'] ?? [];
+                                    $d_is_abs = ($dev['event_type'] === 'absence');
+                                    $pill_bg = $d_is_abs ? '#fef2f2' : '#f0f9ff';
+                                    $pill_fg = $d_is_abs ? '#b91c1c' : '#0369a1';
+                                    $pill_border = $d_is_abs ? '#fca5a5' : '#bae6fd';
+                                    $doc_label = $d_doc['short_name'] ?? $d_doc['name'] ?? '医師';
+                                ?>
+                                    <div class="cal-doctor-pill" 
+                                         style="background:<?= $pill_bg ?>; color:<?= $pill_fg ?>; border:1px solid <?= $pill_border ?>;"
+                                         onclick='event.preventDefault(); event.stopPropagation(); openDoctorDetailModal(<?= json_encode($dev, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP) ?>)'
+                                         title="🩺 <?= htmlspecialchars($dev['title']) ?> (<?= htmlspecialchars($d_doc['name'] ?? '') ?>)">
+                                        <?= htmlspecialchars($dev['event_icon'] ?? ($d_is_abs ? '🔴' : '🩺')) ?> <?= htmlspecialchars($doc_label) ?>: <?= htmlspecialchars($dev['title']) ?>
+                                    </div>
+                                <?php endforeach; ?>
+                            <?php endif; ?>
+
                             <?php if ($has_absence_warn): ?>
                                 <div class="cal-event-pill-warn" title="事務長不在日の作業・予定が入っています">
                                     ⚠️ 不在日 (<?= count($day_events) + count($day_gcal_events) ?>件)
@@ -2961,11 +3127,10 @@ if ($today_status['is_pre_off_day']) {
                             <?php endif; ?>
 
                             <?php 
-                            $disp_count = 0;
                             // 瓦版イベントの表示
                             foreach ($day_events as $ev): 
-                                if ($disp_count >= 2) {
-                                    $rem = (count($day_events) + count($day_gcal_events)) - 2;
+                                if ($disp_count >= $max_disp) {
+                                    $rem = $total_day_items - $disp_count;
                                     echo '<div style="font-size:0.62rem; color:#64748b; font-weight:bold; padding-left:2px;">＋他 ' . $rem . ' 件</div>';
                                     break;
                                 }
@@ -2988,8 +3153,8 @@ if ($today_status['is_pre_off_day']) {
 
                             <!-- 🌟 Googleカレンダー予定の表示 -->
                             <?php foreach ($day_gcal_events as $gev): 
-                                if ($disp_count >= 3) {
-                                    $rem = (count($day_events) + count($day_gcal_events)) - 3;
+                                if ($disp_count >= $max_disp) {
+                                    $rem = $total_day_items - $disp_count;
                                     echo '<div style="font-size:0.62rem; color:#64748b; font-weight:bold; padding-left:2px;">＋他 ' . $rem . ' 件</div>';
                                     break;
                                 }
@@ -3000,7 +3165,7 @@ if ($today_status['is_pre_off_day']) {
                                      style="border-left-color: <?= htmlspecialchars($gev['color_theme']) ?>;"
                                      title="<?= htmlspecialchars($gev['title']) ?> (<?= htmlspecialchars($gev['calendar_name']) ?>)"
                                      onclick='event.preventDefault(); event.stopPropagation(); openGcalDetailModal(<?= json_encode($gev, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP) ?>);'>
-                                    <span class="span-icon" style="font-size:0.72rem;">🗓️</span>
+                                     <span class="span-icon" style="font-size:0.72rem;">🗓️</span>
                                     <span class="ev-time" style="color:<?= htmlspecialchars($gev['color_theme']) ?>; font-weight:800; font-size:0.68rem;"><?= $gev_time ?></span>
                                     <span class="ev-title" style="color:#0f172a; font-weight:700;"><?= htmlspecialchars($gev['title']) ?></span>
                                 </div>
@@ -3087,8 +3252,63 @@ if ($today_status['is_pre_off_day']) {
 
                 <?php 
                 $sel_gcal_events = $gcal_events_by_date[$selected_date] ?? [];
-                $has_any_sel = !empty($selected_day_events) || !empty($sel_gcal_events);
+                $sel_doc_events  = $doctor_events_by_date[$selected_date] ?? [];
+                $has_any_sel = !empty($selected_day_events) || !empty($sel_gcal_events) || !empty($sel_doc_events);
                 ?>
+
+                <!-- 🌟 選択日の医師予定・休診情報（yotei連携） -->
+                <?php if (!empty($sel_doc_events) || (!empty($doctor_selected_summary['all_meeting']))): ?>
+                    <div style="background:#fff; border:1.5px solid #fecaca; border-radius:8px; padding:12px 14px; margin-bottom:14px; box-shadow:0 1px 3px rgba(0,0,0,0.04);">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; border-bottom:1px solid #fee2e2; padding-bottom:6px;">
+                            <span style="font-weight:800; font-size:0.9rem; color:#991b1b; display:flex; align-items:center; gap:6px;">
+                                🩺 医師予定・休診状況（医師予定表連携）
+                            </span>
+                            <a href="../yotei/calendar.php?year=<?= date('Y', strtotime($selected_date)) ?>&month=<?= date('n', strtotime($selected_date)) ?>" target="_blank" style="font-size:0.75rem; color:#b91c1c; text-decoration:none; font-weight:700; background:#fee2e2; padding:2px 8px; border-radius:4px;">
+                                医師予定表を開く ↗
+                            </a>
+                        </div>
+
+                        <?php if (!empty($doctor_selected_summary['all_meeting'])): ?>
+                            <div style="background:#eff6ff; border:1px solid #bfdbfe; border-radius:6px; padding:6px 10px; margin-bottom:8px; font-size:0.84rem; color:#1e40af; font-weight:700;">
+                                👥 【小野会全体会】<?= htmlspecialchars($doctor_selected_summary['all_meeting']['time'] ?? '13:00〜') ?>（胃腸科1F食堂）
+                            </div>
+                        <?php endif; ?>
+
+                        <?php foreach ($sel_doc_events as $dev): 
+                            $d_doc = $dev['doctor'] ?? [];
+                            $d_is_abs = ($dev['event_type'] === 'absence');
+                            $d_time = $dev['is_all_day'] ? '終日' : (($dev['start_time'] ?? '') . (!empty($dev['end_time']) ? '〜' . $dev['end_time'] : ''));
+                        ?>
+                            <div class="doctor-detail-box" 
+                                 style="border-left-color: <?= $d_is_abs ? '#dc2626' : htmlspecialchars($d_doc['department_color'] ?? '#2563eb') ?>;"
+                                 onclick='openDoctorDetailModal(<?= json_encode($dev, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP) ?>)'>
+                                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                                    <div style="display:flex; align-items:center; gap:6px;">
+                                        <span style="font-size:1rem;"><?= htmlspecialchars($dev['event_icon'] ?? '🔴') ?></span>
+                                        <span style="font-weight:800; font-size:0.95rem; color:#0f172a;">
+                                            <?= htmlspecialchars($d_doc['name'] ?? '医師') ?>
+                                            <small style="color:#64748b; font-weight:normal;"><?= htmlspecialchars($d_doc['title'] ?? '') ?></small>
+                                        </span>
+                                        <span class="doctor-badge-tag" style="background:<?= htmlspecialchars($d_doc['department_color'] ?? '#475569') ?>;">
+                                            <?= htmlspecialchars($d_doc['department_name'] ?? '診療科') ?>
+                                        </span>
+                                    </div>
+                                    <span style="font-size:0.82rem; font-weight:700; color:<?= $d_is_abs ? '#dc2626' : '#0284c7' ?>;">
+                                        <?= htmlspecialchars($d_time) ?>
+                                    </span>
+                                </div>
+                                <div style="font-size:0.88rem; font-weight:700; color:<?= $d_is_abs ? '#b91c1c' : '#1e293b' ?>;">
+                                    <?= htmlspecialchars($dev['title']) ?>
+                                </div>
+                                <?php if (!empty($dev['note'])): ?>
+                                    <div style="font-size:0.82rem; color:#475569; margin-top:4px; line-height:1.4;">
+                                        <?= nl2br(htmlspecialchars($dev['note'])) ?>
+                                    </div>
+                                <?php endif; ?>
+                            </div>
+                        <?php endforeach; ?>
+                    </div>
+                <?php endif; ?>
 
                 <?php if (!$has_any_sel): ?>
                     <div style="text-align:center; padding:50px 20px; color:#64748b;">
@@ -3562,6 +3782,47 @@ if ($today_status['is_pre_off_day']) {
     </div>
 </div>
 
+<!-- モーダル: 医師予定詳細モーダル -->
+<div id="modal-doctor-detail" class="modal-overlay">
+    <div class="modal-box" style="max-width:580px;">
+        <div class="modal-header" style="border-bottom: 2px solid #b91c1c;">
+            <div class="modal-title" style="display:flex; align-items:center; gap:8px;">
+                <span id="doc-detail-icon" style="font-size:1.3rem;">🩺</span>
+                <span id="doc-detail-title">医師予定詳細</span>
+            </div>
+            <button type="button" onclick="closeModal('modal-doctor-detail')" style="border:none; background:none; font-size:1.4rem; cursor:pointer;">&times;</button>
+        </div>
+        <div class="modal-body" style="display:flex; flex-direction:column; gap:14px;">
+            <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                <span id="doc-detail-badge" style="background:#b91c1c; color:#fff; font-size:0.82rem; font-weight:bold; padding:3px 10px; border-radius:12px;">休診・不在</span>
+                <span id="doc-detail-dept-badge" style="background:#475569; color:#fff; font-size:0.82rem; font-weight:bold; padding:3px 10px; border-radius:12px;">診療科</span>
+                <span id="doc-detail-doctor-name" style="font-size:1rem; font-weight:bold; color:#0f172a;">医師名</span>
+            </div>
+
+            <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:12px 16px;">
+                <div style="font-size:0.82rem; font-weight:bold; color:#64748b; margin-bottom:4px;">日時:</div>
+                <div id="doc-detail-time" style="font-size:1rem; font-weight:bold; color:#1e293b;"></div>
+            </div>
+
+            <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:12px 16px;">
+                <div style="font-size:0.82rem; font-weight:bold; color:#64748b; margin-bottom:4px;">件名・ステータス:</div>
+                <div id="doc-detail-event-title" style="font-size:1rem; font-weight:bold; color:#b91c1c;"></div>
+            </div>
+
+            <div id="doc-detail-note-box" style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:12px 16px; display:none;">
+                <div style="font-size:0.82rem; font-weight:bold; color:#64748b; margin-bottom:4px;">備考・連絡事項:</div>
+                <div id="doc-detail-note" style="font-size:0.88rem; color:#334155; line-height:1.6; white-space:pre-wrap; max-height:180px; overflow-y:auto;"></div>
+            </div>
+        </div>
+        <div class="modal-footer" style="display:flex; justify-content:space-between; align-items:center;">
+            <a id="doc-detail-link" href="../yotei/calendar.php" target="_blank" class="tool-btn" style="background:#b91c1c; color:#fff; text-decoration:none; display:inline-flex; align-items:center; gap:6px;">
+                <span>🩺</span> 医師予定表で確認・編集 ↗
+            </a>
+            <button type="button" class="tool-btn" onclick="closeModal('modal-doctor-detail')">閉じる</button>
+        </div>
+    </div>
+</div>
+
 <!-- モーダル: ダッシュボードメモ（月・日）編集モーダル -->
 <div id="modal-dashboard-note" class="modal-overlay">
     <div class="modal-box" style="max-width:520px;">
@@ -3874,6 +4135,62 @@ function openGcalDetailModal(ev) {
     }
 
     openModal('modal-gcal-detail');
+}
+
+// 🌟 医師予定詳細モーダルを開く
+function openDoctorDetailModal(ev) {
+    if (!ev) return;
+    const doc = ev.doctor || {};
+    const isAbsence = (ev.event_type === 'absence');
+
+    document.getElementById('doc-detail-icon').textContent = ev.event_icon || (isAbsence ? '🔴' : '🩺');
+    document.getElementById('doc-detail-title').textContent = (doc.name || '医師') + ' の予定詳細';
+
+    // バッジ
+    const badge = document.getElementById('doc-detail-badge');
+    badge.textContent = ev.event_type_label || (isAbsence ? '休診・不在' : '診察予定');
+    badge.style.backgroundColor = isAbsence ? '#b91c1c' : '#2563eb';
+
+    const deptBadge = document.getElementById('doc-detail-dept-badge');
+    deptBadge.textContent = doc.department_name || '診療科';
+    deptBadge.style.backgroundColor = doc.department_color || '#475569';
+
+    document.getElementById('doc-detail-doctor-name').textContent = (doc.name || '') + (doc.title ? ' ' + doc.title : '');
+
+    // 日時文字列整形
+    let timeStr = '';
+    const dateStr = (ev.date || ev.start_date || '').replace(/-/g, '/');
+    if (ev.is_all_day) {
+        timeStr = `${dateStr} 終日`;
+    } else {
+        const sTime = ev.start_time || '';
+        const eTime = ev.end_time || '';
+        timeStr = `${dateStr} ${sTime}${eTime ? ' 〜 ' + eTime : ''}`;
+    }
+    document.getElementById('doc-detail-time').textContent = timeStr;
+
+    // 件名
+    const titleEl = document.getElementById('doc-detail-event-title');
+    titleEl.textContent = ev.title || '(無題)';
+    titleEl.style.color = isAbsence ? '#b91c1c' : '#1e40af';
+
+    // 備考
+    const noteBox = document.getElementById('doc-detail-note-box');
+    const noteEl = document.getElementById('doc-detail-note');
+    if (ev.note && ev.note.trim() !== '') {
+        noteEl.textContent = ev.note;
+        noteBox.style.display = 'block';
+    } else {
+        noteBox.style.display = 'none';
+    }
+
+    // 医師予定表リンク
+    const linkBtn = document.getElementById('doc-detail-link');
+    const yStr = (ev.date || ev.start_date || '').substring(0, 4);
+    const mStr = parseInt((ev.date || ev.start_date || '').substring(5, 7), 10) || '';
+    linkBtn.href = `../yotei/calendar.php?year=${yStr}&month=${mStr}`;
+
+    openModal('modal-doctor-detail');
 }
 
 // 部署プリンタ設定の読み込み

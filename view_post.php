@@ -281,7 +281,8 @@ foreach ($target_members as $tm) {
             👤 <?= htmlspecialchars($login_user['staff_name']) ?>
         </span>
         <a href="login.php?switch_user=1" title="別のアカウントに切り替える" style="color:rgba(255,255,255,0.85); font-size:0.75rem; text-decoration:underline;">切替</a>
-        <a href="index.php" class="btn-back">← 一覧</a>
+        <a href="index.php" class="btn-back" style="background:rgba(255,255,255,0.25);">🏠 メニュー</a>
+        <a href="kawara_list.php" class="btn-back">← 一覧</a>
     </div>
 </header>
 

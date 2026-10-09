@@ -327,7 +327,10 @@ $gcal_event_count = $pdo->query("SELECT COUNT(*) FROM google_calendar_events_cac
 <div class="container">
     <header>
         <h1>⚙️ システムマスタ管理</h1>
-        <a href="index.php" class="btn-back">← かわら版へ戻る</a>
+        <div style="display:flex; gap:6px;">
+            <a href="index.php" class="btn-back" style="background:#475569;">🏠 メニュー</a>
+            <a href="kawara_list.php" class="btn-back">📜 かわら版一覧</a>
+        </div>
     </header>
 
     <?php if ($msg): ?><div class="alert-success"><?= htmlspecialchars($msg) ?></div><?php endif; ?>

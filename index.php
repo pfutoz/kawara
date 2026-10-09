@@ -1,19 +1,30 @@
 <?php
-require_once __DIR__ . '/includes/auth_helper.php';
+/**
+ * ============================================================
+ * ファイル名: index.php
+ * システム名: 院内かわら版（医療法人小野会）
+ * バージョン: v3.1（1024×768 コンパクト最適化メニュー）
+ * ============================================================
+ *
+ * 【概要】
+ * 院内かわら版のメインポータル・機能ランチャー画面
+ * 1024×768端末（電子カルテ・院内PC）でもスクロールなしで
+ * 全体が見渡せる縦方向超圧縮レイアウト
+ */
 
-// 2. DB接続 ＆ LINEヘルパー読み込み
+require_once __DIR__ . '/includes/auth_helper.php';
 require_once __DIR__ . '/includes/db.php';
 
-if (file_exists('includes/line_helper.php')) {
-    require_once 'includes/line_helper.php';
+if (file_exists(__DIR__ . '/includes/line_helper.php')) {
+    require_once __DIR__ . '/includes/line_helper.php';
 }
 
-// 📱 端末固定Cookieがあれば自動ログイン！なければlogin.phpへ
+// 📱 端末固定Cookieがあれば自動復元！なければlogin.phpへ
 $login_user = checkAuthOrAutoLogin($pdo, $_SERVER['REQUEST_URI'] ?? '');
 $current_staff_id = (int)$login_user['staff_id'];
 $is_admin = (bool)($login_user['is_admin'] ?? false);
+$is_jimucho = ($current_staff_id === 15 || mb_strpos($login_user['staff_name'] ?? '', '山本') !== false || mb_strpos($login_user['role'] ?? '', '事務') !== false);
 $has_line_id = !empty(trim($login_user['line_user_id'] ?? ''));
-
 
 // 本日の生存確認・安否報告チェック ＆ BCPモード判定
 $active_safety_event = $pdo->query("SELECT * FROM safety_events WHERE is_active = TRUE ORDER BY event_id DESC LIMIT 1")->fetch();
@@ -27,492 +38,538 @@ if ($safety_mode !== 'normal') {
     $my_safety_reported_today = ($stmt_safety->fetchColumn() > 0);
 }
 
-// POST処理（コメント追加・既読・未読戻し）
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action_type'])) {
-    $p_id = (int)$_POST['post_id'];
-    
-    if ($_POST['action_type'] === 'add_comment') {
-        $c_text = trim($_POST['comment_text'] ?? '');
-        $stamp  = trim($_POST['stamp_code'] ?? '');
-        if ($c_text !== '' || $stamp !== '') {
-            $stmt_c = $pdo->prepare("INSERT INTO post_comments (post_id, author_id, comment_text, stamp_code, created_at) VALUES (:pid, :aid, :txt, :stamp, NOW())");
-            $stmt_c->execute([':pid' => $p_id, ':aid' => $current_staff_id, ':txt' => $c_text, ':stamp' => $stamp]);
-        }
-    }
+// 📊 統計情報（未読件数・本日の予定件数など）の取得
+$today_str = date('Y-m-d');
 
-    // 既読を未読に戻す処理
-    if ($_POST['action_type'] === 'mark_unread') {
-        $stmt_del = $pdo->prepare("DELETE FROM post_reads WHERE post_id = :pid AND staff_id = :sid");
-        $stmt_del->execute([':pid' => $p_id, ':sid' => $current_staff_id]);
-        $_SESSION['notice_msg'] = "↩️ ステータスを「未読」に戻しました。";
-    }
+// 1. 掲載中のお知らせ総件数
+$stmt_total = $pdo->query("SELECT COUNT(*) FROM posts WHERE (display_until IS NULL OR display_until >= NOW())");
+$total_active_posts = (int)$stmt_total->fetchColumn();
 
-    if ($_POST['action_type'] === 'mark_read') {
-        $stmt_r = $pdo->prepare("INSERT INTO post_reads (post_id, staff_id, read_at) VALUES (:pid, :sid, NOW()) ON CONFLICT DO NOTHING");
-        $stmt_r->execute([':pid' => $p_id, ':sid' => $current_staff_id]);
+// 2. 自分の未読件数の集計（掲載中かつ未読の投稿）
+$stmt_unread = $pdo->query("
+    SELECT COUNT(*) 
+    FROM posts p
+    WHERE (p.display_until IS NULL OR p.display_until >= NOW())
+      AND NOT EXISTS (
+          SELECT 1 FROM post_reads rd 
+          WHERE rd.post_id = p.post_id AND rd.staff_id = {$current_staff_id}
+      )
+");
+$unread_count = (int)$stmt_unread->fetchColumn();
 
-        $send_self_line = isset($_POST['send_self_line']) && $_POST['send_self_line'] === '1';
+// 3. 直近・緊急のお知らせ（最新3件）
+$stmt_urgent = $pdo->query("
+    SELECT p.post_id, p.title, p.category_id, p.target_datetime, p.created_at,
+           c.category_name, c.icon_emoji, c.color_code, c.category_code,
+           s.staff_name AS author_name,
+           (SELECT COUNT(*) FROM post_reads rd WHERE rd.post_id = p.post_id AND rd.staff_id = {$current_staff_id}) AS is_my_read
+    FROM posts p
+    LEFT JOIN post_categories c ON p.category_id = c.category_id
+    LEFT JOIN staff s ON p.author_id = s.staff_id
+    WHERE (p.display_until IS NULL OR p.display_until >= NOW())
+      AND (
+          p.is_pinned = TRUE 
+          OR c.category_code IN ('urgent', 'important')
+          OR (p.target_datetime IS NOT NULL AND DATE(p.target_datetime) = '{$today_str}')
+      )
+    ORDER BY p.is_pinned DESC, p.created_at DESC
+    LIMIT 3
+");
+$urgent_posts = $stmt_urgent->fetchAll();
 
-        // 自分のLINE宛てへ本文入り既読メモを送信
-        if ($send_self_line && function_exists('sendLineNotification')) {
-            $stmt_post = $pdo->prepare("SELECT title, content, target_datetime, target_end_datetime FROM posts WHERE post_id = :pid");
-            $stmt_post->execute([':pid' => $p_id]);
-            $p_info = $stmt_post->fetch();
-
-            $p_title = $p_info['title'] ?? 'お知らせ';
-            $plain_content = trim(strip_tags(str_replace(['<br>', '<br/>', '<br />', '</p>'], "\n", $p_info['content'] ?? '')));
-            
-            if (mb_strlen($plain_content) > 1500) {
-                $plain_content = mb_substr($plain_content, 0, 1500) . "\n…(以下省略)";
-            }
-
-            $memo_msg = "【既読完了メモ】\n■ 件名：{$p_title}\n----------------------------------\n【本文】\n{$plain_content}";
-
-            $line_res = sendLineNotification($pdo, $current_staff_id, $memo_msg);
-
-            if ($line_res['unregistered_count'] > 0) {
-                $_SESSION['notice_msg'] = "✓ 既読を記録しました。（※LINE IDが未登録のため自分のLINE宛てのメモ送信はスキップされました）";
-            } else {
-                $_SESSION['notice_msg'] = "✓ 既読を記録し、自分のLINEに本文メモを送信しました。";
-            }
-        } else {
-            $_SESSION['notice_msg'] = "✓ 既読を記録しました。";
-        }
-    }
-
-    header("Location: index.php?" . http_build_query($_GET));
-    exit;
-}
-
-$notice_msg = $_SESSION['notice_msg'] ?? '';
-unset($_SESSION['notice_msg']);
-
-// 4. カテゴリーリスト＆パラメータ取得
-$selected_cat  = isset($_GET['cat']) ? (int)$_GET['cat'] : 0;
-$date_filter   = $_GET['date_filter'] ?? 'all';
-$categories    = $pdo->query("SELECT * FROM post_categories WHERE is_active = TRUE ORDER BY display_order")->fetchAll();
-
-// 5. 投稿一覧の取得SQL
-$sql = "SELECT 
-            p.*, 
-            c.category_name, c.category_code, c.icon_emoji, c.color_code,
-            s.staff_name AS author_name,
-            (SELECT COUNT(*) FROM post_images img WHERE img.post_id = p.post_id) AS image_count,
-            (SELECT COUNT(*) FROM post_comments cm WHERE cm.post_id = p.post_id) AS comment_count,
-            (SELECT COUNT(*) FROM post_reads rd WHERE rd.post_id = p.post_id AND rd.staff_id = {$current_staff_id}) AS is_my_read
-        FROM posts p
-        LEFT JOIN post_categories c ON p.category_id = c.category_id
-        LEFT JOIN staff s ON p.author_id = s.staff_id";
-
-$today_str      = date('Y-m-d');
-$tomorrow_str   = date('Y-m-d', strtotime('+1 day'));
-$plus7_end_str  = date('Y-m-d', strtotime('+7 days'));
-
-$this_month_start = date('Y-m-01');
-$this_month_end   = date('Y-m-t');
-
-$next_month_start = date('Y-m-01', strtotime('first day of next month'));
-$next_month_end   = date('Y-m-t', strtotime('last day of next month'));
-
-$where_clauses = [];
-
-// 掲載期限・過去投稿モードの判定
-if ($date_filter === 'past') {
-    // 過去の投稿モード：掲載期限終了、または対象日時が過去の投稿
-    $where_clauses[] = "(p.display_until < NOW() OR (p.display_until IS NULL AND p.target_datetime IS NOT NULL AND DATE(COALESCE(p.target_end_datetime, p.target_datetime)) < '{$today_str}'))";
-} elseif ($date_filter === 'all_history') {
-    // 全履歴モード：過去・現在・未来すべての投稿（条件制限なし）
-} else {
-    // 通常モード（全期間・今日・明日など）：現在掲載中の投稿
-    $where_clauses[] = "(p.display_until IS NULL OR p.display_until >= NOW())";
-}
-
-if ($selected_cat > 0) {
-    $where_clauses[] = "p.category_id = " . $selected_cat;
-}
-
-if ($date_filter === 'today') {
-    $where_clauses[] = "p.target_datetime IS NOT NULL AND DATE(p.target_datetime) = '{$today_str}'";
-} elseif ($date_filter === 'tomorrow') {
-    $where_clauses[] = "p.target_datetime IS NOT NULL AND DATE(p.target_datetime) = '{$tomorrow_str}'";
-} elseif ($date_filter === 'plus7') {
-    $where_clauses[] = "p.target_datetime IS NOT NULL AND DATE(p.target_datetime) >= '{$today_str}' AND DATE(p.target_datetime) <= '{$plus7_end_str}'";
-} elseif ($date_filter === 'this_month') {
-    $where_clauses[] = "p.target_datetime IS NOT NULL AND DATE(p.target_datetime) >= '{$this_month_start}' AND DATE(p.target_datetime) <= '{$this_month_end}'";
-} elseif ($date_filter === 'next_month') {
-    $where_clauses[] = "p.target_datetime IS NOT NULL AND DATE(p.target_datetime) >= '{$next_month_start}' AND DATE(p.target_datetime) <= '{$next_month_end}'";
-}
-
-if (!empty($where_clauses)) {
-    $sql .= " WHERE " . implode(" AND ", $where_clauses);
-}
-
-$raw_posts = $pdo->query($sql)->fetchAll();
-
-// 6. 重要度判定 ＆ ソートスコア計算
-$now = new DateTime();
+// 曜日配列
 $week_names = ['日', '月', '火', '水', '木', '金', '土'];
-$posts = [];
+$today_w = (int)date('w');
+$today_display = date('Y/n/j') . '(' . $week_names[$today_w] . ')';
 
-foreach ($raw_posts as $p) {
-    $start_dt = $p['target_datetime'] ? new DateTime($p['target_datetime']) : null;
-    $end_dt   = $p['target_end_datetime'] ? new DateTime($p['target_end_datetime']) : null;
-    $created_dt = new DateTime($p['created_at']);
-    
-    $is_urgent = false;
-    $is_within_24h = false;
-    $is_today_event = false;
-
-    $is_new_post = ($now->getTimestamp() - $created_dt->getTimestamp()) <= 86400;
-
-    if ($start_dt) {
-        $diff_sec = $start_dt->getTimestamp() - $now->getTimestamp();
-        
-        if (($diff_sec <= 10800 && ($end_dt ? $now <= $end_dt : $diff_sec >= -86400)) || $p['category_code'] === 'urgent') {
-            $is_urgent = true;
-        }
-        if ($diff_sec > 0 && $diff_sec <= 86400) {
-            $is_within_24h = true;
-        }
-        if ($start_dt->format('Y-m-d') === $now->format('Y-m-d')) {
-            $is_today_event = true;
-        }
-
-        $start_str = $start_dt->format('Y/m/d') . '(' . $week_names[(int)$start_dt->format('w')] . ') ' . $start_dt->format('H:i');
-
-        if ($end_dt) {
-            if ($start_dt->format('Y-m-d') === $end_dt->format('Y-m-d')) {
-                $end_str = $end_dt->format('H:i');
-            } else {
-                $end_str = $end_dt->format('Y/m/d') . '(' . $week_names[(int)$end_dt->format('w')] . ') ' . $end_dt->format('H:i');
-            }
-            $p['formatted_event_date'] = $start_str . ' 〜 ' . $end_str;
-        } else {
-            $p['formatted_event_date'] = $start_str;
-        }
-    } else {
-        if ($p['category_code'] === 'urgent') {
-            $is_urgent = true;
-        }
-        $p['formatted_event_date'] = null;
-    }
-
-    if ($is_urgent) {
-        $priority_level = 'urgent';
-    } elseif ($is_within_24h || $is_today_event || $p['is_pinned'] || in_array($p['category_code'], ['important', 'facility'])) {
-        $priority_level = 'important';
-    } else {
-        $priority_level = 'normal';
-    }
-
-    $sort_score = 0;
-    if ($priority_level === 'urgent') $sort_score = 3000;
-    elseif ($priority_level === 'important') $sort_score = 2000;
-    else $sort_score = 1000;
-
-    if ($p['is_pinned']) $sort_score += 5000;
-    if (!$p['is_my_read']) $sort_score += 100;
-
-    $dept_stmt = $pdo->prepare("SELECT dept_id FROM post_target_departments WHERE post_id = :pid");
-    $dept_stmt->execute([':pid' => $p['post_id']]);
-    $target_dept_ids = $dept_stmt->fetchAll(PDO::FETCH_COLUMN);
-
-    $staff_stmt = $pdo->prepare("SELECT staff_id FROM post_target_staff WHERE post_id = :pid");
-    $staff_stmt->execute([':pid' => $p['post_id']]);
-    $target_staff_ids = $staff_stmt->fetchAll(PDO::FETCH_COLUMN);
-
-    $all_active_staff = $pdo->query("SELECT staff_id, staff_name, dept_id FROM staff WHERE is_deleted = FALSE ORDER BY kana ASC")->fetchAll();
-    
-    $target_members = [];
-    foreach ($all_active_staff as $st) {
-        $is_target = false;
-        if (empty($target_dept_ids) && empty($target_staff_ids)) {
-            $is_target = true;
-        } else {
-            if (!empty($target_dept_ids) && in_array($st['dept_id'], $target_dept_ids)) $is_target = true;
-            if (!empty($target_staff_ids) && in_array($st['staff_id'], $target_staff_ids)) $is_target = true;
-        }
-        if ($is_target) $target_members[] = $st;
-    }
-
-    $read_stmt = $pdo->prepare("SELECT staff_id FROM post_reads WHERE post_id = :pid");
-    $read_stmt->execute([':pid' => $p['post_id']]);
-    $read_staff_ids = $read_stmt->fetchAll(PDO::FETCH_COLUMN);
-
-    $p['priority_level']  = $priority_level;
-    $p['is_within_24h']   = $is_within_24h;
-    $p['is_new_post']     = $is_new_post;
-    $p['sort_score']      = $sort_score;
-    $p['target_members']  = $target_members;
-    $p['read_staff_ids']  = $read_staff_ids;
-    $p['read_count']      = count(array_intersect(array_column($target_members, 'staff_id'), $read_staff_ids));
-    $p['total_targets']   = count($target_members);
-
-    $p['plain_summary']   = mb_substr(trim(strip_tags($p['content'])), 0, 150);
-
-    $posts[] = $p;
-}
-
-usort($posts, function($a, $b) use ($date_filter) {
-    if ($date_filter === 'past' || $date_filter === 'all_history') {
-        // 過去の投稿一覧 / 全履歴では、対象日時または作成日時の新しい順（降順）で時系列表示
-        $time_a = strtotime($a['target_datetime'] ?? $a['created_at']);
-        $time_b = strtotime($b['target_datetime'] ?? $b['created_at']);
-        if ($time_a === $time_b) {
-            return strtotime($b['created_at']) - strtotime($a['created_at']);
-        }
-        return $time_b - $time_a;
-    }
-    if ($a['sort_score'] === $b['sort_score']) {
-        return strtotime($b['created_at']) - strtotime($a['created_at']);
-    }
-    return $b['sort_score'] - $a['sort_score'];
-});
+$msg = $_GET['msg'] ?? '';
 ?>
-
 <!DOCTYPE html>
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>院内かわら版</title>
+    <title>院内かわら版 - メニュー | 医療法人小野会</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&family=Outfit:wght@600;700&display=swap" rel="stylesheet">
     <style>
         :root {
-            --primary-color: #005a9c;
-            --bg-color: #f4f6f9;
-            --card-bg: #ffffff;
-            --text-color: #333333;
-            --border-color: #e0e0e0;
+            --primary: #005a9c;
+            --primary-dark: #004085;
+            --primary-light: #eff6ff;
+            --bg-body: #f8fafc;
+            --bg-card: #ffffff;
+            --text-main: #0f172a;
+            --text-muted: #64748b;
+            --border: #e2e8f0;
+            --shadow-sm: 0 1px 2px rgba(0,0,0,0.04);
+            --shadow-md: 0 3px 8px rgba(0,0,0,0.06);
+            --radius-sm: 6px;
+            --radius-md: 8px;
         }
 
         * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg-color); color: var(--text-color); line-height: 1.5; }
-
-        header { background: var(--primary-color); color: #fff; padding: 0.8rem 1.5rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-        .header-container { max-width: 950px; margin: 0 auto; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; }
-        .header-title h1 { font-size: 1.25rem; font-weight: bold; }
-        .header-title span { font-size: 0.8rem; opacity: 0.9; margin-left: 6px; }
-
-        .header-right { display: flex; align-items: center; gap: 12px; }
-        .user-info { font-size: 0.82rem; background: rgba(255,255,255,0.18); padding: 4px 10px; border-radius: 4px; display: flex; align-items: center; gap: 6px; text-decoration: none; color: #fff; }
-        .user-info:hover { background: rgba(255,255,255,0.3); }
-        .btn-header { background: rgba(255,255,255,0.2); color: white; padding: 5px 10px; border-radius: 4px; text-decoration: none; font-size: 0.8rem; font-weight: bold; }
-
-        main { max-width: 950px; margin: 1.2rem auto; padding: 0 1rem; }
-
-        .alert-notice { background: #e0f2fe; color: #0369a1; border: 1px solid #7dd3fc; padding: 10px 14px; border-radius: 6px; font-size: 0.88rem; font-weight: bold; margin-bottom: 1.2rem; }
-
-        .filter-section { background: #fff; border: 1px solid var(--border-color); border-radius: 8px; padding: 12px 14px; margin-bottom: 1.2rem; display: flex; flex-direction: column; gap: 10px; }
-        .toolbar-group { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; }
-
-        .btn-create { background: #28a745; color: white; border: none; padding: 7px 16px; border-radius: 6px; font-weight: bold; font-size: 0.88rem; text-decoration: none; display: inline-flex; align-items: center; gap: 4px; box-shadow: 0 2px 4px rgba(0,0,0,0.08); white-space: nowrap; }
-        .btn-create:hover { background: #218838; }
-
-        .btn-toggle-compact { background: #005a9c; color: white; border: 1px solid #004085; padding: 6px 14px; border-radius: 6px; font-size: 0.82rem; font-weight: bold; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; transition: all 0.2s; box-shadow: 0 2px 4px rgba(0,0,0,0.08); }
-        .btn-toggle-compact:hover { background: #004085; }
-        .btn-toggle-compact.is-active { background: #e67e22; border-color: #d35400; }
-
-        .date-filter-group { display: flex; gap: 4px; background: #eef2f5; padding: 3px; border-radius: 6px; flex-wrap: wrap; align-items: center; }
-        .btn-date { text-decoration: none; padding: 4px 10px; border-radius: 4px; font-size: 0.78rem; font-weight: bold; color: #495057; transition: all 0.15s; }
-        .btn-date:hover { background: rgba(255,255,255,0.7); }
-        .btn-date.active { background: var(--primary-color); color: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
-
-        .cat-tabs { display: flex; gap: 4px; flex-wrap: wrap; padding-top: 6px; border-top: 1px dashed #eee; }
-        .cat-tab { background: #f8f9fa; border: 1px solid #ced4da; padding: 2px 8px; border-radius: 12px; text-decoration: none; color: #555; font-size: 0.75rem; font-weight: bold; white-space: nowrap; transition: all 0.15s; }
-        .cat-tab:hover { background: #eef6fc; border-color: var(--primary-color); }
-        .cat-tab.active { background: #495057; color: #fff; border-color: #495057; }
-
-        .badge { display: inline-flex; align-items: center; gap: 2px; padding: 2px 7px; border-radius: 4px; font-size: 0.75rem; font-weight: bold; line-height: 1.2; }
-        .badge-urgent { background-color: #dc3545; color: #ffffff; border: 1.5px solid #a71d2a; box-shadow: 0 0 6px rgba(220, 53, 69, 0.6); }
-        .badge-24h { background-color: #fff9db; color: #856404; border: 1.5px solid #f1c40f; }
-        .badge-unread { background-color: #f3e8ff; color: #6b21a8; border: 1.5px solid #9333ea; }
-        .badge-read { background-color: #e0f2fe; color: #0369a1; border: 1.5px solid #0284c7; }
-        .badge-new { background-color: #e74c3c; color: #ffffff; padding: 1px 5px; border-radius: 3px; font-size: 0.68rem; font-weight: bold; }
-        .badge-pinned { background-color: #343a40; color: #ffffff; }
-
-        .post-list { display: flex; flex-direction: column; gap: 1rem; }
-        .post-card { background: var(--card-bg); border-radius: 8px; padding: 1.25rem; transition: all 0.15s; position: relative; border: 1px solid var(--border-color); }
-
-        .post-card.p-urgent.is-unread { border: 3px solid #dc3545; animation: pulse-red 2.5s infinite; }
-        .post-card.p-urgent.is-read { border: 2px solid #dc3545; background: #fff8f8; }
-        .post-card.p-important.is-unread { border: 2px solid #fd7e14; border-left: 6px solid #fd7e14; background: #fff9f5; }
-        .post-card.p-important.is-read { border: 1px solid #e0e0e0; border-left: 5px solid #fd7e14; background: #ffffff; }
-        .post-card.p-normal.is-unread { border-left: 5px solid #005a9c; background: #ffffff; }
-        .post-card.p-normal.is-read { border: 1px solid #e9ecef; background: #fdfdfd; opacity: 0.85; }
-        .post-card.is-expired { opacity: 0.92; background: #fcfcfc; }
-        .post-card.is-expired.p-urgent.is-unread { animation: none; }
-
-        @keyframes pulse-red {
-            0% { background-color: #ffffff; box-shadow: 0 0 0 rgba(220, 53, 69, 0); }
-            50% { background-color: #fff0f1; box-shadow: 0 0 12px rgba(220, 53, 69, 0.4); }
-            100% { background-color: #ffffff; box-shadow: 0 0 0 rgba(220, 53, 69, 0); }
+        body {
+            font-family: 'Noto Sans JP', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: var(--bg-body);
+            color: var(--text-main);
+            line-height: 1.45;
+            -webkit-font-smoothing: antialiased;
         }
 
-        .post-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px; }
-        .badge-cat { padding: 2px 8px; border-radius: 4px; color: #fff; font-size: 0.75rem; font-weight: bold; }
-
-        .post-title { font-size: 1.15rem; font-weight: bold; color: #2c3e50; text-decoration: none; margin-bottom: 6px; display: block; }
-        .post-title:hover { color: #005a9c; text-decoration: underline; }
-        .post-title.text-urgent { color: #dc3545; }
-
-        .post-meta { font-size: 0.82rem; color: #777; display: flex; gap: 15px; margin-bottom: 10px; flex-wrap: wrap; }
-        .event-box { background: #eef6fc; border: 1px solid #b8daff; color: #004085; padding: 8px 12px; border-radius: 6px; font-size: 0.88rem; font-weight: bold; margin-bottom: 10px; }
-        .event-box.urgent-box { background: #f8d7da; border-color: #f5c6cb; color: #721c24; }
-
-        .post-body-preview { font-size: 0.92rem; color: #444; line-height: 1.5; margin-bottom: 12px; }
-
-        .read-action-bar {
-            background: #f8f9fa;
-            border: 1px solid #e9ecef;
-            padding: 8px 12px;
-            border-radius: 6px;
+        /* 💻 ヘッダー（超薄型・44px） */
+        header {
+            background: var(--primary);
+            color: #ffffff;
+            padding: 6px 14px;
+            box-shadow: 0 1px 4px rgba(0, 90, 156, 0.2);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+        .header-container {
+            max-width: 1000px;
+            margin: 0 auto;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 10px;
+        }
+        .header-title-box {
             display: flex;
             align-items: center;
-            justify-content: space-between;
-            flex-wrap: wrap;
-            gap: 10px;
-            margin-bottom: 10px;
+            gap: 8px;
+        }
+        .header-icon {
+            font-size: 1.3rem;
+            line-height: 1;
+        }
+        .header-title h1 {
+            font-size: 1.1rem;
+            font-weight: 800;
+            letter-spacing: -0.2px;
+            line-height: 1.1;
+            display: inline-block;
+        }
+        .header-title span {
+            font-size: 0.72rem;
+            opacity: 0.88;
+            margin-left: 6px;
         }
 
-        .btn-unread-reset {
-            background: #6c757d;
-            color: #fff;
-            border: none;
-            padding: 4px 10px;
-            border-radius: 4px;
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .user-info {
             font-size: 0.78rem;
-            font-weight: bold;
-            cursor: pointer;
+            background: rgba(255, 255, 255, 0.18);
+            padding: 3px 8px;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            text-decoration: none;
+            color: #fff;
         }
-        .btn-unread-reset:hover { background: #5a6268; }
-
-        .toggle-bar { display: flex; border-top: 1px solid #eee; border-bottom: 1px solid #eee; background: #fafafa; margin-top: 10px; }
-        .toggle-btn { flex: 1; padding: 8px; border: none; background: none; font-size: 0.83rem; font-weight: bold; color: #555; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; }
-        .toggle-btn:first-child { border-right: 1px solid #eee; }
-        .toggle-btn:hover { background: #eef6fc; color: #005a9c; }
-        .toggle-btn.active { background: #eef6fc; color: #005a9c; border-bottom: 2px solid #005a9c; }
-
-        .accordion-content { display: none; background: #fdfdfd; padding: 12px; border-bottom: 1px solid #eee; font-size: 0.88rem; }
-        .comment-item { border-bottom: 1px dashed #ddd; padding: 6px 0; display: flex; justify-content: space-between; }
-        .stamp-badge { background: #e0f2fe; color: #0369a1; padding: 2px 8px; border-radius: 12px; font-weight: bold; font-size: 0.8rem; }
-        .stamp-select-btn { background: #fff; border: 1px solid #ccc; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 0.82rem; }
-
-        .read-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 6px; margin-top: 8px; }
-        .read-user-badge { padding: 4px 8px; border-radius: 4px; font-size: 0.78rem; text-align: center; }
-        .read-user-badge.is-read { background: #d4edda; color: #155724; }
-        .read-user-badge.is-unread { background: #f8d7da; color: #721c24; }
-
-        .post-footer { display: flex; justify-content: space-between; align-items: center; margin-top: 10px; font-size: 0.8rem; color: #888; flex-wrap: wrap; gap: 5px; }
-        .btn-print { background: #f8f9fa; border: 1px solid #ccc; color: #333; padding: 3px 10px; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 0.78rem; display: inline-flex; align-items: center; gap: 4px; text-decoration: none; }
-        .btn-print:hover { background: #e2e6ea; }
-
-        body.mode-compact .post-list { gap: 4px !important; }
-        body.mode-compact .post-card { 
-            padding: 6px 12px !important; 
-            animation: none !important; 
-            display: flex !important; 
-            align-items: center !important; 
-            justify-content: space-between !important; 
-            gap: 10px !important; 
-            border-radius: 4px !important; 
+        .user-info:hover { background: rgba(255, 255, 255, 0.3); }
+        .user-tag {
+            font-size: 0.68rem;
+            background: rgba(255, 255, 255, 0.3);
+            padding: 1px 4px;
+            border-radius: 3px;
         }
-        body.mode-compact .post-header { margin-bottom: 0 !important; }
-        body.mode-compact .post-header > span { display: none !important; }
-        body.mode-compact .post-title-wrapper { flex: 1; display: flex; align-items: center; gap: 8px; overflow: hidden; white-space: nowrap; }
-        body.mode-compact .post-title { margin-bottom: 0 !important; font-size: 0.95rem !important; overflow: hidden; text-overflow: ellipsis; }
-        body.mode-compact .post-author-tag { font-size: 0.75rem; color: #777; white-space: nowrap; }
-        
-        body.mode-compact .post-body-preview,
-        body.mode-compact .post-meta,
-        body.mode-compact .event-box,
-        body.mode-compact .toggle-bar,
-        body.mode-compact .accordion-content,
-        body.mode-compact .post-footer,
-        body.mode-compact .read-action-bar { display: none !important; }
 
-        /* 📱 LINE連携ボタンスタイル */
         .btn-line-header {
             border: none;
             padding: 3px 8px;
             border-radius: 4px;
-            font-size: 0.76rem;
+            font-size: 0.74rem;
             font-weight: bold;
             cursor: pointer;
             display: inline-flex;
             align-items: center;
-            gap: 4px;
-            transition: all 0.15s;
+            gap: 3px;
             text-decoration: none;
+            transition: all 0.15s;
         }
         .btn-line-header.is-linked {
             background: #e8f9ee;
             color: #06c755;
             border: 1px solid #b2e8c4;
         }
-        .btn-line-header.is-linked:hover {
-            background: #d4f4de;
-        }
         .btn-line-header.is-unlinked {
             background: #fef3c7;
             color: #b45309;
             border: 1px solid #fde68a;
-            animation: pulse-line-btn 1.5s infinite alternate;
-        }
-        @keyframes pulse-line-btn {
-            from { transform: scale(1); }
-            to { transform: scale(1.04); }
         }
 
-        /* 📱 LINE未登録アナウンスバナー */
-        .line-register-banner {
-            background: linear-gradient(135deg, #f0fdf4 0%, #e8f9ee 100%);
-            border: 1.5px solid #86efac;
-            border-left: 5px solid #06c755;
-            padding: 10px 14px;
-            border-radius: 8px;
-            margin-bottom: 1rem;
+        .btn-portal {
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+            padding: 3px 10px;
+            border-radius: 4px;
+            text-decoration: none;
+            font-size: 0.76rem;
+            font-weight: bold;
+        }
+        .btn-portal:hover { background: rgba(255, 255, 255, 0.35); }
+
+        /* メインコンテナ（縦マージン縮小） */
+        main {
+            max-width: 1000px;
+            margin: 0.6rem auto;
+            padding: 0 0.8rem 1rem;
+        }
+
+        /* アラートメッセージ */
+        .alert-msg {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-weight: bold;
+            font-size: 0.82rem;
+            margin-bottom: 0.6rem;
+        }
+
+        /* BCPバナー（スリム化） */
+        .bcp-banner {
+            border-radius: 6px;
+            padding: 6px 12px;
+            margin-bottom: 0.6rem;
             display: flex;
             justify-content: space-between;
             align-items: center;
             flex-wrap: wrap;
-            gap: 10px;
-            box-shadow: 0 2px 6px rgba(6, 199, 85, 0.08);
+            gap: 6px;
+            font-size: 0.82rem;
+            font-weight: bold;
         }
-        .line-banner-left {
+        .bcp-banner.disaster {
+            background: #fef2f2;
+            border: 1px solid #fecaca;
+            border-left: 4px solid #dc2626;
+            color: #b91c1c;
+        }
+        .bcp-banner.drill {
+            background: #fff8ee;
+            border: 1px solid #fde68a;
+            border-left: 4px solid #e67e22;
+            color: #b45309;
+        }
+
+        /* 🌟 スマート・ステータスバー（ウェルカム＋日付＋未読を1行に集約！） */
+        .status-strip {
+            background: #ffffff;
+            border: 1px solid var(--border);
+            border-left: 4px solid var(--primary);
+            border-radius: var(--radius-md);
+            padding: 7px 12px;
+            margin-bottom: 0.75rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 8px;
+            box-shadow: var(--shadow-sm);
+        }
+        .status-strip-left {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-size: 0.84rem;
+            color: #334155;
+            flex-wrap: wrap;
+        }
+        .status-strip-left strong {
+            color: #0f172a;
+        }
+        .status-divider {
+            color: #cbd5e1;
+        }
+        .status-strip-right {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .pill-unread {
+            background: #f3e8ff;
+            color: #6b21a8;
+            border: 1px solid #c4b5fd;
+            font-size: 0.78rem;
+            font-weight: 800;
+            padding: 2px 8px;
+            border-radius: 12px;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            text-decoration: none;
+            transition: all 0.15s;
+        }
+        .pill-unread:hover {
+            background: #8b5cf6;
+            color: #fff;
+            border-color: #8b5cf6;
+        }
+        .pill-all-read {
+            background: #e0f2fe;
+            color: #0369a1;
+            font-size: 0.75rem;
+            font-weight: bold;
+            padding: 2px 8px;
+            border-radius: 12px;
+        }
+
+        /* セクション見出し（超スリム） */
+        .section-header {
+            font-size: 0.9rem;
+            font-weight: 800;
+            color: var(--text-main);
+            margin-bottom: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        /* 🚀 メインメニューグリッド（3列配置 × 薄型カード） */
+        .menu-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 8px;
+            margin-bottom: 0.85rem;
+        }
+        .menu-card {
+            background: var(--bg-card);
+            border: 1.5px solid var(--border);
+            border-radius: var(--radius-md);
+            padding: 10px 12px;
+            text-decoration: none;
+            color: inherit;
             display: flex;
             align-items: center;
             gap: 10px;
+            transition: all 0.15s ease;
+            position: relative;
+            box-shadow: var(--shadow-sm);
         }
-        .line-banner-icon {
-            font-size: 1.6rem;
-            line-height: 1;
+        .menu-card:hover {
+            transform: translateY(-2px);
+            border-color: var(--primary);
+            box-shadow: var(--shadow-md);
         }
-        .line-banner-title {
-            font-size: 0.88rem;
-            font-weight: 800;
-            color: #065f46;
+        .menu-icon-box {
+            width: 38px;
+            height: 38px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            flex-shrink: 0;
         }
-        .line-banner-desc {
-            font-size: 0.75rem;
-            color: #475569;
-            margin-top: 2px;
+
+        /* 🔍 クイックキーワード検索バー（メニュー化） */
+        .portal-search-strip {
+            background: #ffffff;
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            padding: 5px 10px;
+            margin-bottom: 0.75rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 8px;
+            box-shadow: var(--shadow-sm);
         }
-        .btn-line-banner {
-            background: #06c755;
-            color: #ffffff;
-            font-size: 0.82rem;
-            font-weight: bold;
-            padding: 6px 14px;
-            border-radius: 6px;
+        .portal-search-form {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            flex: 1;
+            min-width: 260px;
+            max-width: 480px;
+        }
+        .portal-search-input-wrap {
+            display: flex;
+            align-items: center;
+            background: #f8fafc;
+            border: 1.5px solid #cbd5e1;
+            border-radius: var(--radius-sm);
+            padding: 3px 8px;
+            flex: 1;
+            transition: all 0.2s;
+        }
+        .portal-search-input-wrap:focus-within {
+            background: #ffffff;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 2px rgba(0, 90, 156, 0.12);
+        }
+        .portal-search-icon {
+            font-size: 0.9rem;
+            margin-right: 6px;
+            opacity: 0.7;
+        }
+        .portal-search-input {
             border: none;
+            outline: none;
+            background: transparent;
+            font-size: 0.82rem;
+            width: 100%;
+            color: #1e293b;
+            font-family: inherit;
+        }
+        .portal-search-input::placeholder { color: #94a3b8; }
+        .btn-portal-search-submit {
+            background: var(--primary);
+            color: #ffffff;
+            border: none;
+            padding: 5px 12px;
+            border-radius: var(--radius-sm);
+            font-size: 0.8rem;
+            font-weight: bold;
             cursor: pointer;
-            box-shadow: 0 2px 6px rgba(6, 199, 85, 0.3);
+            transition: background 0.15s;
+            white-space: nowrap;
+        }
+        .btn-portal-search-submit:hover { background: var(--primary-dark); }
+        .portal-quick-tags {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            flex-wrap: wrap;
+        }
+        .portal-tag-label {
+            font-size: 0.74rem;
+            color: var(--text-muted);
+            margin-right: 2px;
+        }
+        .portal-tag-link {
+            background: #f1f5f9;
+            color: #334155;
+            border: 1px solid #e2e8f0;
+            padding: 2px 7px;
+            border-radius: 12px;
+            font-size: 0.74rem;
+            font-weight: 600;
+            text-decoration: none;
             transition: all 0.15s;
             white-space: nowrap;
         }
-        .btn-line-banner:hover {
-            background: #05b04a;
-            transform: translateY(-1px);
+        .portal-tag-link:hover {
+            background: var(--primary-light);
+            border-color: #bfdbfe;
+            color: var(--primary);
+        }
+
+        .icon-list    { background: #eff6ff; color: #0284c7; border: 1px solid #bfdbfe; }
+        .icon-create  { background: #ecfdf5; color: #059669; border: 1px solid #a7f3d0; }
+        .icon-search  { background: #fefce8; color: #ca8a04; border: 1px solid #fef08a; }
+        .icon-jimucho { background: #f0f9ff; color: #0369a1; border: 1px solid #bae6fd; }
+        .icon-safety  { background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; }
+        .icon-mente   { background: #fff7ed; color: #ea580c; border: 1px solid #fed7aa; }
+        .icon-help    { background: #f5f3ff; color: #7c3aed; border: 1px solid #ddd6fe; }
+        .icon-portal  { background: #f8fafc; color: #475569; border: 1px solid #e2e8f0; }
+
+        .menu-info { flex: 1; min-width: 0; }
+        .menu-title {
+            font-size: 0.94rem;
+            font-weight: 800;
+            color: var(--text-main);
+            margin-bottom: 2px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .menu-arrow {
+            color: #94a3b8;
+            font-size: 0.8rem;
+            transition: transform 0.15s, color 0.15s;
+        }
+        .menu-card:hover .menu-arrow {
+            transform: translateX(2px);
+            color: var(--primary);
+        }
+        .menu-desc {
+            font-size: 0.74rem;
+            color: var(--text-muted);
+            line-height: 1.35;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        /* 🚨 直近・重要なお知らせ（1行超コンパクト化） */
+        .urgent-card-list {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+        .urgent-item {
+            background: #ffffff;
+            border: 1px solid var(--border);
+            border-left: 4px solid #dc2626;
+            border-radius: 6px;
+            padding: 6px 12px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            text-decoration: none;
+            color: inherit;
+            transition: all 0.12s;
+            box-shadow: var(--shadow-sm);
+        }
+        .urgent-item:hover {
+            transform: translateX(3px);
+            border-color: #cbd5e1;
+            border-left-color: #dc2626;
+        }
+        .urgent-title-wrap {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            flex: 1;
+            overflow: hidden;
+            white-space: nowrap;
+        }
+        .urgent-item-title {
+            font-weight: bold;
+            font-size: 0.86rem;
+            color: #1e293b;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .badge {
+            font-size: 0.68rem;
+            padding: 1px 5px;
+            border-radius: 3px;
+            font-weight: bold;
+            white-space: nowrap;
+        }
+        .badge-urgent { background: #fee2e2; color: #dc2626; border: 1px solid #fca5a5; }
+        .badge-pinned { background: #334155; color: #fff; }
+        .badge-unread { background: #f3e8ff; color: #7c3aed; border: 1px solid #c4b5fd; }
+        .urgent-meta {
+            font-size: 0.74rem;
+            color: var(--text-muted);
+            white-space: nowrap;
+            margin-left: 8px;
+        }
+
+        /* 📱 スマホ・極小解像度対応 */
+        @media (max-width: 820px) {
+            .menu-grid { grid-template-columns: repeat(2, 1fr); }
+        }
+        @media (max-width: 540px) {
+            .menu-grid { grid-template-columns: 1fr; }
+            .status-strip { flex-direction: column; align-items: flex-start; }
+            .portal-search-strip { flex-direction: column; align-items: stretch; }
+            .portal-search-form { max-width: 100%; }
+            .header-title span { display: none; }
         }
 
         /* 📱 LINE連携モーダル */
@@ -528,13 +585,12 @@ usort($posts, function($a, $b) use ($date_filter) {
             padding: 16px;
         }
         .line-modal-overlay.active { display: flex; animation: fade-in 0.2s; }
-
         .line-modal-card {
             background: #ffffff;
             width: 100%;
-            max-width: 480px;
-            border-radius: 16px;
-            box-shadow: 0 12px 35px rgba(0,0,0,0.25);
+            max-width: 460px;
+            border-radius: 12px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.25);
             overflow: hidden;
             display: flex;
             flex-direction: column;
@@ -543,915 +599,487 @@ usort($posts, function($a, $b) use ($date_filter) {
         .line-modal-header {
             background: #06c755;
             color: #ffffff;
-            padding: 14px 18px;
+            padding: 10px 14px;
             display: flex;
             justify-content: space-between;
             align-items: center;
         }
-        .line-modal-header h3 {
-            margin: 0;
-            font-size: 1.05rem;
-            display: flex;
-            align-items: center;
-            gap: 6px;
-        }
+        .line-modal-header h3 { font-size: 0.95rem; font-weight: bold; margin: 0; }
         .line-modal-close {
-            background: none;
-            border: none;
-            color: #fff;
-            font-size: 1.5rem;
-            cursor: pointer;
-            line-height: 1;
-            padding: 0 4px;
-            opacity: 0.85;
+            background: none; border: none; color: #fff; font-size: 1.4rem; line-height: 1; cursor: pointer;
         }
-        .line-modal-close:hover { opacity: 1; }
-
-        .line-modal-body {
-            padding: 18px 20px;
-            overflow-y: auto;
-        }
+        .line-modal-body { padding: 14px; overflow-y: auto; font-size: 0.85rem; }
         .line-step-box {
             background: #f8fafc;
             border: 1px solid #e2e8f0;
-            border-radius: 10px;
-            padding: 12px 14px;
-            margin-bottom: 12px;
+            border-radius: 6px;
+            padding: 10px;
+            margin-bottom: 10px;
         }
         .line-step-num {
-            display: inline-block;
             background: #06c755;
             color: #fff;
-            font-size: 0.72rem;
-            font-weight: 800;
-            padding: 2px 7px;
-            border-radius: 10px;
+            padding: 1px 6px;
+            border-radius: 8px;
+            font-size: 0.7rem;
+            font-weight: bold;
             margin-right: 5px;
         }
-        .line-step-title {
-            font-size: 0.88rem;
-            font-weight: 800;
-            color: #1e293b;
-        }
+        .line-step-title { font-weight: bold; color: #1e293b; font-size: 0.82rem; }
         .link-code-digit {
-            font-family: 'Outfit', monospace;
-            font-size: 2.2rem;
+            font-size: 1.8rem;
             font-weight: 900;
-            letter-spacing: 10px;
+            letter-spacing: 8px;
             color: #065f46;
             background: #ecfdf5;
             border: 2px dashed #06c755;
-            border-radius: 8px;
-            padding: 8px 14px;
+            border-radius: 6px;
+            padding: 6px 10px;
             text-align: center;
-            margin: 10px 0;
+            margin: 8px 0;
         }
         .btn-copy-code {
             background: #ffffff;
             border: 1px solid #cbd5e1;
             color: #475569;
-            padding: 4px 10px;
+            padding: 3px 8px;
             border-radius: 4px;
-            font-size: 0.76rem;
+            font-size: 0.72rem;
             font-weight: bold;
             cursor: pointer;
         }
-        .btn-copy-code:hover { background: #f1f5f9; color: #1e293b; }
         .line-waiting-box {
             display: flex;
             align-items: center;
-            gap: 10px;
-            font-size: 0.8rem;
+            gap: 8px;
+            font-size: 0.76rem;
             color: #059669;
             background: #f0fdf4;
-            padding: 8px 12px;
+            padding: 6px 10px;
             border-radius: 6px;
-            margin-top: 8px;
+            margin-top: 6px;
             border: 1px solid #bbf7d0;
         }
         .line-spinner {
-            width: 16px;
-            height: 16px;
-            border: 2.5px solid #86efac;
+            width: 14px;
+            height: 14px;
+            border: 2px solid #86efac;
             border-top-color: #059669;
             border-radius: 50%;
             animation: spin 0.8s linear infinite;
         }
         @keyframes spin { to { transform: rotate(360deg); } }
-
-        /* 📱 スマホ最適化 ＆ 超コンパクト化スタイル */
-        .header-menu-select {
-            display: none;
-            background: rgba(255, 255, 255, 0.22);
-            color: #ffffff;
-            border: 1px solid rgba(255, 255, 255, 0.45);
-            padding: 4px 8px;
-            border-radius: 5px;
-            font-size: 0.8rem;
-            font-weight: bold;
-            outline: none;
-            cursor: pointer;
-        }
-        .header-menu-select option {
-            color: #1e293b;
-            background: #ffffff;
-        }
-
-        .filter-select-group {
-            display: none;
-            gap: 6px;
-            width: 100%;
-        }
-        .filter-select {
-            flex: 1;
-            padding: 6px 8px;
-            border: 1px solid #cbd5e1;
-            border-radius: 6px;
-            font-size: 0.82rem;
-            background: #ffffff;
-            color: #334155;
-            font-weight: 600;
-            outline: none;
-            cursor: pointer;
-            box-shadow: 0 1px 2px rgba(0,0,0,0.04);
-        }
-
-        .post-date-tag {
-            font-size: 0.74rem;
-            color: #888;
-            white-space: nowrap;
-            margin-left: auto;
-            padding-left: 6px;
-            flex-shrink: 0;
-            align-self: flex-start;
-        }
-
-        @media (max-width: 768px) {
-            header { padding: 0.5rem 0.8rem !important; }
-            .header-container { gap: 6px !important; }
-            .header-title h1 { font-size: 1.05rem !important; }
-            .header-right { gap: 6px !important; }
-            .desktop-only { display: none !important; }
-            .header-menu-select { display: inline-block !important; }
-            .user-info { font-size: 0.78rem !important; padding: 3px 6px !important; }
-            .btn-line-header { font-size: 0.72rem !important; padding: 3px 6px !important; }
-            
-            main { margin: 0.6rem auto !important; padding: 0 0.5rem !important; }
-            .filter-section { padding: 8px 10px !important; margin-bottom: 0.8rem !important; gap: 8px !important; }
-            .toolbar-group { gap: 6px !important; }
-            .btn-create { padding: 5px 12px !important; font-size: 0.82rem !important; }
-            .btn-toggle-compact { padding: 5px 10px !important; font-size: 0.78rem !important; }
-            .btn-print-top { display: none !important; }
-            
-            .desktop-filter-pills { display: none !important; }
-            .filter-select-group { display: flex !important; }
-
-            .post-card { padding: 10px 12px !important; }
-            .post-title { font-size: 1.05rem !important; }
-            .post-meta { font-size: 0.76rem !important; gap: 8px !important; margin-bottom: 6px !important; }
-        }
-
-        @media (max-width: 480px) {
-            .post-date-label { display: none !important; }
-        }
     </style>
 </head>
 <body>
 
     <header>
         <div class="header-container">
-            <div class="header-title">
-                <h1>📜 院内かわら版</h1>
+            <div class="header-title-box">
+                <span class="header-icon">📜</span>
+                <div class="header-title">
+                    <h1>院内かわら版</h1>
+                    <span>医療法人小野会 ポータル</span>
+                </div>
             </div>
             <div class="header-right">
                 <a href="login.php?switch_user=1" class="user-info" title="クリックしてユーザーを切り替え">
-                    👤 <span style="font-weight:bold;"><?= htmlspecialchars($login_user['staff_name']) ?></span>
-                    <span style="font-size:0.7rem; background:rgba(255,255,255,0.3); padding:1px 5px; border-radius:3px; margin-left:2px;">切替</span>
+                    👤 <b><?= htmlspecialchars($login_user['staff_name']) ?></b>
+                    <span class="user-tag"><?= htmlspecialchars($login_user['role'] ?? '職員') ?></span>
+                    <span style="font-size:0.68rem; opacity:0.85;">切替</span>
                 </a>
-                <button type="button" class="btn-line-header <?= $has_line_id ? 'is-linked' : 'is-unlinked' ?>" id="headerLineBtn" onclick="openLineLinkModal()" title="LINE連携設定">
-                    <?= $has_line_id ? '🟢 LINE済' : '📱 LINE未' ?>
+                <button type="button" class="btn-line-header <?= $has_line_id ? 'is-linked' : 'is-unlinked' ?>" onclick="openLineLinkModal()" title="LINE連携設定">
+                    <?= $has_line_id ? '🟢 LINE連携済' : '📱 LINE未登録' ?>
                 </button>
-
-                <!-- 📱 スマホ用 メニューリストBOX -->
-                <select class="header-menu-select" onchange="handleHeaderMenu(this)">
-                    <option value="">☰ メニュー ▼</option>
-                    <?php if ($is_admin || $current_staff_id === 15 || mb_strpos($login_user['role'] ?? '', '事務') !== false): ?>
-                        <option value="jimucho_dashboard.php">👔 事務長モード</option>
-                    <?php endif; ?>
-                    <option value="safety_contacts.php">🛡️ 連絡網・安否</option>
-                    <option value="/index.php">🏠 院内ポータル</option>
-                    <option value="help.php">❓ 使い方</option>
-                    <?php if ($is_admin): ?><option value="master_mente.php">⚙️ メンテ</option><?php endif; ?>
-                </select>
-
-                <!-- 💻 PC用 ヘッダーボタン群 -->
-                <div class="header-actions desktop-only">
-                    <?php if ($is_admin || $current_staff_id === 15 || mb_strpos($login_user['role'] ?? '', '事務') !== false): ?>
-                        <a href="jimucho_dashboard.php" class="btn-header" style="background:#0284c7; font-weight:bold;">👔 事務長モード</a>
-                    <?php endif; ?>
-                    <a href="safety_contacts.php" class="btn-header" style="background:#28a745;">🛡️ 連絡網・安否</a>
-                    <a href="/index.php" class="btn-header">ポータル</a>
-                    <a href="help.php" class="btn-header" style="background:#17a2b8;" target="_blank">❓ 使い方</a>
-                    <?php if ($is_admin): ?><a href="master_mente.php" class="btn-header" style="background:#e67e22;">⚙️ メンテ</a><?php endif; ?>
-                </div>
+                <a href="/index.php" class="btn-portal">🏠 総合ポータル</a>
             </div>
         </div>
     </header>
 
     <main>
-        <?php if ($notice_msg): ?>
-            <div class="alert-notice"><?= htmlspecialchars($notice_msg) ?></div>
+        <?php if ($msg === 'saved'): ?>
+            <div class="alert-msg">✅ 記事を保存・更新しました。</div>
+        <?php elseif ($msg === 'deleted'): ?>
+            <div class="alert-msg">🗑️ 記事を削除しました。</div>
         <?php endif; ?>
 
-        <?php if (!$has_line_id): ?>
-            <div class="line-register-banner" id="lineNoticeBanner">
-                <div class="line-banner-left">
-                    <span class="line-banner-icon">📱</span>
-                    <div>
-                        <div class="line-banner-title">【BCP安否確認・重要連絡】LINEが未登録です</div>
-                        <div class="line-banner-desc">有事の生存点呼や緊急アナウンスをスマホで受け取れるよう、公式LINEとの連携をお願いします。</div>
-                    </div>
-                </div>
-                <button type="button" class="btn-line-banner" onclick="openLineLinkModal()">
-                    👉 LINE連携コードを発行する（約30秒）
-                </button>
-            </div>
-        <?php endif; ?>
-
-        <!-- 🛡️ BCP安否確認バナー（平常モード時は非表示、訓練・災害時のみ表示） -->
+        <!-- 🛡️ BCP安否確認バナー（災害・訓練時で未報告の場合のみ） -->
         <?php if ($safety_mode !== 'normal' && !$my_safety_reported_today): ?>
-            <?php if ($safety_mode === 'disaster'): ?>
-                <div style="background:#fef2f2; border:1px solid #fecaca; border-left:5px solid #dc2626; padding:8px 12px; border-radius:6px; margin-bottom:0.8rem; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
-                    <span style="font-size:0.84rem; color:#b91c1c; font-weight:bold;">
-                        🚨 【災害時緊急モード】生存報告（BCP安否確認）が未報告です
-                    </span>
-                    <a href="safety_contacts.php" style="background:#dc2626; color:#fff; font-size:0.78rem; font-weight:bold; padding:4px 10px; border-radius:4px; text-decoration:none; white-space:nowrap;">
-                        1クリック報告 →
-                    </a>
+            <div class="bcp-banner <?= $safety_mode === 'disaster' ? 'disaster' : 'drill' ?>">
+                <div>
+                    <?= $safety_mode === 'disaster' ? '🚨 【災害時緊急モード】安否確認・生存点呼が未報告です' : '🛡️ 【安否確認訓練】本日の生存チェックが未報告です' ?>
                 </div>
-            <?php else: /* drill (訓練モード) */ ?>
-                <div style="background:#fff8ee; border:1px solid #fde68a; border-left:5px solid #e67e22; padding:8px 12px; border-radius:6px; margin-bottom:0.8rem; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
-                    <span style="font-size:0.84rem; color:#b45309; font-weight:bold;">
-                        🛡️ 【安否訓練中】本日の生存チェックが未報告です
-                    </span>
-                    <a href="safety_contacts.php" style="background:#28a745; color:#fff; font-size:0.78rem; font-weight:bold; padding:4px 10px; border-radius:4px; text-decoration:none; white-space:nowrap;">
-                        1クリック報告 →
-                    </a>
-                </div>
-            <?php endif; ?>
+                <a href="safety_contacts.php" style="background:#dc2626; color:#fff; font-size:0.76rem; font-weight:bold; padding:3px 10px; border-radius:4px; text-decoration:none;">
+                    1クリック安否報告 →
+                </a>
+            </div>
         <?php endif; ?>
 
-        <!-- フィルター・ツールバーセクション（超コンパクト化） -->
-        <div class="filter-section">
-            <div class="toolbar-group">
-                <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
-                    <a href="create_post.php" class="btn-create">✏️ 新規投稿</a>
-                    
-                    <button type="button" id="compactToggleBtn" class="btn-toggle-compact" onclick="toggleCompactMode()">
-                        📄 1行表示
-                    </button>
-
-                    <button type="button" class="btn-toggle-compact btn-print-top" onclick="window.print()" style="background:#6c757d; border-color:#5a6268;">
-                        🖨️ 一覧印刷
-                    </button>
-
-                    <?php
-                    $build_url = function($df, $cat) {
-                        $p = [];
-                        if ($df !== 'all') $p['date_filter'] = $df;
-                        if ($cat > 0) $p['cat'] = $cat;
-                        return 'index.php' . (!empty($p) ? '?' . http_build_query($p) : '');
-                    };
-                    ?>
-                </div>
-
-                <!-- 💻 PC用 期間フィルター -->
-                <div class="date-filter-group desktop-filter-pills">
-                    <a href="<?= $build_url('all', $selected_cat) ?>" class="btn-date <?= $date_filter === 'all' ? 'active' : '' ?>">全期間</a>
-                    <a href="<?= $build_url('today', $selected_cat) ?>" class="btn-date <?= $date_filter === 'today' ? 'active' : '' ?>">今日</a>
-                    <a href="<?= $build_url('tomorrow', $selected_cat) ?>" class="btn-date <?= $date_filter === 'tomorrow' ? 'active' : '' ?>">明日</a>
-                    <a href="<?= $build_url('plus7', $selected_cat) ?>" class="btn-date <?= $date_filter === 'plus7' ? 'active' : '' ?>">+7日</a>
-                    <a href="<?= $build_url('this_month', $selected_cat) ?>" class="btn-date <?= $date_filter === 'this_month' ? 'active' : '' ?>">今月</a>
-                    <a href="<?= $build_url('next_month', $selected_cat) ?>" class="btn-date <?= $date_filter === 'next_month' ? 'active' : '' ?>">来月</a>
-                    <span style="color:#ced4da; margin:0 2px;">|</span>
-                    <a href="<?= $build_url('past', $selected_cat) ?>" class="btn-date <?= $date_filter === 'past' ? 'active' : '' ?>" style="<?= $date_filter === 'past' ? 'background:#5c636a; color:#fff;' : '' ?>">📁 過去分</a>
-                    <a href="<?= $build_url('all_history', $selected_cat) ?>" class="btn-date <?= $date_filter === 'all_history' ? 'active' : '' ?>" style="<?= $date_filter === 'all_history' ? 'background:#17a2b8; color:#fff;' : '' ?>">🌐 全履歴</a>
-                </div>
+        <!-- 🌟 スマート・ステータスバー（薄型1行） -->
+        <div class="status-strip">
+            <div class="status-strip-left">
+                <span>👤 <strong><?= htmlspecialchars($login_user['staff_name']) ?></strong> さん</span>
+                <span class="status-divider">|</span>
+                <span>📅 <strong><?= $today_display ?></strong></span>
+                <span class="status-divider">|</span>
+                <span style="color:#64748b;">掲載中: <strong><?= $total_active_posts ?></strong> 件</span>
             </div>
-
-            <!-- 📱 スマホ用 期間＆カテゴリ 2列ドロップダウン（超コンパクト！） -->
-            <div class="filter-select-group">
-                <select class="filter-select" onchange="if(this.value) location.href=this.value;">
-                    <option value="<?= $build_url('all', $selected_cat) ?>" <?= $date_filter === 'all' ? 'selected' : '' ?>>📅 期間: 全期間</option>
-                    <option value="<?= $build_url('today', $selected_cat) ?>" <?= $date_filter === 'today' ? 'selected' : '' ?>>📅 期間: 今日</option>
-                    <option value="<?= $build_url('tomorrow', $selected_cat) ?>" <?= $date_filter === 'tomorrow' ? 'selected' : '' ?>>📅 期間: 明日</option>
-                    <option value="<?= $build_url('plus7', $selected_cat) ?>" <?= $date_filter === 'plus7' ? 'selected' : '' ?>>📅 期間: 直近+7日</option>
-                    <option value="<?= $build_url('this_month', $selected_cat) ?>" <?= $date_filter === 'this_month' ? 'selected' : '' ?>>📅 期間: 今月</option>
-                    <option value="<?= $build_url('next_month', $selected_cat) ?>" <?= $date_filter === 'next_month' ? 'selected' : '' ?>>📅 期間: 来月</option>
-                    <option value="<?= $build_url('past', $selected_cat) ?>" <?= $date_filter === 'past' ? 'selected' : '' ?>>📁 期間: 過去の投稿</option>
-                    <option value="<?= $build_url('all_history', $selected_cat) ?>" <?= $date_filter === 'all_history' ? 'selected' : '' ?>>🌐 期間: 全履歴(過去含)</option>
-                </select>
-
-                <select class="filter-select" onchange="if(this.value) location.href=this.value;">
-                    <option value="<?= $build_url($date_filter, 0) ?>" <?= $selected_cat === 0 ? 'selected' : '' ?>>🏷️ カテゴリ: 全て</option>
-                    <?php foreach ($categories as $cat): ?>
-                        <option value="<?= $build_url($date_filter, $cat['category_id']) ?>" <?= $selected_cat == $cat['category_id'] ? 'selected' : '' ?>>
-                            <?= $cat['icon_emoji'] ?> <?= htmlspecialchars($cat['category_name']) ?>
-                        </option>
-                    <?php endforeach; ?>
-                </select>
-            </div>
-
-            <!-- 💻 PC用 カテゴリタブ -->
-            <div class="cat-tabs desktop-filter-pills">
-                <a href="<?= $build_url($date_filter, 0) ?>" class="cat-tab <?= $selected_cat === 0 ? 'active' : '' ?>">全て</a>
-                <?php foreach ($categories as $cat): ?>
-                    <a href="<?= $build_url($date_filter, $cat['category_id']) ?>" class="cat-tab <?= $selected_cat == $cat['category_id'] ? 'active' : '' ?>">
-                        <?= $cat['icon_emoji'] ?> <?= htmlspecialchars($cat['category_name']) ?>
+            <div class="status-strip-right">
+                <?php if ($unread_count > 0): ?>
+                    <a href="kawara_list.php" class="pill-unread" title="未読お知らせを確認する">
+                        📢 <strong>未読 <?= $unread_count ?> 件</strong> を確認 →
                     </a>
-                <?php endforeach; ?>
+                <?php else: ?>
+                    <span class="pill-all-read">✓ すべて確認済</span>
+                <?php endif; ?>
             </div>
         </div>
 
-        <?php if ($date_filter === 'past'): ?>
-            <div style="background:#f1f3f5; border:1px solid #ced4da; border-left:5px solid #6c757d; padding:10px 14px; border-radius:6px; margin-bottom:1.2rem; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
-                <div>
-                    <strong style="color:#495057; font-size:0.95rem;">📁 過去の投稿（掲載終了・過去分）を表示しています</strong>
-                    <span style="font-size:0.82rem; color:#666; margin-left:8px;">（合計 <?= count($posts) ?> 件）</span>
+        <!-- 🔍 クイックキーワード検索バー（メニュー化） -->
+        <div class="portal-search-strip">
+            <form method="GET" action="kawara_list.php" class="portal-search-form">
+                <div class="portal-search-input-wrap">
+                    <span class="portal-search-icon">🔍</span>
+                    <input type="text" name="q" placeholder="キーワードでお知らせ・過去履歴・予定を検索..." class="portal-search-input">
                 </div>
-                <a href="<?= $build_url('all', $selected_cat) ?>" style="font-size:0.82rem; color:#005a9c; text-decoration:none; font-weight:bold; background:#fff; border:1px solid #005a9c; padding:4px 10px; border-radius:4px;">🔙 通常表示（掲載中のみ）に戻る</a>
+                <button type="submit" class="btn-portal-search-submit">検索</button>
+            </form>
+            <div class="portal-quick-tags">
+                <span class="portal-tag-label">クイック:</span>
+                <a href="kawara_list.php?date_filter=today" class="portal-tag-link">📅 今日の予定</a>
+                <a href="kawara_list.php?date_filter=plus7" class="portal-tag-link">⏰ 直近+7日</a>
+                <a href="kawara_list.php?date_filter=past" class="portal-tag-link">📁 過去ログ</a>
+                <a href="kawara_list.php?date_filter=all_history" class="portal-tag-link" style="color:#0284c7; border-color:#bae6fd; background:#f0f9ff;">🌐 全履歴</a>
             </div>
-        <?php elseif ($date_filter === 'all_history'): ?>
-            <div style="background:#eef6fc; border:1px solid #b8daff; border-left:5px solid #005a9c; padding:10px 14px; border-radius:6px; margin-bottom:1.2rem; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
-                <div>
-                    <strong style="color:#004085; font-size:0.95rem;">🌐 全履歴（過去を含むすべての投稿）を表示しています</strong>
-                    <span style="font-size:0.82rem; color:#666; margin-left:8px;">（合計 <?= count($posts) ?> 件）</span>
+        </div>
+
+        <!-- 📋 メインメニュー見出し -->
+        <div class="section-header">
+            <span>📋 メインメニュー</span>
+        </div>
+
+        <!-- 🚀 メインメニューグリッド（3列コンパクト配置） -->
+        <div class="menu-grid">
+            <!-- 1. かわら版 一覧 -->
+            <a href="kawara_list.php" class="menu-card">
+                <div class="menu-icon-box icon-list">📜</div>
+                <div class="menu-info">
+                    <div class="menu-title">
+                        <span>かわら版 一覧</span>
+                        <span class="menu-arrow">→</span>
+                    </div>
+                    <div class="menu-desc">病院お知らせ・行事予定・既読確認</div>
                 </div>
-                <a href="<?= $build_url('all', $selected_cat) ?>" style="font-size:0.82rem; color:#005a9c; text-decoration:none; font-weight:bold; background:#fff; border:1px solid #005a9c; padding:4px 10px; border-radius:4px;">🔙 通常表示（掲載中のみ）に戻る</a>
+            </a>
+
+            <!-- 2. 新規投稿作成 -->
+            <a href="create_post.php" class="menu-card">
+                <div class="menu-icon-box icon-create">✏️</div>
+                <div class="menu-info">
+                    <div class="menu-title">
+                        <span>新規投稿・予定作成</span>
+                        <span class="menu-arrow">→</span>
+                    </div>
+                    <div class="menu-desc">お知らせ・日程・特定部署への告知</div>
+                </div>
+            </a>
+
+            <!-- 3. 過去ログ・全履歴検索 -->
+            <a href="kawara_list.php?date_filter=all_history" class="menu-card">
+                <div class="menu-icon-box icon-search">🔍</div>
+                <div class="menu-info">
+                    <div class="menu-title">
+                        <span>過去ログ・全履歴検索</span>
+                        <span class="menu-arrow">→</span>
+                    </div>
+                    <div class="menu-desc">キーワード検索・過去の通知や全履歴の閲覧</div>
+                </div>
+            </a>
+
+            <!-- 3. 事務長ダッシュボード -->
+            <?php if ($is_admin || $is_jimucho): ?>
+                <a href="jimucho_dashboard.php" class="menu-card">
+                    <div class="menu-icon-box icon-jimucho">👔</div>
+                    <div class="menu-info">
+                        <div class="menu-title">
+                            <span>事務長モード</span>
+                            <span class="menu-arrow">→</span>
+                        </div>
+                        <div class="menu-desc">医師公休・出勤・Google同期・既読集計</div>
+                    </div>
+                </a>
+            <?php endif; ?>
+
+            <!-- 4. 連絡網・安否確認 -->
+            <a href="safety_contacts.php" class="menu-card">
+                <div class="menu-icon-box icon-safety">🛡️</div>
+                <div class="menu-info">
+                    <div class="menu-title">
+                        <span>BCP連絡網・安否点呼</span>
+                        <span class="menu-arrow">→</span>
+                    </div>
+                    <div class="menu-desc">災害時安否点呼・緊急連絡網・LINE点呼</div>
+                </div>
+            </a>
+
+            <!-- 5. システムマスタ管理（管理者のみ） -->
+            <?php if ($is_admin): ?>
+                <a href="master_mente.php" class="menu-card">
+                    <div class="menu-icon-box icon-mente">⚙️</div>
+                    <div class="menu-info">
+                        <div class="menu-title">
+                            <span>マスタ管理</span>
+                            <span class="menu-arrow">→</span>
+                        </div>
+                        <div class="menu-desc">職員マスタ・カテゴリ・カレンダー連携</div>
+                    </div>
+                </a>
+            <?php endif; ?>
+
+            <!-- 6. かんたん使い方ガイド -->
+            <a href="help.php" class="menu-card">
+                <div class="menu-icon-box icon-help">❓</div>
+                <div class="menu-info">
+                    <div class="menu-title">
+                        <span>使い方ガイド</span>
+                        <span class="menu-arrow">→</span>
+                    </div>
+                    <div class="menu-desc">既読操作・LINE通知・投稿マニュアル</div>
+                </div>
+            </a>
+
+            <!-- 7. 院内総合ポータル -->
+            <a href="/index.php" class="menu-card">
+                <div class="menu-icon-box icon-portal">🏠</div>
+                <div class="menu-info">
+                    <div class="menu-title">
+                        <span>院内総合ポータル</span>
+                        <span class="menu-arrow">→</span>
+                    </div>
+                    <div class="menu-desc">カルテ・予定表・ヒヤリハット等トップへ</div>
+                </div>
+            </a>
+        </div>
+
+        <!-- ⚡ 直近・重要なお知らせ（最新3件） -->
+        <?php if (!empty($urgent_posts)): ?>
+            <div class="section-header">
+                <span>⚡ 直近・重要なお知らせ</span>
+                <a href="kawara_list.php" style="font-size:0.76rem; font-weight:normal; color:var(--primary); text-decoration:none;">すべて見る →</a>
             </div>
-        <?php endif; ?>
 
-        <div class="post-list">
-            <?php if (empty($posts)): ?>
-                <div style="text-align:center; padding: 3rem; background:#fff; border-radius:8px; color:#888;">
-                    <?= $date_filter === 'past' ? '過去の投稿はありません。' : '該当するお知らせや予定はありません。' ?>
-                </div>
-            <?php else: ?>
-                <?php foreach ($posts as $p): 
-                    $p_lvl = $p['priority_level'];
-                    $is_read = (bool)$p['is_my_read'];
-                    $is_expired = !empty($p['display_until']) && strtotime($p['display_until']) < time();
-                    $is_past_event = empty($p['display_until']) && !empty($p['target_datetime']) && strtotime($p['target_datetime']) < strtotime($today_str);
-                    $expired_class = ($is_expired || $is_past_event) ? 'is-expired' : '';
-
-                    $card_class = "p-{$p_lvl} " . ($is_read ? 'is-read' : 'is-unread') . " " . $expired_class;
-                    $can_edit = ($is_admin || $p['author_id'] == $current_staff_id);
-                    
-                    $read_cnt   = $p['read_count'];
-                    $total_cnt  = $p['total_targets'];
-                    $unread_cnt = max(0, $total_cnt - $read_cnt);
-                ?>
-                    <div class="post-card <?= $card_class ?>" 
-                         data-is-read="<?= $is_read ? '1' : '0' ?>"
-                         data-priority="<?= $p_lvl ?>"
-                         data-within-24h="<?= $p['is_within_24h'] ? '1' : '0' ?>">
-                        
-                        <div class="post-header">
-                            <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
-                                <?php if ($is_expired): ?>
-                                    <span class="badge" style="background:#6c757d; color:#ffffff;">⏱️ 掲載終了</span>
-                                <?php elseif ($is_past_event): ?>
-                                    <span class="badge" style="background:#6c757d; color:#ffffff;">📜 過去の予定</span>
-                                <?php endif; ?>
-
-                                <?php if ($p_lvl === 'urgent' && !$is_expired && !$is_past_event): ?>
-                                    <span class="badge badge-urgent">🚨 直近/緊急</span>
-                                <?php elseif ($p['is_within_24h'] && !$is_expired && !$is_past_event): ?>
-                                    <span class="badge badge-24h">⏰ 24時間以内</span>
-                                <?php endif; ?>
-
-                                <?php if (!$is_read): ?>
-                                    <span class="badge badge-unread">🟣 未読</span>
-                                <?php else: ?>
-                                    <span class="badge badge-read">🩵 既読</span>
-                                <?php endif; ?>
-
-                                <?php if ($p['is_new_post']): ?>
-                                    <span class="badge-new">NEW</span>
-                                <?php endif; ?>
-
-                                <?php if ($p['is_pinned']): ?><span class="badge badge-pinned">📌 固定</span><?php endif; ?>
-                                
-                                <span class="badge-cat" style="background-color: <?= $p['color_code'] ?? '#005a9c' ?>;">
-                                    <?= $p['icon_emoji'] ?> <?= htmlspecialchars($p['category_name'] ?? '一般') ?>
-                                </span>
-                            </div>
-                            <span class="post-date-tag"><span class="post-date-label">投稿: </span><?= date('n/j H:i', strtotime($p['created_at'])) ?></span>
-                        </div>
-
-                        <div class="post-title-wrapper">
-                            <a href="view_post.php?id=<?= $p['post_id'] ?>" 
-                               class="post-title <?= $p_lvl === 'urgent' ? 'text-urgent' : '' ?>"
-                               title="<?= htmlspecialchars($p['plain_summary']) ?>">
-                                <?= htmlspecialchars($p['title']) ?>
-                            </a>
-                            <span class="post-author-tag">(<?= htmlspecialchars($p['author_dept'] ?? '事務部') ?>)</span>
-                        </div>
-
-                        <div class="post-meta">
-                            <span>👤 投稿者: <?= htmlspecialchars($p['author_name'] ?? '事務部') ?> (<?= htmlspecialchars($p['author_dept']) ?>)</span>
-                            <?php if ($p['image_count'] > 0): ?><span>🖼 画像: <?= $p['image_count'] ?>枚</span><?php endif; ?>
-                            <!-- 🆕 掲載期限を追加 -->
-                            <span>掲載期限: <?= empty($p['display_until']) ? '♾️ 無期限' : date('Y/m/d 23:59', strtotime($p['display_until'])) ?></span>
-                        </div>
-
-                        <?php if ($p['formatted_event_date']): ?>
-                            <div class="event-box <?= $p_lvl === 'urgent' ? 'urgent-box' : '' ?>">
-                                🗓 実施・対象日時: <?= $p['formatted_event_date'] ?>
-                            </div>
-                        <?php endif; ?>
-
-                        <div class="post-body-preview">
-                            <?= $p['content'] ?>
-                        </div>
-
-                        <?php if (!$is_read): ?>
-                            <form method="POST" class="read-action-bar">
-                                <input type="hidden" name="action_type" value="mark_read">
-                                <input type="hidden" name="post_id" value="<?= $p['post_id'] ?>">
-                                
-                                <button type="submit" style="background:#28a745; color:white; border:none; padding:7px 16px; border-radius:4px; font-weight:bold; cursor:pointer; font-size:0.88rem; box-shadow:0 2px 4px rgba(0,0,0,0.1);">
-                                     内容を確認しました（既読を付ける）
-                                </button>
-
-                                <label style="font-size:0.82rem; color:#0f5132; font-weight:bold; cursor:pointer; display:inline-flex; align-items:center; gap:4px;">
-                                    <input type="checkbox" name="send_self_line" value="1" <?= $has_line_id ? 'checked' : '' ?> onclick="checkLineIdStatus(event, <?= $has_line_id ? 'true' : 'false' ?>)" style="accent-color:#198754; width:16px; height:16px;">
-                                    <span>📲 自分のLINEにも内容をメモとして送信する</span>
-                                </label>
-                            </form>
-                        <?php else: ?>
-                            <div style="display:flex; justify-content:space-between; align-items:center; background:#e0f2fe; padding:6px 12px; border-radius:6px; margin-bottom:10px; flex-wrap:wrap; gap:5px;">
-                                <span style="font-size:0.82rem; color:#0369a1; font-weight:bold;">🩵 このお知らせは確認済み（既読）です</span>
-                                <form method="POST" style="margin:0;">
-                                    <input type="hidden" name="action_type" value="mark_unread">
-                                    <input type="hidden" name="post_id" value="<?= $p['post_id'] ?>">
-                                    <button type="submit" class="btn-unread-reset">↩️ 未読に戻す</button>
-                                </form>
-                            </div>
-                        <?php endif; ?>
-
-                        <div class="toggle-bar">
-                            <button type="button" class="toggle-btn" onclick="toggleAccordion('comments_<?= $p['post_id'] ?>', this)">
-                                💬 コメント・スタンプ (<?= $p['comment_count'] ?>件) ▼
-                            </button>
-                            <button type="button" class="toggle-btn" onclick="toggleAccordion('reads_<?= $p['post_id'] ?>', this)">
-                                👀 既読 <?= $read_cnt ?> / 未読 <?= $unread_cnt ?>名 (対象<?= $total_cnt ?>名) ▼
-                            </button>
-                        </div>
-
-                        <div id="comments_<?= $p['post_id'] ?>" class="accordion-content">
-                            <?php
-                            $stmt_cm = $pdo->prepare("SELECT cm.*, s.staff_name FROM post_comments cm LEFT JOIN staff s ON cm.author_id = s.staff_id WHERE cm.post_id = :pid ORDER BY cm.created_at ASC");
-                            $stmt_cm->execute([':pid' => $p['post_id']]);
-                            $comments = $stmt_cm->fetchAll();
-                            ?>
-
-                            <?php if (!empty($comments)): ?>
-                                <div style="margin-bottom:10px;">
-                                    <?php foreach ($comments as $cm): ?>
-                                        <div class="comment-item">
-                                            <div>
-                                                <b><?= htmlspecialchars($cm['staff_name']) ?>:</b> 
-                                                <?= htmlspecialchars($cm['comment_text']) ?>
-                                                <?php if ($cm['stamp_code']): ?>
-                                                    <span class="stamp-badge"><?= htmlspecialchars($cm['stamp_code']) ?></span>
-                                                <?php endif; ?>
-                                            </div>
-                                            <span style="font-size:0.75rem; color:#999;"><?= date('m/d H:i', strtotime($cm['created_at'])) ?></span>
-                                        </div>
-                                    <?php endforeach; ?>
-                                </div>
-                            <?php else: ?>
-                                <p style="color:#888; margin-bottom:10px;">コメントやスタンプはまだありません。</p>
+            <div class="urgent-card-list">
+                <?php foreach ($urgent_posts as $up): ?>
+                    <a href="view_post.php?id=<?= $up['post_id'] ?>" class="urgent-item">
+                        <div class="urgent-title-wrap">
+                            <?php if ($up['category_code'] === 'urgent'): ?>
+                                <span class="badge badge-urgent">🚨 緊急</span>
+                            <?php elseif (!empty($up['is_pinned'])): ?>
+                                <span class="badge badge-pinned">📌 固定</span>
                             <?php endif; ?>
 
-                            <form method="POST" style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
-                                <input type="hidden" name="action_type" value="add_comment">
-                                <input type="hidden" name="post_id" value="<?= $p['post_id'] ?>">
-                                
-                                <input type="text" name="comment_text" placeholder="一言コメントを入力..." style="flex:1; padding:6px; border:1px solid #ccc; border-radius:4px; font-size:0.85rem;">
-                                
-                                <button type="submit" name="stamp_code" value="👍 了解です" class="stamp-select-btn">👍 了解</button>
-                                <button type="submit" name="stamp_code" value="🙏 感謝" class="stamp-select-btn">🙏 感謝</button>
-                                <button type="submit" name="stamp_code" value="👌 確認済" class="stamp-select-btn">👌 確認済</button>
+                            <?php if (!$up['is_my_read']): ?>
+                                <span class="badge badge-unread">未読</span>
+                            <?php endif; ?>
 
-                                <button type="submit" style="background:#005a9c; color:white; border:none; padding:6px 12px; border-radius:4px; font-weight:bold; cursor:pointer; font-size:0.82rem;">送信</button>
-                            </form>
+                            <span class="urgent-item-title"><?= htmlspecialchars($up['title']) ?></span>
                         </div>
-
-                        <div id="reads_<?= $p['post_id'] ?>" class="accordion-content">
-                            <div style="font-size:0.8rem; color:#666; margin-bottom:5px;">対象スタッフの確認状況（グリーン: 既読 / ピンク: 未読）:</div>
-                            <div class="read-grid">
-                                <?php foreach ($p['target_members'] as $st): 
-                                    $is_st_read = in_array($st['staff_id'], $p['read_staff_ids']);
-                                ?>
-                                    <div class="read-user-badge <?= $is_st_read ? 'is-read' : 'is-unread' ?>">
-                                        <?= htmlspecialchars($st['staff_name']) ?> <?= $is_st_read ? '✓' : '' ?>
-                                    </div>
-                                <?php endforeach; ?>
-                            </div>
+                        <div class="urgent-meta">
+                            <?= date('n/j H:i', strtotime($up['created_at'])) ?>
                         </div>
-
-                        <div class="post-footer">
-                            <div>
-                                <a href="print_post.php?id=<?= $p['post_id'] ?>" target="_blank" class="btn-print">🖨️ 単体印刷</a>
-                                <span style="margin-left: 10px;">掲載期限: <?= empty($p['display_until']) ? '♾️ 無期限' : date('Y/m/d 23:59', strtotime($p['display_until'])) ?></span>
-                            </div>
-                            
-                            <div>
-                                <a href="view_post.php?id=<?= $p['post_id'] ?>" style="color:#005a9c; text-decoration:none; font-weight:bold; margin-right:12px;">詳細をみる →</a>
-                                <?php if ($can_edit): ?>
-                                    <a href="create_post.php?id=<?= $p['post_id'] ?>" style="color:#e67e22; text-decoration:none; font-weight:bold;">✏️ 編集</a>
-                                <?php endif; ?>
-                            </div>
-                        </div>
-                    </div>
+                    </a>
                 <?php endforeach; ?>
-            <?php endif; ?>
-        </div>
+            </div>
+        <?php endif; ?>
     </main>
 
-<!-- 📱 LINE公式アカウント連携モーダル -->
-<div id="lineLinkModal" class="line-modal-overlay" onclick="if(event.target===this) closeLineLinkModal()">
-    <div class="line-modal-card">
-        <div class="line-modal-header">
-            <h3>📱 公式LINE 連携設定</h3>
-            <button type="button" class="line-modal-close" onclick="closeLineLinkModal()">&times;</button>
-        </div>
-        <div class="line-modal-body">
-            <!-- ユーザー表示 -->
-            <div style="display:flex; justify-content:space-between; align-items:center; background:#f1f5f9; padding:8px 12px; border-radius:8px; margin-bottom:14px;">
-                <div style="font-size:0.85rem; font-weight:bold; color:#1e293b;">
-                    👤 <?= htmlspecialchars($login_user['staff_name']) ?> 様 (<?= htmlspecialchars($login_user['role']) ?>)
-                </div>
-                <div id="modalLineBadge" style="font-size:0.75rem; font-weight:bold; padding:2px 8px; border-radius:12px;">
-                    確認中...
-                </div>
+    <!-- 📱 LINE公式アカウント連携モーダル -->
+    <div id="lineLinkModal" class="line-modal-overlay" onclick="if(event.target===this) closeLineLinkModal()">
+        <div class="line-modal-card">
+            <div class="line-modal-header">
+                <h3>📱 公式LINE 連携設定</h3>
+                <button type="button" class="line-modal-close" onclick="closeLineLinkModal()">&times;</button>
             </div>
-
-            <!-- 状態 A: 未連携の場合（3ステップ連携フロー） -->
-            <div id="modalUnlinkedView">
-                <div class="line-step-box">
-                    <div style="display:flex; align-items:center; margin-bottom:8px;">
-                        <span class="line-step-num">Step 1</span>
-                        <span class="line-step-title">公式LINEを友だち追加</span>
+            <div class="line-modal-body">
+                <div style="display:flex; justify-content:space-between; align-items:center; background:#f1f5f9; padding:6px 10px; border-radius:6px; margin-bottom:10px;">
+                    <div style="font-size:0.82rem; font-weight:bold; color:#1e293b;">
+                        👤 <?= htmlspecialchars($login_user['staff_name']) ?> 様 (<?= htmlspecialchars($login_user['role']) ?>)
                     </div>
-                    <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
-                        <div style="text-align:center;">
-                            <img id="lineQrImg" src="https://api.qrserver.com/v1/create-qr-code/?size=110x110&data=https%3A%2F%2Fline.me%2FR%2Fti%2Fp%2F%40tmw3446q" alt="LINE友だち追加QR" style="width:100px; height:100px; border:1px solid #cbd5e1; border-radius:6px; padding:3px; background:#fff;">
-                            <div style="font-size:0.65rem; color:#64748b; margin-top:2px;">QRコードをスキャン</div>
+                    <div id="modalLineBadge" style="font-size:0.72rem; font-weight:bold; padding:2px 6px; border-radius:10px;">
+                        確認中...
+                    </div>
+                </div>
+
+                <div id="modalUnlinkedView">
+                    <div class="line-step-box">
+                        <div style="display:flex; align-items:center; margin-bottom:6px;">
+                            <span class="line-step-num">Step 1</span>
+                            <span class="line-step-title">公式LINEを友だち追加</span>
                         </div>
-                        <div style="flex:1; min-width:180px;">
-                            <div style="font-size:0.8rem; color:#334155; margin-bottom:6px;">
-                                スマホのLINEカメラでQRを読み取るか、以下から友だち追加してください。
+                        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+                            <div style="text-align:center;">
+                                <img id="lineQrImg" src="https://api.qrserver.com/v1/create-qr-code/?size=90x90&data=https%3A%2F%2Fline.me%2FR%2Fti%2Fp%2F%40tmw3446q" alt="LINE友だち追加QR" style="width:85px; height:85px; border:1px solid #cbd5e1; border-radius:4px; padding:2px; background:#fff;">
+                                <div style="font-size:0.62rem; color:#64748b; margin-top:2px;">QRスキャン</div>
                             </div>
-                            <a id="btnLineAddFriend" href="https://line.me/R/ti/p/@tmw3446q" target="_blank" style="display:inline-flex; align-items:center; gap:6px; background:#06c755; color:#fff; padding:6px 12px; border-radius:6px; font-size:0.78rem; font-weight:bold; text-decoration:none;">
-                                💬 LINEで友だち追加を開く
-                            </a>
-                            <div style="font-size:0.7rem; color:#64748b; margin-top:4px;">
-                                ID検索: <span id="modalBotId" style="font-weight:bold; color:#0f172a;">@tmw3446q</span>
+                            <div style="flex:1; min-width:160px;">
+                                <div style="font-size:0.76rem; color:#334155; margin-bottom:4px;">
+                                    スマホカメラでQR読取、または友だち追加を開く：
+                                </div>
+                                <a id="btnLineAddFriend" href="https://line.me/R/ti/p/@tmw3446q" target="_blank" style="display:inline-flex; align-items:center; gap:4px; background:#06c755; color:#fff; padding:4px 10px; border-radius:4px; font-size:0.74rem; font-weight:bold; text-decoration:none;">
+                                    💬 LINEで開く
+                                </a>
+                                <div style="font-size:0.68rem; color:#64748b; margin-top:3px;">
+                                    ID: <span id="modalBotId" style="font-weight:bold; color:#0f172a;">@tmw3446q</span>
+                                </div>
                             </div>
                         </div>
                     </div>
-                </div>
 
-                <div class="line-step-box">
-                    <div style="display:flex; align-items:center; margin-bottom:6px;">
-                        <span class="line-step-num">Step 2</span>
-                        <span class="line-step-title">トーク画面でこのコードを送信</span>
-                    </div>
-                    <div style="font-size:0.78rem; color:#475569;">
-                        公式アカウントのトーク画面に、下記の【数字4桁】をそのまま送信してください：
-                    </div>
-                    <div class="link-code-digit" id="lineLinkCode">
-                        ----
-                    </div>
-                    <div style="display:flex; justify-content:space-between; align-items:center;">
-                        <button type="button" class="btn-copy-code" onclick="copyLinkCode()">📋 コードをコピー</button>
-                        <div style="font-size:0.74rem; color:#64748b;">
-                            有効期限: <span id="lineCodeCountdown" style="font-weight:bold; color:#d97706;">--:--</span>
-                            <button type="button" onclick="generateNewLinkCode()" style="background:none; border:none; color:#0284c7; cursor:pointer; font-size:0.72rem; text-decoration:underline; margin-left:4px;">再発行</button>
+                    <div class="line-step-box">
+                        <div style="display:flex; align-items:center; margin-bottom:4px;">
+                            <span class="line-step-num">Step 2</span>
+                            <span class="line-step-title">トーク画面でこのコードを送信</span>
+                        </div>
+                        <div style="font-size:0.74rem; color:#475569;">
+                            公式LINEのトークに、下記の【数字4桁】をそのまま送信：
+                        </div>
+                        <div class="link-code-digit" id="lineLinkCode">----</div>
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <button type="button" class="btn-copy-code" onclick="copyLinkCode()">📋 コードをコピー</button>
+                            <div style="font-size:0.72rem; color:#64748b;">
+                                有効期限: <span id="lineCodeCountdown" style="font-weight:bold; color:#d97706;">--:--</span>
+                                <button type="button" onclick="generateNewLinkCode()" style="background:none; border:none; color:#0284c7; cursor:pointer; font-size:0.7rem; text-decoration:underline; margin-left:3px;">再発行</button>
+                            </div>
                         </div>
                     </div>
-                </div>
 
-                <div class="line-waiting-box">
-                    <div class="line-spinner"></div>
-                    <div>
-                        <strong>Step 3: トークからの送信を待機しています...</strong>
-                        <div style="font-size:0.72rem; color:#065f46; margin-top:2px;">コードが送信されると、約2〜3秒で自動的に連携完了へ切り替わります。</div>
+                    <div class="line-waiting-box">
+                        <div class="line-spinner"></div>
+                        <div>LINEでコード送信待ち… (受信すると自動完了します)</div>
                     </div>
                 </div>
-            </div>
 
-            <!-- 状態 B: 連携済みの場合（完了画面） -->
-            <div id="modalLinkedView" style="display:none; text-align:center; padding:10px 0;">
-                <div style="font-size:3rem; margin-bottom:8px;">🎉</div>
-                <h4 style="margin:0 0 6px 0; color:#065f46; font-size:1.15rem;">LINE連携が完了しています</h4>
-                <p style="font-size:0.82rem; color:#475569; margin:0 0 16px 0;">
-                    有事のBCP安否確認や緊急アナウンスがあなたのLINEへ届きます。<br>
-                    登録ID: <span id="modalMaskedId" style="font-family:monospace; background:#e2e8f0; padding:2px 6px; border-radius:4px; font-weight:bold;"></span>
-                </p>
-                <div style="display:flex; gap:10px; justify-content:center;">
-                    <button type="button" onclick="closeLineLinkModal()" style="background:#06c755; color:#fff; border:none; padding:8px 20px; border-radius:6px; font-weight:bold; cursor:pointer;">
-                        閉じる
-                    </button>
-                    <button type="button" onclick="unlinkMyLine()" style="background:#fff; color:#dc2626; border:1px solid #fca5a5; padding:8px 14px; border-radius:6px; font-size:0.78rem; font-weight:bold; cursor:pointer;">
-                        連携を解除
+                <div id="modalLinkedView" style="display:none; text-align:center; padding:12px 6px;">
+                    <div style="font-size:2.4rem; margin-bottom:6px;">🟢</div>
+                    <h4 style="color:#059669; font-weight:800; font-size:1rem; margin-bottom:4px;">公式LINEと連携中です</h4>
+                    <p style="font-size:0.78rem; color:#475569; margin-bottom:12px;">
+                        有事のBCP生存点呼や、重要アナウンスがあなたのLINEへ届きます。
+                    </p>
+                    <button type="button" onclick="unlinkLine()" style="background:#fee2e2; color:#dc2626; border:1px solid #fca5a5; padding:5px 12px; border-radius:4px; font-size:0.76rem; font-weight:bold; cursor:pointer;">
+                        連携を解除する
                     </button>
                 </div>
-            </div>
-
-            <!-- アコーディオン：テスト・手動入力用（Webhook未開通環境でも確実にテスト可能） -->
-            <div style="margin-top:14px; border-top:1px dashed #cbd5e1; padding-top:10px;">
-                <details style="font-size:0.76rem; color:#64748b;">
-                    <summary style="cursor:pointer; font-weight:bold; color:#475569;">🛠️ 手動登録 / 開発テスト用連携メニュー</summary>
-                    <div style="background:#f8fafc; padding:10px; border-radius:6px; margin-top:6px; border:1px solid #e2e8f0;">
-                        <p style="margin:0 0 6px 0;">直接LINE User ID（U...）を入力して登録するか、テスト用の模擬IDで即座に連携をテストできます：</p>
-                        <div style="display:flex; gap:6px; margin-bottom:6px;">
-                            <input type="text" id="manualLineUserId" placeholder="例: U1234567890abcdef..." style="flex:1; padding:4px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.75rem; font-family:monospace;">
-                            <button type="button" onclick="manualSaveLineId()" style="background:#0284c7; color:#fff; border:none; padding:4px 10px; border-radius:4px; font-weight:bold; cursor:pointer;">保存</button>
-                        </div>
-                        <button type="button" onclick="simulateTestLink()" style="background:#e2e8f0; color:#1e293b; border:1px solid #cbd5e1; padding:3px 8px; border-radius:4px; font-size:0.72rem; cursor:pointer;">
-                            ⚡ 模擬LINE IDで即時テスト連携
-                        </button>
-                    </div>
-                </details>
             </div>
         </div>
     </div>
-</div>
 
-<script>
-function checkLineIdStatus(e, hasLine) {
-    if (e.target.checked && !hasLine) {
-        if (confirm("LINE IDがまだ登録されていません。\n今すぐLINE連携を設定しますか？")) {
-            openLineLinkModal();
+    <script>
+        let pollTimer = null;
+        let expireTimer = null;
+        let expiresAtTs = 0;
+
+        function openLineLinkModal() {
+            document.getElementById('lineLinkModal').classList.add('active');
+            checkCurrentLineStatus();
         }
-        e.target.checked = false;
-    }
-}
 
-let isCompact = (localStorage.getItem('kawara_is_compact') === '1');
+        function closeLineLinkModal() {
+            document.getElementById('lineLinkModal').classList.remove('active');
+            if (pollTimer) clearInterval(pollTimer);
+            if (expireTimer) clearInterval(expireTimer);
+        }
 
-function applyCompactMode() {
-    const btn = document.getElementById('compactToggleBtn');
-    if (isCompact) {
-        document.body.classList.add('mode-compact');
-        btn.classList.add('is-active');
-        btn.innerHTML = '🖼️ 通常表示に戻す';
-    } else {
-        document.body.classList.remove('mode-compact');
-        btn.classList.remove('is-active');
-        btn.innerHTML = '📄 1行コンパクト表示';
-    }
-}
-
-function toggleCompactMode() {
-    isCompact = !isCompact;
-    localStorage.setItem('kawara_is_compact', isCompact ? '1' : '0');
-    applyCompactMode();
-}
-
-document.addEventListener('DOMContentLoaded', applyCompactMode);
-
-function toggleAccordion(targetId, btn) {
-    const target = document.getElementById(targetId);
-    const isVisible = (target.style.display === 'block');
-
-    const card = btn.closest('.post-card');
-    card.querySelectorAll('.accordion-content').forEach(el => el.style.display = 'none');
-    card.querySelectorAll('.toggle-btn').forEach(el => el.classList.remove('active'));
-
-    if (!isVisible) {
-        target.style.display = 'block';
-        btn.classList.add('active');
-    }
-}
-
-// ==========================================
-// 📱 LINE連携モーダル制御 & 自動ポーリングJS
-// ==========================================
-let linePollingTimer = null;
-let lineCountdownTimer = null;
-let lineRemainingSeconds = 0;
-
-async function openLineLinkModal() {
-    document.getElementById('lineLinkModal').classList.add('active');
-    await refreshLineStatus();
-}
-
-function closeLineLinkModal() {
-    document.getElementById('lineLinkModal').classList.remove('active');
-    stopLinePolling();
-    stopLineCountdown();
-}
-
-async function refreshLineStatus() {
-    try {
-        const res = await fetch('api/line_link_status.php?action=status', { cache: 'no-store' });
-        if (!res.ok) return;
-        const data = await res.json();
-        if (!data.success) return;
-
-        updateModalUI(data);
-
-        if (!data.is_linked) {
-            if (!data.active_code || data.remaining_sec <= 30) {
-                await generateNewLinkCode();
-            } else {
-                displayLinkCode(data.active_code, data.remaining_sec);
-                startLinePolling();
+        async function checkCurrentLineStatus() {
+            try {
+                const res = await fetch('api/line_link_api.php?action=status');
+                const data = await res.json();
+                const badge = document.getElementById('modalLineBadge');
+                
+                if (data.is_linked) {
+                    badge.textContent = '🟢 連携済み';
+                    badge.style.background = '#e8f9ee';
+                    badge.style.color = '#06c755';
+                    document.getElementById('modalUnlinkedView').style.display = 'none';
+                    document.getElementById('modalLinkedView').style.display = 'block';
+                } else {
+                    badge.textContent = '⚪ 未連携';
+                    badge.style.background = '#fef3c7';
+                    badge.style.color = '#b45309';
+                    document.getElementById('modalUnlinkedView').style.display = 'block';
+                    document.getElementById('modalLinkedView').style.display = 'none';
+                    generateNewLinkCode();
+                }
+            } catch (err) {
+                console.error(err);
             }
-        } else {
-            stopLinePolling();
-            stopLineCountdown();
         }
-    } catch (e) {
-        console.error(e);
-    }
-}
 
-function updateModalUI(data) {
-    const badge = document.getElementById('modalLineBadge');
-    const unlinkedView = document.getElementById('modalUnlinkedView');
-    const linkedView = document.getElementById('modalLinkedView');
-    const maskedIdEl = document.getElementById('modalMaskedId');
-    const botIdEl = document.getElementById('modalBotId');
-    const btnFriend = document.getElementById('btnLineAddFriend');
-    const qrImg = document.getElementById('lineQrImg');
-    const headerBtn = document.getElementById('headerLineBtn');
-    const topBanner = document.getElementById('lineNoticeBanner');
-
-    if (data.bot_basic_id) {
-        botIdEl.textContent = data.bot_basic_id;
-        btnFriend.href = data.bot_add_url;
-        qrImg.src = 'https://api.qrserver.com/v1/create-qr-code/?size=110x110&data=' + encodeURIComponent(data.bot_add_url);
-    }
-
-    if (data.is_linked) {
-        badge.textContent = '🟢 連携中';
-        badge.style.background = '#dcfce7';
-        badge.style.color = '#15803d';
-        unlinkedView.style.display = 'none';
-        linkedView.style.display = 'block';
-        maskedIdEl.textContent = data.line_user_id_mask;
-        if (headerBtn) {
-            headerBtn.className = 'btn-line-header is-linked';
-            headerBtn.textContent = '🟢 LINE連携済';
-        }
-        if (topBanner) topBanner.style.display = 'none';
-    } else {
-        badge.textContent = '⚠️ 未連携';
-        badge.style.background = '#fef3c7';
-        badge.style.color = '#b45309';
-        unlinkedView.style.display = 'block';
-        linkedView.style.display = 'none';
-        if (headerBtn) {
-            headerBtn.className = 'btn-line-header is-unlinked';
-            headerBtn.textContent = '📱 LINE未登録';
-        }
-    }
-}
-
-async function generateNewLinkCode() {
-    try {
-        const res = await fetch('api/line_link_status.php?action=generate_code', { method: 'POST', cache: 'no-store' });
-        const data = await res.json();
-        if (data.success) {
-            displayLinkCode(data.link_code, data.remaining_sec);
-            startLinePolling();
-        }
-    } catch (e) {
-        console.error(e);
-    }
-}
-
-function displayLinkCode(code, sec) {
-    document.getElementById('lineLinkCode').textContent = code;
-    lineRemainingSeconds = sec;
-    startLineCountdown();
-}
-
-function startLineCountdown() {
-    stopLineCountdown();
-    updateCountdownText();
-    lineCountdownTimer = setInterval(() => {
-        lineRemainingSeconds--;
-        if (lineRemainingSeconds <= 0) {
-            stopLineCountdown();
-            generateNewLinkCode();
-        } else {
-            updateCountdownText();
-        }
-    }, 1000);
-}
-
-function updateCountdownText() {
-    const m = Math.floor(lineRemainingSeconds / 60);
-    const s = lineRemainingSeconds % 60;
-    const txt = `${m}:${s < 10 ? '0' : ''}${s}`;
-    const el = document.getElementById('lineCodeCountdown');
-    if (el) el.textContent = txt;
-}
-
-function stopLineCountdown() {
-    if (lineCountdownTimer) clearInterval(lineCountdownTimer);
-    lineCountdownTimer = null;
-}
-
-function startLinePolling() {
-    stopLinePolling();
-    linePollingTimer = setInterval(async () => {
-        try {
-            const res = await fetch('api/line_link_status.php?action=status', { cache: 'no-store' });
-            if (!res.ok) return;
-            const data = await res.json();
-            if (data.success && data.is_linked) {
-                stopLinePolling();
-                stopLineCountdown();
-                updateModalUI(data);
+        async function generateNewLinkCode() {
+            try {
+                const res = await fetch('api/line_link_api.php?action=generate_code');
+                const data = await res.json();
+                if (data.success) {
+                    document.getElementById('lineLinkCode').textContent = data.code;
+                    expiresAtTs = Date.now() + (data.expires_in * 1000);
+                    startCountdown();
+                    startPolling();
+                }
+            } catch (err) {
+                console.error(err);
             }
-        } catch (e) {}
-    }, 3000);
-}
-
-function stopLinePolling() {
-    if (linePollingTimer) clearInterval(linePollingTimer);
-    linePollingTimer = null;
-}
-
-function copyLinkCode() {
-    const code = document.getElementById('lineLinkCode').textContent.trim();
-    if (!code || code === '----') return;
-    navigator.clipboard.writeText(code).then(() => {
-        alert('連携コード【' + code + '】をコピーしました！LINEのトーク画面に貼り付けて送信してください。');
-    }).catch(() => {
-        alert('コード：' + code);
-    });
-}
-
-async function unlinkMyLine() {
-    if (!confirm('LINE連携を解除しますか？\n（解除すると緊急安否確認やお知らせが届かなくなります）')) return;
-    try {
-        const res = await fetch('api/line_link_status.php?action=unlink', { method: 'POST' });
-        const data = await res.json();
-        if (data.success) {
-            alert('LINE連携を解除しました。');
-            refreshLineStatus();
         }
-    } catch (e) {
-        alert('解除に失敗しました。');
-    }
-}
 
-async function manualSaveLineId() {
-    const val = document.getElementById('manualLineUserId').value.trim();
-    if (!val) {
-        alert('LINE IDを入力してください。');
-        return;
-    }
-    const fd = new FormData();
-    fd.append('action', 'manual_link');
-    fd.append('line_user_id', val);
-    const res = await fetch('api/line_link_status.php', { method: 'POST', body: fd });
-    const data = await res.json();
-    if (data.success) {
-        alert('LINE IDを登録しました！');
-        refreshLineStatus();
-    }
-}
+        function startCountdown() {
+            if (expireTimer) clearInterval(expireTimer);
+            const cdEl = document.getElementById('lineCodeCountdown');
+            expireTimer = setInterval(() => {
+                const diff = Math.max(0, Math.floor((expiresAtTs - Date.now()) / 1000));
+                const m = Math.floor(diff / 60);
+                const s = diff % 60;
+                cdEl.textContent = `${m}:${s < 10 ? '0' : ''}${s}`;
+                if (diff <= 0) {
+                    clearInterval(expireTimer);
+                    document.getElementById('lineLinkCode').textContent = '期限切';
+                }
+            }, 1000);
+        }
 
-async function simulateTestLink() {
-    const fd = new FormData();
-    fd.append('action', 'manual_link');
-    const res = await fetch('api/line_link_status.php', { method: 'POST', body: fd });
-    const data = await res.json();
-    if (data.success) {
-        alert('テスト用LINE IDで連携しました！');
-        refreshLineStatus();
-    }
-}
-function handleHeaderMenu(sel) {
-    if (!sel || !sel.value) return;
-    if (sel.value === 'help.php' || sel.value.startsWith('http')) {
-        window.open(sel.value, '_blank');
-    } else {
-        window.location.href = sel.value;
-    }
-    sel.value = '';
-}
-</script>
+        function startPolling() {
+            if (pollTimer) clearInterval(pollTimer);
+            pollTimer = setInterval(async () => {
+                try {
+                    const res = await fetch('api/line_link_api.php?action=status');
+                    const data = await res.json();
+                    if (data.is_linked) {
+                        clearInterval(pollTimer);
+                        if (expireTimer) clearInterval(expireTimer);
+                        checkCurrentLineStatus();
+                        location.reload();
+                    }
+                } catch (e) {}
+            }, 3000);
+        }
 
+        function copyLinkCode() {
+            const code = document.getElementById('lineLinkCode').textContent.trim();
+            navigator.clipboard.writeText(code).then(() => {
+                alert('連携コード ' + code + ' をコピーしました！LINEトーク画面に貼り付けて送信してください。');
+            });
+        }
+
+        async function unlinkLine() {
+            if (!confirm('公式LINEとの連携を解除しますか？\n（解除すると緊急連絡や安否点呼がスマホLINEに届かなくなります）')) return;
+            try {
+                const res = await fetch('api/line_link_api.php?action=unlink', { method: 'POST' });
+                const data = await res.json();
+                if (data.success) {
+                    alert('連携を解除しました。');
+                    location.reload();
+                }
+            } catch (err) {
+                alert('解除に失敗しました');
+            }
+        }
+    </script>
 </body>
 </html>

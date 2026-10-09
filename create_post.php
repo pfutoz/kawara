@@ -94,8 +94,10 @@ if (empty($return_to) && !empty($_SERVER['HTTP_REFERER'])) {
         $return_to = 'jimucho';
     } elseif (strpos($ref, 'view_post.php') !== false) {
         $return_to = 'view';
+    } elseif (strpos($ref, 'kawara_list.php') !== false) {
+        $return_to = 'list';
     } elseif (strpos($ref, 'index.php') !== false) {
-        $return_to = 'index';
+        $return_to = 'menu';
     }
 }
 
@@ -105,9 +107,12 @@ if ($return_to === 'jimucho' || $return_to === 'jimucho_dashboard.php') {
 } elseif (($return_to === 'view' || strpos($return_to, 'view_post.php') !== false) && $post_id > 0) {
     $back_url = "view_post.php?id={$post_id}";
     $back_label = '🔍 記事詳細へ戻る';
-} else {
+} elseif ($return_to === 'menu' || $return_to === 'index.php') {
     $back_url = 'index.php';
-    $back_label = '🏠 かわら版一覧へ戻る';
+    $back_label = '🏠 かわら版メニューへ戻る';
+} else {
+    $back_url = 'kawara_list.php';
+    $back_label = '📜 かわら版一覧へ戻る';
 }
 
 // 掲載終了予定日の初期プレビュー表示（曜日付き）
@@ -168,17 +173,17 @@ if (empty($existing_schedules)) {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif;
             background: var(--bg-base);
             margin: 0;
-            padding: 24px;
+            padding: 8px 12px;
             color: var(--text-main);
         }
 
         .container {
-            max-width: 900px;
+            max-width: 960px;
             margin: 0 auto;
             background: #fff;
-            padding: 28px;
-            border-radius: 12px;
-            box-shadow: var(--shadow-lg);
+            padding: 12px 18px;
+            border-radius: 8px;
+            box-shadow: var(--shadow);
             border: 1px solid var(--border);
         }
 
@@ -186,62 +191,68 @@ if (empty($existing_schedules)) {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 20px;
-            border-bottom: 2px solid var(--border);
-            padding-bottom: 14px;
+            margin-bottom: 8px;
+            border-bottom: 1.5px solid var(--border);
+            padding-bottom: 6px;
         }
         .page-header h1 {
-            font-size: 1.35rem;
+            font-size: 1.15rem;
             color: #0f172a;
             display: flex;
             align-items: center;
-            gap: 10px;
+            gap: 6px;
+            margin: 0;
         }
 
         /* 📋 過去イベントからコピー・流用バー */
         .copy-source-bar {
             background: linear-gradient(135deg, #f0fdf4, #e0f2fe);
-            border: 2px solid #38bdf8;
-            border-radius: 10px;
-            padding: 14px 18px;
-            margin-bottom: 24px;
+            border: 1.5px solid #38bdf8;
+            border-radius: 6px;
+            padding: 6px 12px;
+            margin-bottom: 8px;
             box-shadow: var(--shadow);
         }
         .copy-source-label {
-            font-size: 0.95rem;
+            font-size: 0.82rem;
             font-weight: 800;
             color: #0369a1;
             display: flex;
-            flex-direction: column;
-            gap: 3px;
+            align-items: center;
+            justify-content: space-between;
+            gap: 4px;
+        }
+        .copy-source-label small {
+            font-weight: normal;
+            color: #475569;
+            font-size: 0.74rem;
         }
         .btn-copy-apply {
             background: #0284c7;
             color: #fff;
             border: none;
-            padding: 9px 18px;
-            border-radius: 6px;
+            padding: 5px 12px;
+            border-radius: 4px;
             font-weight: bold;
-            font-size: 0.9rem;
+            font-size: 0.82rem;
             cursor: pointer;
             transition: all 0.15s;
             display: inline-flex;
             align-items: center;
-            gap: 6px;
+            gap: 4px;
             white-space: nowrap;
         }
         .btn-copy-apply:hover {
             background: #0369a1;
-            transform: translateY(-1px);
         }
 
         /* 📝 修正モード：変更検知差分パネル */
         .diff-monitor-card {
             background: #fffbeb;
-            border: 2px solid #f59e0b;
-            border-radius: 8px;
-            padding: 14px 18px;
-            margin-bottom: 22px;
+            border: 1.5px solid #f59e0b;
+            border-radius: 6px;
+            padding: 8px 12px;
+            margin-bottom: 8px;
             display: none;
         }
         .diff-monitor-card.has-diff {
@@ -254,90 +265,91 @@ if (empty($existing_schedules)) {
         }
         .diff-monitor-title {
             font-weight: 800;
-            font-size: 0.95rem;
+            font-size: 0.84rem;
             color: #92400e;
             display: flex;
             align-items: center;
-            gap: 8px;
-            margin-bottom: 8px;
+            gap: 6px;
+            margin-bottom: 4px;
         }
         .diff-items-list {
-            font-size: 0.88rem;
+            font-size: 0.8rem;
             color: #78350f;
             display: flex;
             flex-direction: column;
-            gap: 4px;
-            padding-left: 20px;
+            gap: 2px;
+            padding-left: 18px;
+            margin: 0;
         }
         .diff-badge {
             background: #fef08a;
             color: #854d0e;
-            font-size: 0.75rem;
+            font-size: 0.72rem;
             font-weight: bold;
-            padding: 2px 7px;
-            border-radius: 4px;
-            margin-left: 8px;
+            padding: 1px 5px;
+            border-radius: 3px;
+            margin-left: 6px;
             display: none;
         }
         .diff-badge.show { display: inline-block; }
 
-        /* フォームセクション */
+        /* フォームセクション（薄型超コンパクト化） */
         .form-section {
             background: #f8fafc;
-            padding: 18px 20px;
-            border-radius: 10px;
+            padding: 8px 12px;
+            border-radius: 6px;
             border: 1px solid var(--border);
-            margin-bottom: 22px;
+            margin-bottom: 8px;
         }
         .section-label {
             font-weight: 800;
-            font-size: 1rem;
-            margin-bottom: 12px;
+            font-size: 0.88rem;
+            margin-bottom: 6px;
             color: #1e293b;
             display: flex;
             justify-content: space-between;
             align-items: center;
             border-bottom: 1px dashed var(--border-dark);
-            padding-bottom: 8px;
+            padding-bottom: 4px;
         }
 
-        .form-group { margin-bottom: 16px; }
+        .form-group { margin-bottom: 6px; }
         .form-group:last-child { margin-bottom: 0; }
         .form-group label {
             display: block;
             font-weight: 700;
-            font-size: 0.88rem;
-            margin-bottom: 6px;
+            font-size: 0.82rem;
+            margin-bottom: 3px;
             color: var(--text-main);
         }
         .form-control {
             width: 100%;
-            padding: 9px 12px;
+            padding: 5px 8px;
             border: 1px solid var(--border-dark);
-            border-radius: 6px;
-            font-size: 0.95rem;
+            border-radius: 4px;
+            font-size: 0.88rem;
             background: #fff;
             transition: border-color 0.15s;
         }
         .form-control:focus {
             outline: none;
             border-color: var(--primary);
-            box-shadow: 0 0 0 3px rgba(2, 132, 199, 0.15);
+            box-shadow: 0 0 0 2px rgba(2, 132, 199, 0.15);
         }
 
         /* 🗓️ 複数日程スロットマネージャー */
         .schedule-slots-container {
             display: flex;
             flex-direction: column;
-            gap: 12px;
-            margin-bottom: 12px;
+            gap: 6px;
+            margin-bottom: 6px;
         }
         .slot-card {
             background: #ffffff;
-            border: 2px solid var(--border);
-            border-radius: 8px;
-            padding: 14px 16px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.03);
+            border: 1.5px solid var(--border);
+            border-radius: 6px;
+            padding: 8px 10px;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.02);
             transition: all 0.15s;
             position: relative;
         }
@@ -348,35 +360,35 @@ if (empty($existing_schedules)) {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 10px;
-            font-size: 0.9rem;
+            margin-bottom: 6px;
+            font-size: 0.82rem;
             font-weight: 800;
             color: var(--primary-dark);
             border-bottom: 1px solid #f1f5f9;
-            padding-bottom: 6px;
+            padding-bottom: 4px;
         }
         .slot-pill {
             background: #e0f2fe;
             color: #0369a1;
-            padding: 3px 10px;
-            border-radius: 6px;
-            font-size: 0.85rem;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.78rem;
             font-weight: 800;
             display: inline-flex;
             align-items: center;
-            gap: 6px;
+            gap: 4px;
         }
         .slot-actions {
             display: flex;
-            gap: 8px;
+            gap: 6px;
             align-items: center;
         }
         .btn-slot-action {
             background: #f8fafc;
             border: 1px solid var(--border-dark);
-            padding: 4px 10px;
-            border-radius: 4px;
-            font-size: 0.78rem;
+            padding: 2px 7px;
+            border-radius: 3px;
+            font-size: 0.72rem;
             font-weight: bold;
             cursor: pointer;
             color: var(--text-sub);
@@ -392,22 +404,22 @@ if (empty($existing_schedules)) {
 
         .slot-grid-row {
             display: grid;
-            grid-template-columns: 180px 140px auto 140px 140px;
-            gap: 12px;
+            grid-template-columns: 150px 120px auto 120px 120px;
+            gap: 8px;
             align-items: center;
-            margin-bottom: 10px;
+            margin-bottom: 6px;
         }
         @media (max-width: 768px) {
-            .slot-grid-row { grid-template-columns: 1fr; gap: 8px; }
+            .slot-grid-row { grid-template-columns: 1fr; gap: 6px; }
         }
 
         .slot-sub-row {
             display: grid;
             grid-template-columns: 1fr 1fr;
-            gap: 12px;
+            gap: 8px;
             background: #f8fafc;
-            padding: 8px 12px;
-            border-radius: 6px;
+            padding: 6px 8px;
+            border-radius: 4px;
         }
         @media (max-width: 768px) {
             .slot-sub-row { grid-template-columns: 1fr; }
@@ -415,8 +427,8 @@ if (empty($existing_schedules)) {
 
         .time-quick-btns {
             display: flex;
-            gap: 4px;
-            margin-top: 4px;
+            gap: 3px;
+            margin-top: 2px;
             align-items: center;
             flex-wrap: wrap;
         }
@@ -424,9 +436,9 @@ if (empty($existing_schedules)) {
             background: #fff;
             border: 1px solid #16a34a;
             color: #16a34a;
-            padding: 2px 7px;
-            border-radius: 8px;
-            font-size: 0.72rem;
+            padding: 1px 5px;
+            border-radius: 4px;
+            font-size: 0.68rem;
             font-weight: bold;
             cursor: pointer;
         }
@@ -434,18 +446,18 @@ if (empty($existing_schedules)) {
 
         .btn-add-slot {
             background: #ffffff;
-            border: 2px dashed #0284c7;
+            border: 1.5px dashed #0284c7;
             color: #0284c7;
-            padding: 10px;
-            border-radius: 8px;
+            padding: 6px;
+            border-radius: 6px;
             font-weight: 800;
-            font-size: 0.95rem;
+            font-size: 0.85rem;
             cursor: pointer;
             width: 100%;
             display: flex;
             justify-content: center;
             align-items: center;
-            gap: 6px;
+            gap: 4px;
             transition: all 0.15s;
         }
         .btn-add-slot:hover {
@@ -454,15 +466,15 @@ if (empty($existing_schedules)) {
         }
 
         /* 掲載期間ボタン群 */
-        .period-container { display: flex; align-items: center; gap: 15px; flex-wrap: wrap; margin-top: 5px; }
-        .period-btn-group { display: flex; gap: 6px; flex-wrap: wrap; }
+        .period-container { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 3px; }
+        .period-btn-group { display: flex; gap: 4px; flex-wrap: wrap; }
         .btn-period {
             background: #ffffff;
             color: var(--text-main);
             border: 1px solid var(--border-dark);
-            padding: 7px 14px;
-            border-radius: 6px;
-            font-size: 0.88rem;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 0.8rem;
             font-weight: bold;
             cursor: pointer;
             transition: all 0.15s;
@@ -472,7 +484,6 @@ if (empty($existing_schedules)) {
             background: #0284c7;
             color: #ffffff;
             border-color: #0284c7;
-            box-shadow: 0 2px 5px rgba(2, 132, 199, 0.3);
         }
 
         /* エディタ装飾アシスタントバー */
@@ -480,35 +491,38 @@ if (empty($existing_schedules)) {
             background: #f1f5f9;
             border: 1px solid var(--border-dark);
             border-bottom: none;
-            padding: 6px 12px;
+            padding: 3px 8px;
             display: flex;
-            gap: 8px;
+            gap: 4px;
             align-items: center;
             flex-wrap: wrap;
-            border-radius: 6px 6px 0 0;
+            border-radius: 4px 4px 0 0;
         }
         .btn-helper-tag {
             background: #fff;
             border: 1px solid #cbd5e1;
-            padding: 3px 8px;
-            border-radius: 4px;
-            font-size: 0.78rem;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 0.72rem;
             font-weight: bold;
             cursor: pointer;
             display: inline-flex;
             align-items: center;
-            gap: 4px;
+            gap: 3px;
         }
         .btn-helper-tag:hover { background: #e2e8f0; }
-        #editor { min-height: 240px; background: #fff; font-size: 1rem; border-radius: 0 0 6px 6px; }
+        .ql-toolbar.ql-snow {
+            padding: 4px 8px !important;
+        }
+        #editor { min-height: 130px; background: #fff; font-size: 0.92rem; border-radius: 0 0 4px 4px; }
 
         /* LINE通知オプションカード */
         .line-option-card {
             background: #ecfdf5;
             border: 1px solid #6ee7b7;
-            padding: 12px 16px;
-            border-radius: 8px;
-            margin: 20px 0;
+            padding: 6px 12px;
+            border-radius: 6px;
+            margin: 8px 0;
             display: flex;
             align-items: center;
             justify-content: space-between;
@@ -516,11 +530,11 @@ if (empty($existing_schedules)) {
         .line-option-card label {
             cursor: pointer;
             font-weight: bold;
-            font-size: 0.92rem;
+            font-size: 0.82rem;
             color: #065f46;
             display: flex;
             align-items: center;
-            gap: 8px;
+            gap: 6px;
             margin: 0;
         }
 
@@ -529,34 +543,34 @@ if (empty($existing_schedules)) {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-top: 24px;
-            padding-top: 18px;
-            border-top: 2px solid var(--border);
+            margin-top: 10px;
+            padding-top: 8px;
+            border-top: 1.5px solid var(--border);
         }
         .btn-submit {
             background: linear-gradient(135deg, #0284c7, #2563eb);
             color: white;
             border: none;
-            padding: 12px 32px;
-            border-radius: 8px;
+            padding: 8px 24px;
+            border-radius: 6px;
             font-weight: 800;
-            font-size: 1.05rem;
+            font-size: 0.95rem;
             cursor: pointer;
-            box-shadow: 0 4px 10px rgba(37, 99, 235, 0.25);
+            box-shadow: 0 2px 6px rgba(37, 99, 235, 0.2);
             transition: all 0.15s;
         }
         .btn-submit:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 6px 14px rgba(37, 99, 235, 0.35);
+            transform: translateY(-1px);
+            box-shadow: 0 4px 10px rgba(37, 99, 235, 0.3);
         }
         .btn-delete {
             background: #ef4444;
             color: white;
             border: none;
-            padding: 11px 22px;
-            border-radius: 8px;
+            padding: 7px 16px;
+            border-radius: 6px;
             font-weight: bold;
-            font-size: 0.95rem;
+            font-size: 0.85rem;
             cursor: pointer;
         }
         .btn-delete:hover { background: #dc2626; }
@@ -564,15 +578,15 @@ if (empty($existing_schedules)) {
         /* トースト通知 */
         #toast-box {
             position: fixed;
-            bottom: 24px;
-            right: 24px;
+            bottom: 16px;
+            right: 16px;
             background: #0f172a;
             color: #fff;
-            padding: 12px 20px;
-            border-radius: 8px;
-            font-size: 0.9rem;
+            padding: 8px 14px;
+            border-radius: 6px;
+            font-size: 0.82rem;
             font-weight: 600;
-            box-shadow: 0 6px 16px rgba(0,0,0,0.25);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
             display: none;
             z-index: 9999;
         }
@@ -594,21 +608,18 @@ if (empty($existing_schedules)) {
     <!-- 1. 📋 過去のお知らせ・イベントからコピーして作成バー（完全新規作成時のみ表示） -->
     <?php if (!$is_edit): ?>
     <div class="copy-source-bar">
-        <div class="copy-source-label">
-            <span>📋 登録済みのイベント・お知らせをコピーして作成:</span>
-            <small>過去の工事・定例会・点検などを選んで「コピー」を押すと、件名・通知先・本文・時間帯を一括流用して日程だけ調整できます。</small>
-        </div>
-        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top:8px;">
-            <select id="source_post_selector" class="form-control" style="flex:1; min-width:320px;">
-                <option value="">-- コピー元のお知らせ・イベントを選択してください --</option>
+        <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+            <span style="font-size:0.82rem; font-weight:800; color:#0369a1; white-space:nowrap;">📋 登録済みからコピー:</span>
+            <select id="source_post_selector" class="form-control" style="flex:1; min-width:240px;">
+                <option value="">-- コピー元のお知らせ・イベントを選択 --</option>
                 <?php foreach ($recent_source_posts as $sp): ?>
                     <option value="<?= $sp['post_id'] ?>" data-json="<?= htmlspecialchars(json_encode($sp), ENT_QUOTES, 'UTF-8') ?>">
-                        <?= htmlspecialchars($sp['icon_emoji'] ?? '📄') ?> <?= htmlspecialchars($sp['title']) ?> (<?= date('Y/m/d', strtotime($sp['created_at'])) ?>)
+                        <?= htmlspecialchars($sp['icon_emoji'] ?? '📄') ?> <?= htmlspecialchars($sp['title']) ?> (<?= date('n/j', strtotime($sp['created_at'])) ?>)
                     </option>
                 <?php endforeach; ?>
             </select>
             <button type="button" class="btn-copy-apply" onclick="applyCopiedPost()">
-                📋 この内容をフォームへコピー
+                📋 内容を反映
             </button>
         </div>
     </div>
@@ -618,7 +629,7 @@ if (empty($existing_schedules)) {
     <?php if ($is_edit): ?>
         <div id="diff-monitor-card" class="diff-monitor-card">
             <div class="diff-monitor-title">
-                <span>📝 変更検知ハイライト（修正前の内容からの変更点）:</span>
+                <span>📝 変更検知ハイライト（修正前からの変更点）:</span>
             </div>
             <ul id="diff-items-list" class="diff-items-list">
                 <!-- JSで動的差分生成 -->
@@ -645,10 +656,10 @@ if (empty($existing_schedules)) {
         <div class="form-section">
             <div class="section-label">
                 <span>🏷️ 基本情報</span>
-                <span id="diff-badge-basic" class="diff-badge">[基本情報変更あり]</span>
+                <span id="diff-badge-basic" class="diff-badge">[変更あり]</span>
             </div>
-            <div style="display:flex; gap:16px; align-items:center; flex-wrap:wrap; margin-bottom:12px;">
-                <div style="flex:1; min-width:220px;">
+            <div style="display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap; margin-bottom:6px;">
+                <div style="flex:1; min-width:200px;">
                     <label>区分・カテゴリー</label>
                     <select name="category_id" id="f_category" class="form-control" onchange="onFieldChange()">
                         <?php foreach ($categories as $cat): ?>
@@ -658,8 +669,8 @@ if (empty($existing_schedules)) {
                         <?php endforeach; ?>
                     </select>
                 </div>
-                <div style="margin-top:24px;">
-                    <label style="cursor:pointer; font-weight:bold; display:flex; align-items:center; gap:6px;">
+                <div style="padding-bottom:6px;">
+                    <label style="cursor:pointer; font-weight:bold; display:flex; align-items:center; gap:5px; font-size:0.84rem; margin:0;">
                         <input type="checkbox" name="is_pinned" id="f_is_pinned" value="1" <?= ($is_edit && $post_data['is_pinned']) ? 'checked' : '' ?> onchange="onFieldChange()"> 
                         📌 画面最上部に固定（ピン留め）
                     </label>
@@ -669,7 +680,7 @@ if (empty($existing_schedules)) {
             <div class="form-group">
                 <label>
                     件名（タイトル） <span style="color:red;">*</span>
-                    <span id="diff-badge-title" class="diff-badge">[件名変更あり]</span>
+                    <span id="diff-badge-title" class="diff-badge">[変更あり]</span>
                 </label>
                 <input type="text" name="title" id="f_title" class="form-control" required value="<?= htmlspecialchars($post_data['title'] ?? '') ?>" placeholder="例: 【本日実施】窓リフォームおよび換気扇交換作業" oninput="onFieldChange()">
             </div>
@@ -679,39 +690,39 @@ if (empty($existing_schedules)) {
         <div class="form-section">
             <div class="section-label">
                 <span>🎯 通知対象の指定</span>
-                <span id="diff-badge-target" class="diff-badge">[対象変更あり]</span>
+                <span id="diff-badge-target" class="diff-badge">[変更あり]</span>
             </div>
-            <div style="display:flex; gap:16px; margin-bottom:12px; align-items:center;">
-                <label style="cursor:pointer; font-weight:bold; display:flex; align-items:center; gap:6px;">
+            <div style="display:flex; gap:14px; margin-bottom:6px; align-items:center; font-size:0.84rem;">
+                <label style="cursor:pointer; font-weight:bold; display:flex; align-items:center; gap:4px; margin:0;">
                     <input type="radio" name="target_type" value="dept" <?= (!$is_edit || !empty($selected_depts)) ? 'checked' : '' ?> onclick="toggleTargetType('dept')"> 部署グループで指定
                 </label>
-                <label style="cursor:pointer; font-weight:bold; display:flex; align-items:center; gap:6px;">
+                <label style="cursor:pointer; font-weight:bold; display:flex; align-items:center; gap:4px; margin:0;">
                     <input type="radio" name="target_type" value="individual" <?= ($is_edit && !empty($selected_staff)) ? 'checked' : '' ?> onclick="toggleTargetType('individual')"> 👤 特定の人だけに通知（指名）
                 </label>
             </div>
 
-            <div id="dept-selector" style="display:flex; gap:12px; flex-wrap:wrap; align-items:center;">
+            <div id="dept-selector" style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
                 <?php foreach ($departments as $d): ?>
-                    <label style="font-size:0.9rem; cursor:pointer; display:inline-flex; align-items:center; gap:4px; background:#fff; padding:6px 12px; border:1px solid #cbd5e1; border-radius:6px;">
+                    <label style="font-size:0.82rem; cursor:pointer; display:inline-flex; align-items:center; gap:3px; background:#fff; padding:3px 8px; border:1px solid #cbd5e1; border-radius:4px; margin:0;">
                         <input type="checkbox" name="depts[]" value="<?= $d['dept_id'] ?>" <?= (!$is_edit && $d['dept_code'] === 'all') || in_array($d['dept_id'], $selected_depts) ? 'checked' : '' ?> onchange="onFieldChange()">
                         <?= htmlspecialchars($d['dept_name']) ?>
                     </label>
                 <?php endforeach; ?>
             </div>
 
-            <div id="individual-staff-box" style="display:none; margin-top:10px; background:#fff; padding:12px; border:1px solid #cbd5e1; border-radius:6px;">
-                <div style="display:flex; gap:4px; align-items:center; margin-bottom:8px; flex-wrap:wrap;">
-                    <span style="font-weight:bold; font-size:0.8rem; color:#555; margin-right:6px;">50音フィルター:</span>
+            <div id="individual-staff-box" style="display:none; margin-top:6px; background:#fff; padding:8px; border:1px solid #cbd5e1; border-radius:4px;">
+                <div style="display:flex; gap:3px; align-items:center; margin-bottom:6px; flex-wrap:wrap;">
+                    <span style="font-weight:bold; font-size:0.75rem; color:#555; margin-right:4px;">50音:</span>
                     <?php foreach (['all'=>'全','あ'=>'あ','か'=>'か','さ'=>'さ','た'=>'た','な'=>'な','は'=>'は','ま'=>'ま','や'=>'や','ら'=>'ら','わ'=>'わ'] as $rk => $rv): ?>
-                        <button type="button" class="btn-time-quick" style="padding:2px 8px; border-radius:4px;" onclick="filterStaffKana('<?= $rk ?>', this)"><?= $rv ?></button>
+                        <button type="button" class="btn-time-quick" onclick="filterStaffKana('<?= $rk ?>', this)"><?= $rv ?></button>
                     <?php endforeach; ?>
                 </div>
-                <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(180px, 1fr)); gap:6px; max-height:180px; overflow-y:auto; padding:4px;">
+                <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(160px, 1fr)); gap:4px; max-height:140px; overflow-y:auto; padding:2px;">
                     <?php foreach ($staff_members as $sm): 
                         $kana_trim = trim($sm['kana'] ?? '');
                         $first_char = mb_substr($kana_trim, 0, 1);
                     ?>
-                        <label class="staff-item" data-first-char="<?= htmlspecialchars($first_char) ?>" style="font-size:0.85rem; cursor:pointer; display:inline-flex; align-items:center; gap:4px;">
+                        <label class="staff-item" data-first-char="<?= htmlspecialchars($first_char) ?>" style="font-size:0.8rem; cursor:pointer; display:inline-flex; align-items:center; gap:3px; margin:0;">
                             <input type="checkbox" name="target_staff_ids[]" value="<?= $sm['staff_id'] ?>" <?= in_array($sm['staff_id'], $selected_staff) ? 'checked' : '' ?> onchange="onFieldChange()">
                             <?= htmlspecialchars($sm['staff_name']) ?> <small style="color:#64748b;">(<?= htmlspecialchars($sm['role']) ?>)</small>
                         </label>
@@ -723,12 +734,9 @@ if (empty($existing_schedules)) {
         <!-- 🗓️ イベント日程マネージャー（複数日程・時刻・場所対応） -->
         <div class="form-section" id="section-schedules">
             <div class="section-label">
-                <span>🗓️ イベント・工事・点検の日程設定（複数日程対応）</span>
-                <span id="diff-badge-schedules" class="diff-badge">[日程変更あり]</span>
+                <span>🗓️ 日程設定（複数日程・時刻・場所対応）</span>
+                <span id="diff-badge-schedules" class="diff-badge">[変更あり]</span>
             </div>
-            <p style="font-size:0.85rem; color:#64748b; margin-bottom:12px;">
-                1つの記事に対して、複数の日付・時間帯・場所を登録できます。登録した日程はカレンダーや部署別ポスターに自動連動します。
-            </p>
 
             <div id="schedule-slots-container" class="schedule-slots-container">
                 <!-- JSで動的にスロットカードを生成 -->
@@ -743,7 +751,7 @@ if (empty($existing_schedules)) {
         <div class="form-section">
             <div class="section-label">
                 <span>⏰ 掲示期間（掲載終了日）</span>
-                <span id="diff-badge-period" class="diff-badge">[掲載期間変更あり]</span>
+                <span id="diff-badge-period" class="diff-badge">[変更あり]</span>
             </div>
             <div class="period-container">
                 <div class="period-btn-group" id="periodBtnGroup">
@@ -754,56 +762,54 @@ if (empty($existing_schedules)) {
                     <button type="button" class="btn-period" onclick="selectPeriod(14, this)">2週間</button>
                     <button type="button" class="btn-period" onclick="selectPeriod(30, this)">1ヶ月</button>
                 </div>
-                <div style="font-size:0.9rem; font-weight:bold; color:#475569; background:#fff; padding:6px 14px; border:1px solid #cbd5e1; border-radius:6px;">
+                <div style="font-size:0.8rem; font-weight:bold; color:#475569; background:#fff; padding:3px 10px; border:1px solid #cbd5e1; border-radius:4px;">
                     掲載終了予定: <span id="lbl_display_until_preview" style="color:#0284c7;"><?= $until_preview ?></span>
                 </div>
                 <input type="hidden" name="display_until" id="f_display_until" value="<?= htmlspecialchars($post_data['display_until'] ?? '') ?>">
             </div>
         </div>
 
-        <!-- 記事本文エディタ（カラー＆網掛けハイライト対応） -->
-        <div class="form-group">
+        <!-- 記事本文エディタ -->
+        <div class="form-section" style="background:#fff; border:1px solid var(--border); padding:8px 12px;">
             <div class="section-label" style="border-bottom:none; margin-bottom:4px;">
                 <span>📝 お知らせ本文 <span style="color:red;">*</span></span>
-                <span id="diff-badge-content" class="diff-badge">[本文変更あり]</span>
+                <span id="diff-badge-content" class="diff-badge">[変更あり]</span>
             </div>
 
             <!-- エディタクイック装飾アシスタントバー -->
             <div class="editor-helper-bar">
-                <span style="font-size:0.78rem; font-weight:bold; color:#475569;">クイック装飾:</span>
-                <button type="button" class="btn-helper-tag" onclick="applyHighlight('#fef08a')">🟡 蛍光黄マーカー</button>
-                <button type="button" class="btn-helper-tag" onclick="applyHighlight('#fecdd3')">🔴 薄赤マーカー</button>
-                <button type="button" class="btn-helper-tag" onclick="applyHighlight('#bbf7d0')">🟢 薄緑マーカー</button>
+                <span style="font-size:0.74rem; font-weight:bold; color:#475569;">装飾:</span>
+                <button type="button" class="btn-helper-tag" onclick="applyHighlight('#fef08a')">🟡 蛍光黄</button>
+                <button type="button" class="btn-helper-tag" onclick="applyHighlight('#fecdd3')">🔴 薄赤</button>
+                <button type="button" class="btn-helper-tag" onclick="applyHighlight('#bbf7d0')">🟢 薄緑</button>
                 <button type="button" class="btn-helper-tag" onclick="applyTextColor('#dc2626')">🔴 赤文字太字</button>
-                <button type="button" class="btn-helper-tag" onclick="insertCallout('warning')">⚠️ 警告枠を挿入</button>
-                <button type="button" class="btn-helper-tag" onclick="insertCallout('notice')">📢 案内枠を挿入</button>
-                <button type="button" class="btn-helper-tag" onclick="copySchedulesToEditor()">🗓 日程表を本文に自動挿入</button>
+                <button type="button" class="btn-helper-tag" onclick="insertCallout('warning')">⚠️ 警告枠</button>
+                <button type="button" class="btn-helper-tag" onclick="insertCallout('notice')">📢 案内枠</button>
+                <button type="button" class="btn-helper-tag" onclick="copySchedulesToEditor()">🗓 日程表を本文に挿入</button>
             </div>
 
             <input type="hidden" name="content" id="hiddenContent">
             <div id="editor"><?= $post_data['content'] ?? '' ?></div>
-        </div>
 
-        <!-- 写真・画像添付 -->
-        <div class="form-group" style="margin-top:20px;">
-            <label>🖼️ 写真・画像添付（複数可）</label>
-            <input type="file" name="images[]" multiple accept="image/*" class="form-control">
+            <!-- 写真・画像添付 -->
+            <div style="display:flex; align-items:center; gap:8px; margin-top:8px;">
+                <label style="font-size:0.8rem; font-weight:bold; white-space:nowrap; margin:0;">🖼️ 写真・画像添付:</label>
+                <input type="file" name="images[]" multiple accept="image/*" class="form-control" style="padding:3px 6px; font-size:0.8rem; flex:1;">
+            </div>
         </div>
 
         <!-- LINE通知オプション -->
-        <div class="line-option-card" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+        <div class="line-option-card">
             <div>
                 <label>
                     <input type="checkbox" name="send_line" value="1">
                     <span>📲 対象スタッフのLINEへ更新通知を送信する（デフォルト: オフ）</span>
                 </label>
-                <div style="font-size:0.8rem; color:#065f46; font-weight:bold; margin-top:2px;">
-                    ※有事・重要連絡時のみチェック
-                </div>
+                <span style="font-size:0.74rem; color:#065f46; margin-left:6px;">※有事・重要連絡時のみ</span>
             </div>
             <?php if ($is_edit && !empty($post_id)): ?>
-                <button type="button" onclick="openLineNotifyModal(<?= (int)$post_id ?>)" style="background:#16a34a; color:#fff; border:none; padding:8px 16px; border-radius:6px; font-weight:bold; font-size:0.85rem; cursor:pointer; display:inline-flex; align-items:center; gap:6px; box-shadow:0 2px 6px rgba(22,163,74,0.25);">
-                    💬 LINE Flex通知 プレビュー＆送信
+                <button type="button" onclick="openLineNotifyModal(<?= (int)$post_id ?>)" style="background:#16a34a; color:#fff; border:none; padding:4px 10px; border-radius:4px; font-weight:bold; font-size:0.78rem; cursor:pointer; display:inline-flex; align-items:center; gap:4px;">
+                    💬 LINE Flex通知
                 </button>
             <?php endif; ?>
         </div>
@@ -811,11 +817,11 @@ if (empty($existing_schedules)) {
         <!-- アクションボタンバー -->
         <div class="btn-bar">
             <div>
-                <a href="<?= htmlspecialchars($back_url) ?>" style="color:#64748b; text-decoration:none; margin-right:15px; font-weight:bold;">
+                <a href="<?= htmlspecialchars($back_url) ?>" style="color:#64748b; text-decoration:none; margin-right:12px; font-weight:bold; font-size:0.84rem;">
                     ← キャンセル
                 </a>
                 <?php if ($is_edit): ?>
-                    <button type="button" class="btn-delete" onclick="submitDelete()">🗑️ このお知らせを削除する</button>
+                    <button type="button" class="btn-delete" onclick="submitDelete()">🗑️ 削除する</button>
                 <?php endif; ?>
             </div>
             <button type="submit" class="btn-submit" onclick="submitQuill()">
@@ -982,7 +988,7 @@ function renderScheduleSlots() {
                     <input type="time" class="form-control" value="${slot.start_time || '09:00'}" onchange="updateSlotTimeStart(${index}, this.value)">
                 </div>
 
-                <div style="text-align:center; font-weight:bold; color:#64748b; margin-top:20px; ${isAllDay ? 'display:none;' : ''}">
+                <div style="text-align:center; font-weight:bold; color:#64748b; margin-top:14px; ${isAllDay ? 'display:none;' : ''}">
                     〜
                 </div>
 
@@ -996,7 +1002,7 @@ function renderScheduleSlots() {
                     </div>
                 </div>
 
-                <div style="margin-top:20px;">
+                <div style="margin-top:14px;">
                     <label style="font-size:0.82rem; font-weight:bold; cursor:pointer; color:#0284c7; display:flex; align-items:center; gap:4px;">
                         <input type="checkbox" ${isAllDay ? 'checked' : ''} onchange="toggleSlotAllDay(${index}, this.checked)"> 終日
                     </label>

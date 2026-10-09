@@ -74,7 +74,8 @@ if (!isset($_SESSION['staff_id'])) {
         <h1>📖 かわら版 かんたん使い方ガイド</h1>
         <div>
             <button type="button" class="btn-print" onclick="window.print()">🖨️ ガイドを印刷する</button>
-            <a href="index.php" class="btn-back">← かわら版に戻る</a>
+            <a href="index.php" class="btn-back" style="background:#475569;">🏠 メニュー</a>
+            <a href="kawara_list.php" class="btn-back">📜 一覧へ</a>
         </div>
     </header>
 

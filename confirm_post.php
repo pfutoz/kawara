@@ -58,7 +58,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'save') {
         if ($mode === 'delete' && $post_id > 0) {
             $pdo->prepare("DELETE FROM posts WHERE post_id = :post_id")->execute([':post_id' => $post_id]);
             $pdo->commit();
-            $del_dest = ($return_to === 'jimucho' || $return_to === 'jimucho_dashboard.php') ? 'jimucho_dashboard.php?msg=deleted' : '/kawara/index.php?msg=deleted';
+            $del_dest = ($return_to === 'jimucho' || $return_to === 'jimucho_dashboard.php') ? 'jimucho_dashboard.php?msg=deleted' : 'kawara_list.php?msg=deleted';
             header("Location: {$del_dest}");
             exit;
         }
@@ -207,8 +207,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'save') {
             $dest = 'jimucho_dashboard.php?msg=saved';
         } elseif (($return_to === 'view' || strpos($return_to, 'view_post.php') !== false) && $post_id > 0) {
             $dest = "view_post.php?id={$post_id}&msg=saved";
+        } elseif ($return_to === 'menu' || $return_to === 'index.php') {
+            $dest = 'index.php?msg=saved';
         } else {
-            $dest = '/kawara/index.php?msg=saved';
+            $dest = 'kawara_list.php?msg=saved';
         }
         header("Location: {$dest}");
         exit;

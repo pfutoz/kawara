@@ -1437,7 +1437,8 @@ $all_staff_for_select = $pdo->query("SELECT staff_id, staff_name, dept_id, role,
                 <?php if ($is_admin || $is_can_toggle): ?>
                     <a href="admin_disaster_staff.php" class="btn-header" style="background:#475569;" title="災害モード特定スタッフと暗証番号の管理">⚙️ 権限設定</a>
                 <?php endif; ?>
-                <a href="index.php" class="btn-header">📜 かわら版</a>
+                <a href="index.php" class="btn-header" style="background:#475569;">🏠 メニュー</a>
+                <a href="kawara_list.php" class="btn-header">📜 かわら版</a>
                 <button type="button" class="btn-header" onclick="window.print()" style="background:#495057;">🖨️ A4印刷</button>
                 <form method="POST" style="margin:0; display:inline;">
                     <input type="hidden" name="action" value="sync_stf">
