@@ -1,19 +1,63 @@
 <?php
 require_once __DIR__ . '/includes/auth_helper.php';
-
-// 2. DB接続 ＆ LINEヘルパー読み込み
 require_once __DIR__ . '/includes/db.php';
 
-if (file_exists('includes/line_helper.php')) {
-    require_once 'includes/line_helper.php';
+if (file_exists(__DIR__ . '/includes/line_helper.php')) {
+    require_once __DIR__ . '/includes/line_helper.php';
 }
+
+// 🌟 カレンダー・医師予定ヘルパー読み込み
+require_once __DIR__ . '/includes/calendar_helper_jimucho.php';
+require_once __DIR__ . '/includes/traditional_calendar_helper.php';
+require_once __DIR__ . '/includes/google_calendar_helper.php';
+require_once __DIR__ . '/includes/doctor_schedule_helper.php';
 
 // 📱 端末固定Cookieがあれば自動ログイン！なければlogin.phpへ
 $login_user = checkAuthOrAutoLogin($pdo, $_SERVER['REQUEST_URI'] ?? '');
 $current_staff_id = (int)$login_user['staff_id'];
 $is_admin = (bool)($login_user['is_admin'] ?? false);
+$is_jimucho = ($current_staff_id === 15 || mb_strpos($login_user['staff_name'] ?? '', '山本') !== false || mb_strpos($login_user['role'] ?? '', '事務') !== false);
+$can_see_jimucho = ($is_admin || $is_jimucho);
 $has_line_id = !empty(trim($login_user['line_user_id'] ?? ''));
 
+// 🔄 Googleカレンダー手動同期Ajax
+if (isset($_GET['action']) && $_GET['action'] === 'sync_gcal') {
+    header('Content-Type: application/json; charset=utf-8');
+    $res = sync_all_google_calendars($pdo, true);
+    echo json_encode($res);
+    exit;
+}
+
+// 🌟 ダッシュボードメモ（月・日）Ajax保存・削除（一般ユーザーも利用可能）
+if (isset($_REQUEST['action']) && $_REQUEST['action'] === 'save_dashboard_note') {
+    header('Content-Type: application/json; charset=utf-8');
+    $type    = trim($_REQUEST['target_type'] ?? '');
+    $key     = trim($_REQUEST['target_key'] ?? '');
+    $content = trim($_REQUEST['content'] ?? '');
+
+    if (!in_array($type, ['month', 'date']) || $key === '') {
+        echo json_encode(['success' => false, 'error' => 'パラメータが不正です']);
+        exit;
+    }
+
+    if ($content === '') {
+        $stmt_del = $pdo->prepare("DELETE FROM dashboard_notes WHERE target_type = :type AND target_key = :key");
+        $stmt_del->execute([':type' => $type, ':key' => $key]);
+        echo json_encode(['success' => true, 'action' => 'deleted', 'type' => $type, 'key' => $key]);
+        exit;
+    } else {
+        $stmt_upsert = $pdo->prepare("
+            INSERT INTO dashboard_notes (target_type, target_key, content, updated_at)
+            VALUES (:type, :key, :content, NOW())
+            ON CONFLICT (target_type, target_key) DO UPDATE SET
+                content = EXCLUDED.content,
+                updated_at = NOW()
+        ");
+        $stmt_upsert->execute([':type' => $type, ':key' => $key, ':content' => $content]);
+        echo json_encode(['success' => true, 'action' => 'saved', 'type' => $type, 'key' => $key, 'content' => $content]);
+        exit;
+    }
+}
 
 // 本日の生存確認・安否報告チェック ＆ BCPモード判定
 $active_safety_event = $pdo->query("SELECT * FROM safety_events WHERE is_active = TRUE ORDER BY event_id DESC LIMIT 1")->fetch();
@@ -67,7 +111,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action_type'])) {
             }
 
             $memo_msg = "【既読完了メモ】\n■ 件名：{$p_title}\n----------------------------------\n【本文】\n{$plain_content}";
-
             $line_res = sendLineNotification($pdo, $current_staff_id, $memo_msg);
 
             if ($line_res['unregistered_count'] > 0) {
@@ -92,13 +135,37 @@ $selected_cat  = isset($_GET['cat']) ? (int)$_GET['cat'] : 0;
 $date_filter   = $_GET['date_filter'] ?? 'all';
 $search_query  = trim($_GET['q'] ?? '');
 $current_page  = max(1, (int)($_GET['page'] ?? 1));
-$per_page      = isset($_GET['limit']) ? max(5, min(100, (int)$_GET['limit'])) : 25; // 1ページあたり25件表示（limit指定対応）
+$per_page      = isset($_GET['limit']) ? max(5, min(100, (int)$_GET['limit'])) : 25;
 
-$categories    = $pdo->query("SELECT * FROM post_categories WHERE is_active = TRUE ORDER BY display_order")->fetchAll();
+// 表示モード（デフォルトは一覧 'list'、2週間カードは '2weeks'）
+$view_mode = $_GET['mode'] ?? 'list';
+if (!in_array($view_mode, ['list', '2weeks'])) {
+    $view_mode = 'list';
+}
 
-// URL生成ヘルパー（現在の絞り込み条件・キーワード・ページを保持）
-$build_url = function($df = null, $cat = null, $page = 1, $q = null) use ($date_filter, $selected_cat, $search_query, $per_page) {
+$today_str = date('Y-m-d');
+$selected_date = isset($_GET['date']) ? $_GET['date'] : $today_str;
+if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $selected_date)) {
+    $selected_date = $today_str;
+}
+
+// 🩺 医師予定表の申し送りメモ（画面上部で常に確認可能）
+$doctor_memo = fetch_doctor_memo();
+
+$categories = $pdo->query("SELECT * FROM post_categories WHERE is_active = TRUE ORDER BY display_order")->fetchAll();
+
+// URL生成ヘルパー（現在の絞り込み条件・キーワード・モード・日付を保持）
+$build_url = function($df = null, $cat = null, $page = 1, $q = null, $mode = null, $date = null) use ($date_filter, $selected_cat, $search_query, $per_page, $view_mode, $selected_date) {
     $p = [];
+    $use_mode = ($mode !== null) ? $mode : $view_mode;
+    if ($use_mode !== 'list') {
+        $p['mode'] = $use_mode;
+        $use_date = ($date !== null) ? $date : $selected_date;
+        if ($use_date && $use_date !== date('Y-m-d')) {
+            $p['date'] = $use_date;
+        }
+    }
+
     $use_df   = ($df !== null) ? $df : $date_filter;
     $use_cat  = ($cat !== null) ? (int)$cat : $selected_cat;
     $use_page = ($page !== null) ? (int)$page : 1;
@@ -113,7 +180,256 @@ $build_url = function($df = null, $cat = null, $page = 1, $q = null) use ($date_
     return 'kawara_list.php' . (!empty($p) ? '?' . http_build_query($p) : '');
 };
 
-// 5. 投稿一覧の取得SQL
+// ==========================================
+// 📅 2週間カード表示用 データ準備
+// ==========================================
+$week_days = [];
+$week_groups = [];
+$week_span_events = [[], []];
+$gcal_timed_events_by_date = [];
+$doctor_events_by_date = [];
+$gcal_channels = [];
+$prev_2weeks_date = '';
+$next_2weeks_date = '';
+$week_monday_ts = time();
+$period_sunday_ts = time();
+
+if ($view_mode === '2weeks') {
+    // 週間 / 2週間 計算 (月曜始まり: Mon〜Sun)
+    $sel_ts = strtotime($selected_date);
+    $dow = (int)date('w', $sel_ts); // 0=Sun, 1=Mon, ..., 6=Sat
+    $days_from_mon = ($dow === 0) ? 6 : ($dow - 1);
+    $week_monday_ts = strtotime("-{$days_from_mon} days", $sel_ts);
+
+    $week_count = 2;
+    $period_end_offset = 13;
+    $period_sunday_ts = strtotime("+{$period_end_offset} days", $week_monday_ts);
+
+    $week_start_date = date('Y-m-d', $week_monday_ts);
+    $week_end_date   = date('Y-m-d', $period_sunday_ts);
+
+    // 2週ナビゲーション用リンク日付 (14日前後)
+    $prev_2weeks_date = date('Y-m-d', strtotime("-14 days", $week_monday_ts));
+    $next_2weeks_date = date('Y-m-d', strtotime("+14 days", $week_monday_ts));
+
+    // かわら版イベントの取得
+    $stmt_events = $pdo->prepare("
+        SELECT p.*, c.category_name, c.icon_emoji, s.staff_name 
+        FROM posts p 
+        LEFT JOIN post_categories c ON p.category_id = c.category_id 
+        LEFT JOIN staff s ON p.author_id = s.staff_id 
+        WHERE (
+            (p.target_datetime >= :s_start AND p.target_datetime <= :s_end)
+            OR (p.event_schedules IS NOT NULL AND p.event_schedules::text != '[]' AND p.event_schedules::text != 'null')
+        )
+        ORDER BY p.target_datetime ASC, p.post_id ASC
+    ");
+    $calendar_start_range = date('Y-m-d 00:00:00', strtotime('-3 days', $week_monday_ts));
+    $calendar_end_range   = date('Y-m-d 23:59:59', strtotime('+3 days', $period_sunday_ts));
+
+    $stmt_events->execute([
+        ':s_start' => $calendar_start_range,
+        ':s_end'   => $calendar_end_range
+    ]);
+    $all_event_posts = $stmt_events->fetchAll();
+
+    // 日付ごとにイベントをマッピング（初日＝通常カード、2日目以降＝(続) 件名 [第〇回]）
+    $date_events_map = [];
+    foreach ($all_event_posts as $ep) {
+        $has_slot = false;
+        if (!empty($ep['event_schedules'])) {
+            $raw_slots = json_decode($ep['event_schedules'], true);
+            if (is_array($raw_slots) && count($raw_slots) > 0) {
+                $slots = [];
+                foreach ($raw_slots as $rsl) {
+                    $s_date = !empty($rsl['date']) ? $rsl['date'] : substr($rsl['start_datetime'] ?? '', 0, 10);
+                    $s_time = !empty($rsl['is_all_day']) ? '終日' : (!empty($rsl['start_time']) ? $rsl['start_time'] : (!empty($rsl['start_datetime']) ? date('H:i', strtotime($rsl['start_datetime'])) : ''));
+                    $e_time = !empty($rsl['is_all_day']) ? '' : (!empty($rsl['end_time']) ? $rsl['end_time'] : (!empty($rsl['end_datetime']) ? date('H:i', strtotime($rsl['end_datetime'])) : ''));
+                    $start_dt = !empty($rsl['start_datetime']) ? $rsl['start_datetime'] : ($s_date . ' ' . (!empty($rsl['start_time']) ? $rsl['start_time'] : '00:00:00'));
+                    $end_dt = !empty($rsl['end_datetime']) ? $rsl['end_datetime'] : ((!empty($rsl['end_date']) ? $rsl['end_date'] : $s_date) . ' ' . (!empty($rsl['end_time']) ? $rsl['end_time'] : '23:59:59'));
+
+                    if (!empty($s_date)) {
+                        $slots[] = [
+                            'schedule_id'    => $rsl['schedule_id'] ?? ('slot_' . (count($slots) + 1)),
+                            'date'           => $s_date,
+                            'start_time'     => $s_time,
+                            'end_time'       => $e_time,
+                            'start_datetime' => $start_dt,
+                            'end_datetime'   => $end_dt,
+                            'location'       => $rsl['location'] ?? '',
+                            'memo'           => $rsl['memo'] ?? '',
+                            'is_all_day'     => !empty($rsl['is_all_day'])
+                        ];
+                    }
+                }
+
+                usort($slots, function($a, $b) {
+                    return strcmp($a['start_datetime'], $b['start_datetime']);
+                });
+
+                $total_slots = count($slots);
+                foreach ($slots as $idx => $slot) {
+                    $d = $slot['date'];
+                    $slot_num = $idx + 1;
+                    $is_first = ($idx === 0);
+                    $is_continuation = ($idx > 0);
+                    $display_title = $is_continuation ? "（続）" . $ep['title'] : $ep['title'];
+                    $slot_badge = $total_slots > 1 ? "[第{$slot_num}回]" : "";
+
+                    $date_events_map[$d][] = [
+                        'post_id'         => (int)$ep['post_id'],
+                        'title'           => $ep['title'],
+                        'display_title'   => $display_title,
+                        'slot_num'        => $slot_num,
+                        'total_slots'     => $total_slots,
+                        'is_first'        => $is_first,
+                        'is_continuation' => $is_continuation,
+                        'slot_badge'      => $slot_badge,
+                        'start_time'      => $slot['start_time'],
+                        'end_time'        => $slot['end_time'],
+                        'location'        => $slot['location'],
+                        'memo'            => $slot['memo'],
+                        'icon'            => $ep['icon_emoji'] ?? '🔧',
+                        'author'          => $ep['staff_name'] ?? '事務部',
+                        'raw_post'        => $ep,
+                        'all_slots'       => $slots
+                    ];
+                    $has_slot = true;
+                }
+            }
+        }
+        if (!$has_slot && !empty($ep['target_datetime'])) {
+            $d = substr($ep['target_datetime'], 0, 10);
+            $date_events_map[$d][] = [
+                'post_id'         => (int)$ep['post_id'],
+                'title'           => $ep['title'],
+                'display_title'   => $ep['title'],
+                'slot_num'        => 1,
+                'total_slots'     => 1,
+                'is_first'        => true,
+                'is_continuation' => false,
+                'slot_badge'      => '',
+                'start_time'      => date('H:i', strtotime($ep['target_datetime'])),
+                'end_time'        => !empty($ep['target_end_datetime']) ? date('H:i', strtotime($ep['target_end_datetime'])) : '',
+                'location'        => '',
+                'memo'            => '',
+                'icon'            => $ep['icon_emoji'] ?? '🔧',
+                'author'          => $ep['staff_name'] ?? '事務部',
+                'raw_post'        => $ep,
+                'all_slots'       => [
+                    [
+                        'schedule_id'    => 'slot_1',
+                        'start_datetime' => $ep['target_datetime'],
+                        'end_datetime'   => $ep['target_end_datetime'] ?? '',
+                        'location'       => '',
+                        'memo'           => ''
+                    ]
+                ]
+            ];
+        }
+    }
+
+    foreach ($date_events_map as $d => &$evList) {
+        usort($evList, function($a, $b) {
+            return strcmp($a['start_time'], $b['start_time']);
+        });
+    }
+    unset($evList);
+
+    // 🌟 ダッシュボードメモ（月メモ・日メモ）の取得
+    $cur_month_key = date('Y-m', $week_monday_ts);
+    $cur_month_label = date('Y年n月', $week_monday_ts);
+    $stmt_m_note = $pdo->prepare("SELECT content FROM dashboard_notes WHERE target_type = 'month' AND target_key = :k");
+    $stmt_m_note->execute([':k' => $cur_month_key]);
+    $month_note = $stmt_m_note->fetchColumn() ?: '';
+
+    $stmt_d_notes = $pdo->prepare("SELECT target_key, content FROM dashboard_notes WHERE target_type = 'date' AND target_key >= :s AND target_key <= :e");
+    $stmt_d_notes->execute([':s' => $week_start_date, ':e' => $week_end_date]);
+    $date_notes_map = $stmt_d_notes->fetchAll(PDO::FETCH_KEY_PAIR) ?: [];
+
+    // 14日分配列
+    for ($i = 0; $i < 14; $i++) {
+        $cur_ts = strtotime("+{$i} days", $week_monday_ts);
+        $cur_d_str = date('Y-m-d', $cur_ts);
+        $style_info = get_jimucho_cell_style($cur_d_str);
+        $traditional_info = get_traditional_calendar_info($cur_d_str);
+
+        $week_days[] = [
+            'date_str'    => $cur_d_str,
+            'ts'          => $cur_ts,
+            'day_num'     => date('j', $cur_ts),
+            'month_num'   => date('n', $cur_ts),
+            'dow_text'    => ['日','月','火','水','木','金','土'][(int)date('w', $cur_ts)],
+            'style_info'  => $style_info,
+            'duty_info'   => $style_info['info'],
+            'traditional' => $traditional_info,
+            'events'      => $date_events_map[$cur_d_str] ?? [],
+            'day_note'    => $date_notes_map[$cur_d_str] ?? '',
+            'is_today'    => ($cur_d_str === $today_str),
+            'is_selected' => ($cur_d_str === $selected_date)
+        ];
+    }
+
+    // 週ごとにグループ化（第1週、第2週）
+    $week_groups = [
+        0 => array_slice($week_days, 0, 7),
+        1 => array_slice($week_days, 7, 7)
+    ];
+
+    // Googleカレンダーチャンネル（master_menteで「かわら版表示」が有効なもののみ取得）
+    $gcal_channels = $pdo->query("SELECT * FROM google_calendar_channels WHERE is_enabled = TRUE AND (show_in_kawara IS NOT FALSE) ORDER BY display_order ASC, channel_id ASC")->fetchAll(PDO::FETCH_ASSOC);
+
+    // Google同期（15分以上経過）
+    $last_gcal_sync_ts = $pdo->query("SELECT MAX(synced_at) FROM google_calendar_events_cache")->fetchColumn();
+    if (!empty($gcal_channels) && (!$last_gcal_sync_ts || (time() - strtotime($last_gcal_sync_ts)) > 900)) {
+        @sync_all_google_calendars($pdo, false);
+    }
+
+    $gcal_channel_ids = array_column($gcal_channels, 'channel_id');
+    $gcal_raw_events = !empty($gcal_channel_ids) ? get_cached_google_events_for_range($pdo, $week_start_date, $week_end_date, $gcal_channel_ids) : [];
+
+    // 医師予定表 (yotei API)
+    $doctor_raw_events = fetch_doctor_events($week_start_date, $week_end_date, ['expand_period' => 1]);
+    $doctor_events_by_date = map_doctor_events_by_date($doctor_raw_events);
+
+    // Googleイベント分類＆スパン計算
+    foreach ($gcal_raw_events as $gev) {
+        $ev_start_date = substr($gev['start_datetime'], 0, 10);
+        $ev_end_date   = substr($gev['end_datetime'], 0, 10);
+        $is_all_day    = !empty($gev['is_all_day']);
+        $is_multi_day  = ($ev_start_date !== $ev_end_date);
+
+        if ($is_all_day || $is_multi_day) {
+            for ($w = 0; $w < 2; $w++) {
+                $w_mon_ts = strtotime("+" . ($w * 7) . " days", $week_monday_ts);
+                $start_diff = (int)round((strtotime($ev_start_date) - $w_mon_ts) / 86400);
+                $end_diff   = (int)round((strtotime($ev_end_date) - $w_mon_ts) / 86400);
+
+                $col_start = max(1, $start_diff + 1);
+                $col_end   = min(7, $end_diff + 1);
+
+                if ($col_start <= 7 && $col_end >= 1 && $col_start <= $col_end) {
+                    $col_span = $col_end - $col_start + 1;
+                    $w_gev = $gev;
+                    $w_gev['start_col'] = $col_start;
+                    $w_gev['col_span']  = $col_span;
+                    $w_gev['is_clipped_start'] = ($start_diff < 0);
+                    $w_gev['is_clipped_end']   = ($end_diff > 6);
+                    $week_span_events[$w][] = $w_gev;
+                }
+            }
+        } else {
+            if (!isset($gcal_timed_events_by_date[$ev_start_date])) {
+                $gcal_timed_events_by_date[$ev_start_date] = [];
+            }
+            $gcal_timed_events_by_date[$ev_start_date][] = $gev;
+        }
+    }
+}
+
+// ==========================================
+// 📋 一覧表示用 データ準備（SQL発行 ＆ ページネーション）
+// ==========================================
 $sql = "SELECT 
             p.*, 
             c.category_name, c.category_code, c.icon_emoji, c.color_code,
@@ -125,7 +441,6 @@ $sql = "SELECT
         LEFT JOIN post_categories c ON p.category_id = c.category_id
         LEFT JOIN staff s ON p.author_id = s.staff_id";
 
-$today_str      = date('Y-m-d');
 $tomorrow_str   = date('Y-m-d', strtotime('+1 day'));
 $plus7_end_str  = date('Y-m-d', strtotime('+7 days'));
 
@@ -138,14 +453,11 @@ $next_month_end   = date('Y-m-t', strtotime('last day of next month'));
 $where_clauses = [];
 $sql_params = [];
 
-// 掲載期限・過去投稿モードの判定
 if ($date_filter === 'past') {
-    // 過去の投稿モード：掲載期限終了、または対象日時が過去の投稿
     $where_clauses[] = "(p.display_until < NOW() OR (p.display_until IS NULL AND p.target_datetime IS NOT NULL AND DATE(COALESCE(p.target_end_datetime, p.target_datetime)) < '{$today_str}'))";
 } elseif ($date_filter === 'all_history') {
-    // 全履歴モード：過去・現在・未来すべての投稿（条件制限なし）
+    // 全履歴モード
 } else {
-    // 通常モード（全期間・今日・明日など）：現在掲載中の投稿
     $where_clauses[] = "(p.display_until IS NULL OR p.display_until >= NOW())";
 }
 
@@ -166,7 +478,6 @@ if ($date_filter === 'today') {
     $where_clauses[] = "p.target_datetime IS NOT NULL AND DATE(p.target_datetime) >= '{$next_month_start}' AND DATE(p.target_datetime) <= '{$next_month_end}'";
 }
 
-// 🔍 キーワード検索条件の追加（スペース区切りで複数単語AND検索対応）
 if ($search_query !== '') {
     $keywords = preg_split('/[\s　]+/u', $search_query, -1, PREG_SPLIT_NO_EMPTY);
     $kw_conditions = [];
@@ -188,12 +499,11 @@ if (!empty($where_clauses)) {
     $sql .= " WHERE " . implode(" AND ", $where_clauses);
 }
 
-// プリペアードステートメントで安全に実行
 $stmt_posts = $pdo->prepare($sql);
 $stmt_posts->execute($sql_params);
 $raw_posts = $stmt_posts->fetchAll();
 
-// 6. 重要度判定 ＆ ソートスコア計算（※SQL発行ゼロ・超高速PHP計算）
+// 重要度判定 ＆ ソートスコア計算
 $now = new DateTime();
 $week_names = ['日', '月', '火', '水', '木', '金', '土'];
 
@@ -248,73 +558,75 @@ foreach ($raw_posts as &$p) {
         $priority_level = 'normal';
     }
 
+    $is_read = (bool)$p['is_my_read'];
     $sort_score = 0;
-    if ($priority_level === 'urgent') $sort_score = 3000;
-    elseif ($priority_level === 'important') $sort_score = 2000;
-    else $sort_score = 1000;
 
-    if ($p['is_pinned']) $sort_score += 5000;
-    if (!$p['is_my_read']) $sort_score += 100;
+    if ($p['is_pinned']) {
+        $sort_score += 100000000;
+    }
+    if (!$is_read) {
+        $sort_score += 50000000;
+    }
+    if ($priority_level === 'urgent') {
+        $sort_score += 30000000;
+    } elseif ($priority_level === 'important') {
+        $sort_score += 10000000;
+    }
+    $sort_score += $created_dt->getTimestamp();
 
     $p['priority_level'] = $priority_level;
-    $p['is_within_24h']  = $is_within_24h;
-    $p['is_new_post']    = $is_new_post;
-    $p['sort_score']     = $sort_score;
-    $p['plain_summary']  = mb_substr(trim(strip_tags($p['content'])), 0, 150);
+    $p['is_urgent'] = $is_urgent;
+    $p['is_within_24h'] = $is_within_24h;
+    $p['is_today_event'] = $is_today_event;
+    $p['is_new_post'] = $is_new_post;
+    $p['sort_score'] = $sort_score;
+
+    $clean_content = strip_tags($p['content']);
+    $clean_content = preg_replace('/\s+/', ' ', $clean_content);
+    $p['plain_summary'] = mb_substr($clean_content, 0, 75) . (mb_strlen($clean_content) > 75 ? '...' : '');
+
+    $p['author_dept'] = '事務部';
+    if (!empty($p['author_id'])) {
+        $stmt_dept = $pdo->prepare("SELECT td.dept_name FROM staff s JOIN target_departments td ON s.dept_id = td.dept_id WHERE s.staff_id = :sid");
+        $stmt_dept->execute([':sid' => $p['author_id']]);
+        $d_name = $stmt_dept->fetchColumn();
+        if ($d_name) $p['author_dept'] = $d_name;
+    }
 }
 unset($p);
 
-// ソートの実行
-usort($raw_posts, function($a, $b) use ($date_filter) {
-    if ($date_filter === 'past' || $date_filter === 'all_history') {
-        $time_a = strtotime($a['target_datetime'] ?? $a['created_at']);
-        $time_b = strtotime($b['target_datetime'] ?? $b['created_at']);
-        if ($time_a === $time_b) {
-            return strtotime($b['created_at']) - strtotime($a['created_at']);
-        }
-        return $time_b - $time_a;
+usort($raw_posts, function($a, $b) {
+    if ($a['sort_score'] !== $b['sort_score']) {
+        return ($a['sort_score'] > $b['sort_score']) ? -1 : 1;
     }
-    if ($a['sort_score'] === $b['sort_score']) {
-        return strtotime($b['created_at']) - strtotime($a['created_at']);
-    }
-    return $b['sort_score'] - $a['sort_score'];
+    return $b['post_id'] <=> $a['post_id'];
 });
 
-// 7. ページネーション計算 ＆ 今のページ分だけをスライス（メモリ・処理負荷激減！）
 $total_posts = count($raw_posts);
 $total_pages = max(1, (int)ceil($total_posts / $per_page));
 if ($current_page > $total_pages) {
     $current_page = $total_pages;
 }
 $offset = ($current_page - 1) * $per_page;
-$page_posts = array_slice($raw_posts, $offset, $per_page);
+$paged_raw_posts = array_slice($raw_posts, $offset, $per_page);
 
-// 8. 【N+1解消！】全スタッフ一覧はループの外で1回だけ取得
-$all_active_staff = $pdo->query("SELECT staff_id, staff_name, dept_id FROM staff WHERE is_deleted = FALSE ORDER BY kana ASC")->fetchAll();
+$all_active_staff_stmt = $pdo->query("SELECT staff_id, staff_name, dept_id FROM staff WHERE is_deleted IS NOT TRUE");
+$all_active_staff = $all_active_staff_stmt->fetchAll();
 
-// 9. 今のページに表示する分（最大25件）だけに限定して詳細（ターゲット判定・既読者リスト）を取得！
 $posts = [];
-$dept_stmt  = $pdo->prepare("SELECT dept_id FROM post_target_departments WHERE post_id = :pid");
-$staff_stmt = $pdo->prepare("SELECT staff_id FROM post_target_staff WHERE post_id = :pid");
-$read_stmt  = $pdo->prepare("SELECT staff_id FROM post_reads WHERE post_id = :pid");
+$target_stmt = $pdo->prepare("SELECT dept_id FROM post_target_departments WHERE post_id = :pid");
+$read_stmt = $pdo->prepare("SELECT staff_id FROM post_reads WHERE post_id = :pid");
 
-foreach ($page_posts as $p) {
-    $dept_stmt->execute([':pid' => $p['post_id']]);
-    $target_dept_ids = $dept_stmt->fetchAll(PDO::FETCH_COLUMN);
+foreach ($paged_raw_posts as $p) {
+    $target_stmt->execute([':pid' => $p['post_id']]);
+    $target_depts = $target_stmt->fetchAll(PDO::FETCH_COLUMN);
 
-    $staff_stmt->execute([':pid' => $p['post_id']]);
-    $target_staff_ids = $staff_stmt->fetchAll(PDO::FETCH_COLUMN);
-
-    $target_members = [];
-    foreach ($all_active_staff as $st) {
-        $is_target = false;
-        if (empty($target_dept_ids) && empty($target_staff_ids)) {
-            $is_target = true;
-        } else {
-            if (!empty($target_dept_ids) && in_array($st['dept_id'], $target_dept_ids)) $is_target = true;
-            if (!empty($target_staff_ids) && in_array($st['staff_id'], $target_staff_ids)) $is_target = true;
-        }
-        if ($is_target) $target_members[] = $st;
+    if (in_array(1, $target_depts)) {
+        $target_members = $all_active_staff;
+    } else {
+        $target_members = array_filter($all_active_staff, function($s) use ($target_depts) {
+            return in_array($s['dept_id'], $target_depts);
+        });
     }
 
     $read_stmt->execute([':pid' => $p['post_id']]);
@@ -328,707 +640,1633 @@ foreach ($page_posts as $p) {
     $posts[] = $p;
 }
 ?>
-
 <!DOCTYPE html>
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>院内かわら版</title>
+    <title>院内かわら版 - <?= $view_mode === '2weeks' ? '2週間カレンダー' : '一覧' ?></title>
+    <script>
+        (function() {
+            if (localStorage.getItem('kawara_density_mode') === 'ultra') {
+                document.documentElement.classList.add('density-ultra');
+            }
+        })();
+    </script>
     <style>
         :root {
-            --primary-color: #005a9c;
-            --bg-color: #f4f6f9;
+            --primary: #1e293b;
+            --primary-light: #334155;
+            --accent: #0284c7;
+            --accent-hover: #0369a1;
+            --accent-light: #e0f2fe;
+            --bg-main: #f8fafc;
             --card-bg: #ffffff;
-            --text-color: #333333;
-            --border-color: #e0e0e0;
+            --border-color: #e2e8f0;
+            --text-main: #0f172a;
+            --text-muted: #64748b;
+            --danger: #f43f5e;
+            --success: #10b981;
+            --warning: #f59e0b;
         }
 
         * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg-color); color: var(--text-color); line-height: 1.5; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Hiragino Sans", "Meiryo", sans-serif;
+            background: var(--bg-main);
+            color: var(--text-main);
+            line-height: 1.5;
+            -webkit-font-smoothing: antialiased;
+        }
 
-        header { background: var(--primary-color); color: #fff; padding: 0.8rem 1.5rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-        .header-container { max-width: 950px; margin: 0 auto; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; }
-        .header-title h1 { font-size: 1.25rem; font-weight: bold; }
-        .header-title span { font-size: 0.8rem; opacity: 0.9; margin-left: 6px; }
+        /* ==========================================
+           🌟 ヘッダー（落ち着いたスレートネイビー）
+           ========================================== */
+        header {
+            background: var(--primary);
+            color: #fff;
+            padding: 0.45rem 1rem;
+            box-shadow: 0 2px 8px rgba(15, 23, 42, 0.15);
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+        }
+        .header-container {
+            max-width: 1280px;
+            margin: 0 auto;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+        }
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .header-logo-link {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            text-decoration: none;
+            color: #ffffff;
+        }
+        .header-logo-icon { font-size: 1.35rem; }
+        .header-logo-text {
+            font-size: 1.15rem;
+            font-weight: 800;
+            letter-spacing: -0.02em;
+        }
 
-        .header-right { display: flex; align-items: center; gap: 12px; }
-        .user-info { font-size: 0.82rem; background: rgba(255,255,255,0.18); padding: 4px 10px; border-radius: 4px; display: flex; align-items: center; gap: 6px; text-decoration: none; color: #fff; }
-        .user-info:hover { background: rgba(255,255,255,0.3); }
-        .btn-header { background: rgba(255,255,255,0.2); color: white; padding: 5px 10px; border-radius: 4px; text-decoration: none; font-size: 0.8rem; font-weight: bold; }
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
 
-        main { max-width: 950px; margin: 1.2rem auto; padding: 0 1rem; }
+        .header-nav-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 5px 12px;
+            border-radius: 6px;
+            font-size: 0.82rem;
+            font-weight: 700;
+            text-decoration: none;
+            color: #ffffff;
+            background: rgba(255, 255, 255, 0.12);
+            border: 1px solid rgba(255, 255, 255, 0.18);
+            transition: all 0.15s ease;
+            white-space: nowrap;
+            cursor: pointer;
+        }
+        .header-nav-btn:hover {
+            background: rgba(255, 255, 255, 0.22);
+            transform: translateY(-1px);
+        }
 
-        .alert-notice { background: #e0f2fe; color: #0369a1; border: 1px solid #7dd3fc; padding: 10px 14px; border-radius: 6px; font-size: 0.88rem; font-weight: bold; margin-bottom: 1.2rem; }
+        /* 👔 事務長モードボタン（管理者・山本太専用、分かりやすい場所に独立配置） */
+        .btn-nav-jimucho {
+            background: linear-gradient(135deg, #2563eb, #1d4ed8) !important;
+            border: 1px solid #3b82f6 !important;
+            box-shadow: 0 2px 6px rgba(37, 99, 235, 0.35);
+        }
+        .btn-nav-jimucho:hover {
+            background: linear-gradient(135deg, #1d4ed8, #1e40af) !important;
+            box-shadow: 0 3px 10px rgba(37, 99, 235, 0.5);
+        }
 
-        .filter-section { background: #fff; border: 1px solid var(--border-color); border-radius: 8px; padding: 12px 14px; margin-bottom: 1.2rem; display: flex; flex-direction: column; gap: 10px; }
-        .toolbar-group { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; }
+        .btn-nav-menu {
+            background: rgba(255, 255, 255, 0.16);
+        }
 
-        .btn-create { background: #28a745; color: white; border: none; padding: 7px 16px; border-radius: 6px; font-weight: bold; font-size: 0.88rem; text-decoration: none; display: inline-flex; align-items: center; gap: 4px; box-shadow: 0 2px 4px rgba(0,0,0,0.08); white-space: nowrap; }
-        .btn-create:hover { background: #218838; }
+        .btn-nav-user {
+            background: rgba(255, 255, 255, 0.08);
+            border-color: rgba(255, 255, 255, 0.15);
+        }
+        .badge-switch {
+            font-size: 0.68rem;
+            background: rgba(255, 255, 255, 0.25);
+            padding: 1px 5px;
+            border-radius: 3px;
+            margin-left: 2px;
+        }
 
-        .btn-toggle-compact { background: #005a9c; color: white; border: 1px solid #004085; padding: 6px 14px; border-radius: 6px; font-size: 0.82rem; font-weight: bold; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; transition: all 0.2s; box-shadow: 0 2px 4px rgba(0,0,0,0.08); }
-        .btn-toggle-compact:hover { background: #004085; }
-        .btn-toggle-compact.is-active { background: #e67e22; border-color: #d35400; }
+        .btn-line-header {
+            font-size: 0.76rem;
+            font-weight: 700;
+            padding: 5px 10px;
+            border-radius: 6px;
+            border: none;
+            cursor: pointer;
+            transition: all 0.15s;
+            white-space: nowrap;
+        }
+        .btn-line-header.is-linked {
+            background: #dcfce7;
+            color: #15803d;
+            border: 1px solid #bbf7d0;
+        }
+        .btn-line-header.is-unlinked {
+            background: #fef3c7;
+            color: #b45309;
+            border: 1px solid #fde68a;
+        }
 
-        .date-filter-group { display: flex; gap: 4px; background: #eef2f5; padding: 3px; border-radius: 6px; flex-wrap: wrap; align-items: center; }
-        .btn-date { text-decoration: none; padding: 4px 10px; border-radius: 4px; font-size: 0.78rem; font-weight: bold; color: #495057; transition: all 0.15s; }
-        .btn-date:hover { background: rgba(255,255,255,0.7); }
-        .btn-date.active { background: var(--primary-color); color: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+        /* ☰ その他ドロップダウン */
+        .header-dropdown {
+            position: relative;
+            display: inline-block;
+        }
+        .dropdown-menu {
+            display: none;
+            position: absolute;
+            right: 0;
+            top: calc(100% + 6px);
+            background: #ffffff;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.15);
+            min-width: 190px;
+            z-index: 1100;
+            overflow: hidden;
+            animation: fadeIn 0.15s ease-out;
+        }
+        .dropdown-menu.active {
+            display: block;
+        }
+        .dropdown-item {
+            display: block;
+            padding: 9px 14px;
+            font-size: 0.84rem;
+            color: var(--text-main);
+            text-decoration: none;
+            font-weight: 600;
+            transition: background 0.15s;
+        }
+        .dropdown-item:hover {
+            background: #f1f5f9;
+            color: var(--accent);
+        }
+        .dropdown-item.text-admin {
+            color: #c2410c;
+        }
+        .dropdown-divider {
+            height: 1px;
+            background: #e2e8f0;
+            margin: 4px 0;
+        }
 
-        .cat-tabs { display: flex; gap: 4px; flex-wrap: wrap; padding-top: 6px; border-top: 1px dashed #eee; }
-        .cat-tab { background: #f8f9fa; border: 1px solid #ced4da; padding: 2px 8px; border-radius: 12px; text-decoration: none; color: #555; font-size: 0.75rem; font-weight: bold; white-space: nowrap; transition: all 0.15s; }
-        .cat-tab:hover { background: #eef6fc; border-color: var(--primary-color); }
-        .cat-tab.active { background: #495057; color: #fff; border-color: #495057; }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-4px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
 
-        /* 🔍 キーワード検索バー */
+        /* ==========================================
+           メインレイアウト
+           ========================================== */
+        main {
+            max-width: 1380px;
+            margin: 0.5rem auto;
+            padding: 0 0.8rem;
+        }
+
+        .alert-notice {
+            background: var(--accent-light);
+            color: var(--accent-hover);
+            border: 1px solid #bae6fd;
+            padding: 6px 12px;
+            border-radius: 8px;
+            font-size: 0.84rem;
+            font-weight: bold;
+            margin-bottom: 0.5rem;
+        }
+
+        /* 🩺 医師予定表 申し送りメモ アコーディオンバナー */
+        .doctor-memo-banner {
+            background: #ffffff;
+            border: 1px solid #cbd5e1;
+            border-left: 5px solid #0d9488;
+            border-radius: 8px;
+            margin-bottom: 0.5rem;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+            overflow: hidden;
+        }
+        .doctor-memo-header {
+            padding: 6px 12px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: pointer;
+            background: #f0fdfa;
+            user-select: none;
+        }
+        .doctor-memo-header:hover {
+            background: #ccfbf1;
+        }
+        .doctor-memo-title {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.88rem;
+            font-weight: 800;
+            color: #0f766e;
+        }
+        .doctor-memo-icon { font-size: 1.05rem; }
+        .doctor-memo-date {
+            font-size: 0.74rem;
+            color: #64748b;
+            font-weight: normal;
+            margin-left: 6px;
+        }
+        .doctor-memo-arrow {
+            font-size: 0.78rem;
+            color: #0f766e;
+            font-weight: 700;
+        }
+        .doctor-memo-body {
+            display: none;
+            padding: 12px 16px;
+            background: #ffffff;
+            border-top: 1px solid #e2e8f0;
+            font-size: 0.88rem;
+            color: #1e293b;
+            line-height: 1.6;
+        }
+        .doctor-memo-banner.is-open .doctor-memo-body {
+            display: block;
+        }
+
+        /* ==========================================
+           フィルター ＆ ツールバー
+           ========================================== */
+        .filter-section {
+            background: #ffffff;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 6px 12px;
+            margin-bottom: 0.5rem;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.02);
+        }
+        .toolbar-group {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .btn-create {
+            background: #10b981;
+            color: white;
+            border: none;
+            padding: 6px 14px;
+            border-radius: 6px;
+            font-weight: bold;
+            font-size: 0.84rem;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            box-shadow: 0 1px 3px rgba(16, 185, 129, 0.3);
+            white-space: nowrap;
+            transition: all 0.15s;
+        }
+        .btn-create:hover {
+            background: #059669;
+            transform: translateY(-1px);
+        }
+
+        /* 🌟 表示モード切替（セグメントスイッチ） */
+        .view-mode-switch {
+            display: inline-flex;
+            background: #f1f5f9;
+            padding: 3px;
+            border-radius: 7px;
+            border: 1px solid #e2e8f0;
+        }
+        .btn-mode-tab {
+            padding: 4px 12px;
+            border-radius: 5px;
+            font-size: 0.82rem;
+            font-weight: 700;
+            text-decoration: none;
+            color: #64748b;
+            transition: all 0.15s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            white-space: nowrap;
+        }
+        .btn-mode-tab.active {
+            background: #ffffff;
+            color: #0284c7;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+        }
+        .btn-mode-tab:hover:not(.active) {
+            color: #0f172a;
+        }
+
+        .btn-print-top {
+            background: #ffffff;
+            color: #475569;
+            border: 1px solid #cbd5e1;
+            padding: 5px 10px;
+            border-radius: 6px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .btn-print-top:hover {
+            background: #f8fafc;
+            color: #0f172a;
+        }
+
         .search-form-wrap { display: flex; align-items: center; gap: 4px; }
         .search-input-box {
             display: flex;
             align-items: center;
             background: #ffffff;
-            border: 1.5px solid #cbd5e1;
+            border: 1px solid #cbd5e1;
             border-radius: 6px;
             padding: 2px 4px 2px 8px;
             transition: all 0.2s;
-            box-shadow: inset 0 1px 2px rgba(0,0,0,0.04);
         }
         .search-input-box:focus-within {
-            border-color: var(--primary-color);
-            box-shadow: 0 0 0 2px rgba(0, 90, 156, 0.15);
+            border-color: var(--accent);
+            box-shadow: 0 0 0 2px rgba(2, 132, 199, 0.15);
         }
         .search-input {
             border: none;
             outline: none;
             font-size: 0.82rem;
             padding: 3px 4px;
-            width: 180px;
+            width: 170px;
             color: #334155;
             background: transparent;
         }
-        .search-input::placeholder { color: #94a3b8; }
         .btn-clear-q {
             background: none;
             border: none;
             color: #94a3b8;
             font-size: 0.85rem;
             cursor: pointer;
-            padding: 2px 6px;
+            padding: 2px 5px;
             text-decoration: none;
             line-height: 1;
         }
         .btn-clear-q:hover { color: #ef4444; }
         .btn-search {
-            background: var(--primary-color);
+            background: var(--accent);
             color: #ffffff;
             border: none;
             padding: 5px 12px;
-            border-radius: 5px;
+            border-radius: 6px;
             font-size: 0.8rem;
             font-weight: bold;
             cursor: pointer;
             transition: background 0.15s;
             white-space: nowrap;
         }
-        .btn-search:hover { background: #004085; }
+        .btn-search:hover { background: var(--accent-hover); }
 
-        /* 🔍 検索中バナー */
-        .search-result-banner {
-            background: #eff6ff;
-            border: 1px solid #bfdbfe;
-            border-left: 5px solid var(--primary-color);
-            padding: 8px 12px;
-            border-radius: 6px;
-            margin-bottom: 0.8rem;
+        .date-filter-group {
             display: flex;
-            justify-content: space-between;
-            align-items: center;
+            gap: 3px;
+            background: #f8fafc;
+            padding: 3px;
+            border-radius: 6px;
             flex-wrap: wrap;
-            gap: 8px;
-            font-size: 0.84rem;
+            align-items: center;
+            border: 1px solid #e2e8f0;
         }
-        .search-result-info { color: #1e3a8a; font-weight: 500; }
-        .search-result-info strong { color: #004085; }
-        .btn-search-scope {
-            background: #ffffff;
-            color: #005a9c;
-            border: 1px solid #005a9c;
+        .btn-date {
+            text-decoration: none;
             padding: 3px 8px;
             border-radius: 4px;
             font-size: 0.76rem;
-            font-weight: bold;
-            text-decoration: none;
+            font-weight: 700;
+            color: #64748b;
             transition: all 0.15s;
         }
-        .btn-search-scope:hover { background: #e0f2fe; }
-        .btn-search-clear {
-            background: #f1f5f9;
-            color: #475569;
-            border: 1px solid #cbd5e1;
-            padding: 3px 8px;
-            border-radius: 4px;
-            font-size: 0.76rem;
-            font-weight: bold;
-            text-decoration: none;
-        }
-        .btn-search-clear:hover { background: #e2e8f0; color: #0f172a; }
+        .btn-date:hover { background: #e2e8f0; color: #0f172a; }
+        .btn-date.active { background: var(--accent); color: #fff; }
 
-        /* 📄 ページネーション */
-        .pagination-container {
-            background: #ffffff;
-            border: 1px solid var(--border-color);
+        .cat-tabs {
+            display: flex;
+            gap: 4px;
+            flex-wrap: wrap;
+            padding-top: 6px;
+            border-top: 1px dashed #e2e8f0;
+        }
+        .cat-tab {
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            padding: 2px 8px;
+            border-radius: 12px;
+            text-decoration: none;
+            color: #64748b;
+            font-size: 0.74rem;
+            font-weight: 700;
+            white-space: nowrap;
+            transition: all 0.15s;
+        }
+        .cat-tab:hover { background: #e0f2fe; border-color: #7dd3fc; color: #0369a1; }
+        .cat-tab.active { background: #334155; color: #fff; border-color: #334155; }
+
+        /* ==========================================
+           📋 一覧表示 カードデザイン（上品な医療系モダン）
+           ========================================== */
+        .post-list { display: flex; flex-direction: column; gap: 0.5rem; }
+        .post-card {
+            background: var(--card-bg);
             border-radius: 8px;
-            padding: 8px 12px;
-            margin-top: 1rem;
-            margin-bottom: 1.2rem;
+            padding: 0.75rem 1rem;
+            transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+            position: relative;
+            border: 1px solid var(--border-color);
+            box-shadow: 0 1px 3px rgba(0,0,0,0.02);
+        }
+        .post-card:hover {
+            box-shadow: 0 4px 12px rgba(15, 23, 42, 0.06);
+            transform: translateY(-1px);
+        }
+
+        /* 未読カード：淡いブルー背景 ＋ スカイブルー左端ライン ＋ パルス発光ドット */
+        .post-card.is-unread {
+            background: #f8faff;
+            border-left: 4px solid var(--accent);
+        }
+        .unread-indicator {
+            position: absolute;
+            top: 12px;
+            right: 14px;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            font-size: 0.72rem;
+            font-weight: 800;
+            color: #0284c7;
+            background: #e0f2fe;
+            padding: 2px 7px;
+            border-radius: 10px;
+        }
+        .unread-dot {
+            width: 7px;
+            height: 7px;
+            background: #0284c7;
+            border-radius: 50%;
+            animation: soft-pulse 2s infinite ease-in-out;
+        }
+        @keyframes soft-pulse {
+            0%, 100% { opacity: 1; transform: scale(1); box-shadow: 0 0 0 0 rgba(2, 132, 199, 0.4); }
+            50% { opacity: 0.5; transform: scale(1.1); box-shadow: 0 0 0 4px rgba(2, 132, 199, 0); }
+        }
+
+        /* 既読カード：静かなオフホワイト */
+        .post-card.is-read {
+            background: #ffffff;
+            border-left: 3px solid #cbd5e1;
+        }
+
+        /* 直近・緊急：上品なコーラルローズのアクセントライン */
+        .post-card.p-urgent {
+            border-left-color: var(--danger) !important;
+        }
+        .post-card.p-urgent.is-unread {
+            background: #fff5f5;
+        }
+
+        .post-header {
             display: flex;
             justify-content: space-between;
-            align-items: center;
-            flex-wrap: wrap;
-            gap: 8px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+            align-items: flex-start;
+            margin-bottom: 6px;
+            padding-right: 70px;
         }
-        .pagination-info { font-size: 0.8rem; color: #64748b; }
-        .pagination-info strong { color: #0f172a; }
-        .pagination-nav { display: flex; align-items: center; gap: 3px; }
-        .page-btn {
+        .badge {
             display: inline-flex;
             align-items: center;
-            justify-content: center;
-            min-width: 28px;
-            height: 28px;
-            padding: 0 5px;
-            border: 1px solid #cbd5e1;
-            background: #ffffff;
-            color: #334155;
-            font-size: 0.78rem;
-            font-weight: bold;
+            padding: 2px 7px;
             border-radius: 4px;
+            font-size: 0.72rem;
+            font-weight: 700;
+        }
+        .badge-urgent { background: #fee2e2; color: #b91c1c; border: 1px solid #fecaca; }
+        .badge-24h { background: #fef3c7; color: #b45309; border: 1px solid #fde68a; }
+        .badge-new { background: #f43f5e; color: #fff; font-size: 0.65rem; font-weight: 800; padding: 1px 5px; border-radius: 3px; }
+        .badge-pinned { background: #334155; color: #fff; }
+        .badge-cat { padding: 2px 7px; border-radius: 4px; color: #fff; font-size: 0.72rem; font-weight: 700; }
+
+        .post-title-wrapper { margin-bottom: 4px; }
+        .post-title {
+            font-size: 1.1rem;
+            font-weight: 700;
+            color: #0f172a;
             text-decoration: none;
-            transition: all 0.15s;
+            line-height: 1.4;
         }
-        .page-btn:hover:not(.disabled):not(.active) {
-            background: #f1f5f9;
-            border-color: #94a3b8;
-            color: var(--primary-color);
-        }
-        .page-btn.active {
-            background: var(--primary-color);
-            border-color: var(--primary-color);
-            color: #ffffff;
-            cursor: default;
-        }
-        .page-btn.disabled {
-            color: #cbd5e1;
-            border-color: #e2e8f0;
-            cursor: not-allowed;
-            background: #f8fafc;
-        }
-        .page-ellipsis { padding: 0 3px; color: #94a3b8; font-size: 0.78rem; }
+        .post-title:hover { color: var(--accent); }
+        .post-title.text-urgent { color: #e11d48; }
+        .post-author-tag { font-size: 0.78rem; color: #64748b; margin-left: 4px; font-weight: normal; }
 
-        .badge { display: inline-flex; align-items: center; gap: 2px; padding: 2px 7px; border-radius: 4px; font-size: 0.75rem; font-weight: bold; line-height: 1.2; }
-        .badge-urgent { background-color: #dc3545; color: #ffffff; border: 1.5px solid #a71d2a; box-shadow: 0 0 6px rgba(220, 53, 69, 0.6); }
-        .badge-24h { background-color: #fff9db; color: #856404; border: 1.5px solid #f1c40f; }
-        .badge-unread { background-color: #f3e8ff; color: #6b21a8; border: 1.5px solid #9333ea; }
-        .badge-read { background-color: #e0f2fe; color: #0369a1; border: 1.5px solid #0284c7; }
-        .badge-new { background-color: #e74c3c; color: #ffffff; padding: 1px 5px; border-radius: 3px; font-size: 0.68rem; font-weight: bold; }
-        .badge-pinned { background-color: #343a40; color: #ffffff; }
-
-        .post-list { display: flex; flex-direction: column; gap: 1rem; }
-        .post-card { background: var(--card-bg); border-radius: 8px; padding: 1.25rem; transition: all 0.15s; position: relative; border: 1px solid var(--border-color); }
-
-        .post-card.p-urgent.is-unread { border: 3px solid #dc3545; animation: pulse-red 2.5s infinite; }
-        .post-card.p-urgent.is-read { border: 2px solid #dc3545; background: #fff8f8; }
-        .post-card.p-important.is-unread { border: 2px solid #fd7e14; border-left: 6px solid #fd7e14; background: #fff9f5; }
-        .post-card.p-important.is-read { border: 1px solid #e0e0e0; border-left: 5px solid #fd7e14; background: #ffffff; }
-        .post-card.p-normal.is-unread { border-left: 5px solid #005a9c; background: #ffffff; }
-        .post-card.p-normal.is-read { border: 1px solid #e9ecef; background: #fdfdfd; opacity: 0.85; }
-        .post-card.is-expired { opacity: 0.92; background: #fcfcfc; }
-        .post-card.is-expired.p-urgent.is-unread { animation: none; }
-
-        @keyframes pulse-red {
-            0% { background-color: #ffffff; box-shadow: 0 0 0 rgba(220, 53, 69, 0); }
-            50% { background-color: #fff0f1; box-shadow: 0 0 12px rgba(220, 53, 69, 0.4); }
-            100% { background-color: #ffffff; box-shadow: 0 0 0 rgba(220, 53, 69, 0); }
-        }
-
-        .post-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px; }
-        .badge-cat { padding: 2px 8px; border-radius: 4px; color: #fff; font-size: 0.75rem; font-weight: bold; }
-
-        .post-title { font-size: 1.15rem; font-weight: bold; color: #2c3e50; text-decoration: none; margin-bottom: 6px; display: block; }
-        .post-title:hover { color: #005a9c; text-decoration: underline; }
-        .post-title.text-urgent { color: #dc3545; }
-
-        .post-meta { font-size: 0.82rem; color: #777; display: flex; gap: 15px; margin-bottom: 10px; flex-wrap: wrap; }
-        .event-box { background: #eef6fc; border: 1px solid #b8daff; color: #004085; padding: 8px 12px; border-radius: 6px; font-size: 0.88rem; font-weight: bold; margin-bottom: 10px; }
-        .event-box.urgent-box { background: #f8d7da; border-color: #f5c6cb; color: #721c24; }
-
-        .post-body-preview { font-size: 0.92rem; color: #444; line-height: 1.5; margin-bottom: 12px; }
-
-        .read-action-bar {
-            background: #f8f9fa;
-            border: 1px solid #e9ecef;
-            padding: 8px 12px;
-            border-radius: 6px;
+        .post-meta {
+            font-size: 0.78rem;
+            color: #64748b;
             display: flex;
-            align-items: center;
-            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 8px;
             flex-wrap: wrap;
-            gap: 10px;
+        }
+
+        .event-box {
+            background: #f0fdf4;
+            border: 1px solid #bbf7d0;
+            color: #166534;
+            padding: 6px 10px;
+            border-radius: 6px;
+            font-size: 0.84rem;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+        .event-box.urgent-box {
+            background: #fff1f2;
+            border-color: #fecdd3;
+            color: #be123c;
+        }
+
+        .post-body-preview {
+            font-size: 0.9rem;
+            color: #334155;
+            line-height: 1.5;
             margin-bottom: 10px;
         }
 
+        .read-action-bar {
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 6px;
+            padding: 8px 12px;
+            margin-bottom: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
         .btn-unread-reset {
-            background: #6c757d;
-            color: #fff;
-            border: none;
-            padding: 4px 10px;
-            border-radius: 4px;
-            font-size: 0.78rem;
-            font-weight: bold;
-            cursor: pointer;
-        }
-        .btn-unread-reset:hover { background: #5a6268; }
-
-        .toggle-bar { display: flex; border-top: 1px solid #eee; border-bottom: 1px solid #eee; background: #fafafa; margin-top: 10px; }
-        .toggle-btn { flex: 1; padding: 8px; border: none; background: none; font-size: 0.83rem; font-weight: bold; color: #555; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; }
-        .toggle-btn:first-child { border-right: 1px solid #eee; }
-        .toggle-btn:hover { background: #eef6fc; color: #005a9c; }
-        .toggle-btn.active { background: #eef6fc; color: #005a9c; border-bottom: 2px solid #005a9c; }
-
-        .accordion-content { display: none; background: #fdfdfd; padding: 12px; border-bottom: 1px solid #eee; font-size: 0.88rem; }
-        .comment-item { border-bottom: 1px dashed #ddd; padding: 6px 0; display: flex; justify-content: space-between; }
-        .stamp-badge { background: #e0f2fe; color: #0369a1; padding: 2px 8px; border-radius: 12px; font-weight: bold; font-size: 0.8rem; }
-        .stamp-select-btn { background: #fff; border: 1px solid #ccc; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 0.82rem; }
-
-        .read-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 6px; margin-top: 8px; }
-        .read-user-badge { padding: 4px 8px; border-radius: 4px; font-size: 0.78rem; text-align: center; }
-        .read-user-badge.is-read { background: #d4edda; color: #155724; }
-        .read-user-badge.is-unread { background: #f8d7da; color: #721c24; }
-
-        .post-footer { display: flex; justify-content: space-between; align-items: center; margin-top: 10px; font-size: 0.8rem; color: #888; flex-wrap: wrap; gap: 5px; }
-        .btn-print { background: #f8f9fa; border: 1px solid #ccc; color: #333; padding: 3px 10px; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 0.78rem; display: inline-flex; align-items: center; gap: 4px; text-decoration: none; }
-        .btn-print:hover { background: #e2e6ea; }
-
-        body.mode-compact .post-list { gap: 4px !important; }
-        body.mode-compact .post-card { 
-            padding: 6px 12px !important; 
-            animation: none !important; 
-            display: flex !important; 
-            align-items: center !important; 
-            justify-content: space-between !important; 
-            gap: 10px !important; 
-            border-radius: 4px !important; 
-        }
-        body.mode-compact .post-header { margin-bottom: 0 !important; }
-        body.mode-compact .post-header > span { display: none !important; }
-        body.mode-compact .post-title-wrapper { flex: 1; display: flex; align-items: center; gap: 8px; overflow: hidden; white-space: nowrap; }
-        body.mode-compact .post-title { margin-bottom: 0 !important; font-size: 0.95rem !important; overflow: hidden; text-overflow: ellipsis; }
-        body.mode-compact .post-author-tag { font-size: 0.75rem; color: #777; white-space: nowrap; }
-        
-        body.mode-compact .post-body-preview,
-        body.mode-compact .post-meta,
-        body.mode-compact .event-box,
-        body.mode-compact .toggle-bar,
-        body.mode-compact .accordion-content,
-        body.mode-compact .post-footer,
-        body.mode-compact .read-action-bar { display: none !important; }
-
-        /* 📱 LINE連携ボタンスタイル */
-        .btn-line-header {
-            border: none;
+            background: transparent;
+            border: 1px solid #cbd5e1;
+            color: #64748b;
             padding: 3px 8px;
             border-radius: 4px;
+            font-size: 0.75rem;
+            cursor: pointer;
+        }
+        .btn-unread-reset:hover { background: #f1f5f9; color: #0f172a; }
+
+        .toggle-bar { display: flex; gap: 8px; margin-top: 6px; }
+        .toggle-btn {
+            background: #f1f5f9;
+            border: 1px solid #e2e8f0;
+            color: #475569;
+            padding: 4px 10px;
+            border-radius: 4px;
             font-size: 0.76rem;
-            font-weight: bold;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        .toggle-btn:hover { background: #e2e8f0; color: #0f172a; }
+        .accordion-content {
+            display: none;
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 6px;
+            padding: 10px;
+            margin-top: 6px;
+            font-size: 0.82rem;
+        }
+
+        /* ページネーション */
+        .pagination-container {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 1.2rem;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        .pagination { display: flex; gap: 4px; }
+        .page-link {
+            padding: 5px 10px;
+            border: 1px solid #cbd5e1;
+            background: #fff;
+            color: #334155;
+            text-decoration: none;
+            border-radius: 4px;
+            font-size: 0.82rem;
+            font-weight: 700;
+        }
+        .page-link.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+        /* ==========================================
+           📅 2週間カードカレンダー（7列×2週 グリッド）
+           事務長モードと完全一致の構造＆スタイル
+           ========================================== */
+        .week-view-wrapper {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        .week-navbar {
+            background: #ffffff;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 6px 12px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 6px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.02);
+        }
+        .cal-nav-btn {
+            background: #f1f5f9;
+            color: #334155;
+            border: 1px solid #cbd5e1;
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 0.78rem;
+            font-weight: 700;
+            text-decoration: none;
+            transition: all 0.15s;
+        }
+        .cal-nav-btn:hover { background: #e2e8f0; color: #0f172a; }
+        .week-nav-title {
+            font-size: 0.95rem;
+            font-weight: 800;
+            color: #0f172a;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .btn-gcal-sync {
+            background: #ffffff;
+            color: #0284c7;
+            border: 1px solid #7dd3fc;
+            padding: 5px 12px;
+            border-radius: 6px;
+            font-size: 0.8rem;
+            font-weight: 700;
             cursor: pointer;
             display: inline-flex;
             align-items: center;
             gap: 4px;
             transition: all 0.15s;
-            text-decoration: none;
         }
-        .btn-line-header.is-linked {
-            background: #e8f9ee;
-            color: #06c755;
-            border: 1px solid #b2e8c4;
+        .btn-gcal-sync:hover { background: #e0f2fe; }
+
+        /* Googleカレンダー チャンネルトグルバー */
+        .gcal-toggle-bar {
+            background: #ffffff;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 8px 12px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+            font-size: 0.8rem;
         }
-        .btn-line-header.is-linked:hover {
-            background: #d4f4de;
+        .gcal-toggle-label { font-weight: 700; color: #475569; }
+        .gcal-toggle-group { display: flex; gap: 8px; flex-wrap: wrap; }
+        .gcal-toggle-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            padding: 3px 8px;
+            border-radius: 12px;
+            cursor: pointer;
+            font-size: 0.75rem;
+            font-weight: 600;
         }
-        .btn-line-header.is-unlinked {
-            background: #fef3c7;
-            color: #b45309;
-            border: 1px solid #fde68a;
-            animation: pulse-line-btn 1.5s infinite alternate;
-        }
-        @keyframes pulse-line-btn {
-            from { transform: scale(1); }
-            to { transform: scale(1.04); }
+        .gcal-toggle-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
         }
 
-        /* 📱 LINE未登録アナウンスバナー */
-        .line-register-banner {
-            background: linear-gradient(135deg, #f0fdf4 0%, #e8f9ee 100%);
-            border: 1.5px solid #86efac;
-            border-left: 5px solid #06c755;
-            padding: 10px 14px;
-            border-radius: 8px;
-            margin-bottom: 1rem;
+        .week-block-header {
+            background: #f1f5f9;
+            border-left: 4px solid var(--accent);
+            padding: 6px 12px;
+            border-radius: 4px;
+            font-size: 0.86rem;
+            font-weight: 800;
+            color: #1e293b;
             display: flex;
             justify-content: space-between;
             align-items: center;
-            flex-wrap: wrap;
-            gap: 10px;
-            box-shadow: 0 2px 6px rgba(6, 199, 85, 0.08);
-        }
-        .line-banner-left {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-        .line-banner-icon {
-            font-size: 1.6rem;
-            line-height: 1;
-        }
-        .line-banner-title {
-            font-size: 0.88rem;
-            font-weight: 800;
-            color: #065f46;
-        }
-        .line-banner-desc {
-            font-size: 0.75rem;
-            color: #475569;
-            margin-top: 2px;
-        }
-        .btn-line-banner {
-            background: #06c755;
-            color: #ffffff;
-            font-size: 0.82rem;
-            font-weight: bold;
-            padding: 6px 14px;
-            border-radius: 6px;
-            border: none;
-            cursor: pointer;
-            box-shadow: 0 2px 6px rgba(6, 199, 85, 0.3);
-            transition: all 0.15s;
-            white-space: nowrap;
-        }
-        .btn-line-banner:hover {
-            background: #05b04a;
-            transform: translateY(-1px);
+            margin-top: 4px;
         }
 
-        /* 📱 LINE連携モーダル */
-        .line-modal-overlay {
+        /* 終日・複数日帯レーン */
+        .week-span-container {
+            background: #ffffff;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 6px;
+            margin-bottom: -6px;
+        }
+        .week-span-grid {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            gap: 4px;
+        }
+        .week-span-bar {
+            border-radius: 4px;
+            padding: 4px 8px;
+            color: #ffffff;
+            font-size: 0.74rem;
+            font-weight: 700;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            cursor: pointer;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .week-span-bar:hover { opacity: 0.9; }
+
+        /* 7列カードグリッド */
+        .week-grid-7cols {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            gap: 5px;
+        }
+        .week-day-col {
+            background: #ffffff;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            display: flex;
+            flex-direction: column;
+            min-height: 155px;
+            overflow: hidden;
+        }
+        .week-day-col.is-today {
+            border: 2px solid #0284c7;
+            background: #fcfdfe;
+        }
+
+        .week-day-header {
+            background: #f8fafc;
+            border-bottom: 1px solid var(--border-color);
+            padding: 4px 6px;
+        }
+        .week-day-header-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .week-day-date {
+            font-size: 0.88rem;
+            font-weight: 800;
+            color: #0f172a;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .badge-today {
+            background: #0284c7;
+            color: #fff;
+            font-size: 0.65rem;
+            padding: 1px 5px;
+            border-radius: 3px;
+        }
+        .week-btn-add {
+            background: #e2e8f0;
+            color: #334155;
+            width: 20px;
+            height: 20px;
+            border-radius: 4px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.85rem;
+            font-weight: 900;
+            text-decoration: none;
+        }
+        .week-btn-add:hover { background: var(--accent); color: #fff; }
+
+        .week-traditional-row {
+            display: flex;
+            gap: 3px;
+            flex-wrap: wrap;
+            margin-top: 3px;
+        }
+        .trad-badge {
+            font-size: 0.65rem;
+            font-weight: 700;
+            padding: 1px 5px;
+            border-radius: 3px;
+            white-space: nowrap;
+        }
+        .trad-rokuyo.rokuyo-taian { background: #fee2e2; color: #dc2626; }
+        .trad-rokuyo.rokuyo-tomobiki { background: #eff6ff; color: #2563eb; }
+        .trad-rokuyo.rokuyo-butsumetsu { background: #f1f5f9; color: #64748b; }
+        .trad-rokuyo.rokuyo-default { background: #f8fafc; color: #475569; }
+        .trad-solar { background: #dcfce7; color: #15803d; }
+        .trad-moon { background: #fef3c7; color: #b45309; }
+        .trad-moon-mini { font-size: 0.68rem; color: #64748b; }
+
+        .week-day-badges {
+            display: flex;
+            gap: 3px;
+            flex-wrap: wrap;
+            margin-top: 3px;
+        }
+        .badge-duty {
+            font-size: 0.65rem;
+            padding: 1px 5px;
+            border-radius: 3px;
+            font-weight: 700;
+        }
+        .badge-duty-closed { background: #fee2e2; color: #dc2626; border: 1px solid #fecaca; }
+        .badge-duty-pm_closed,
+        .badge-duty-pm-closed { background: #e0f2fe; color: #0369a1; border: 1px solid #bae6fd; }
+        .badge-duty-open { background: #dbeafe; color: #1d4ed8; border: 1px solid #bfdbfe; }
+        .badge-duty-normal { background: #f1f5f9; color: #475569; }
+
+        .week-day-body {
+            padding: 6px;
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+            flex: 1;
+        }
+
+        /* 医師予定カード */
+        .week-doctor-card {
+            border-left: 3px solid #0284c7;
+            background: #f0f9ff;
+            border-radius: 4px;
+            padding: 4px 6px;
+            cursor: pointer;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.03);
+            transition: all 0.15s;
+        }
+        .week-doctor-card:hover { transform: translateY(-1px); box-shadow: 0 2px 5px rgba(0,0,0,0.08); }
+        .doctor-badge-tag {
+            font-size: 0.65rem;
+            color: #fff;
+            padding: 1px 4px;
+            border-radius: 3px;
+            font-weight: 700;
+            margin-left: auto;
+        }
+
+        /* Googleカレンダー時間指定カード */
+        .week-gcal-card {
+            border-left: 3px solid #1a73e8;
+            background: #ffffff;
+            border: 1px solid #e2e8f0;
+            border-left-width: 3px;
+            border-radius: 4px;
+            padding: 4px 6px;
+            cursor: pointer;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.03);
+        }
+        .week-gcal-card:hover { transform: translateY(-1px); box-shadow: 0 2px 5px rgba(0,0,0,0.08); }
+        .gcal-cal-tag {
+            font-size: 0.62rem;
+            color: #fff;
+            padding: 1px 4px;
+            border-radius: 3px;
+            margin-left: auto;
+        }
+
+        /* かわら版イベントカード */
+        .week-event-card {
+            border-left: 3px solid #0d9488;
+            background: #ffffff;
+            border: 1px solid #e2e8f0;
+            border-left-width: 3px;
+            border-radius: 4px;
+            padding: 4px 6px;
+            cursor: pointer;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.03);
+            transition: all 0.15s;
+        }
+        .week-event-card:hover { transform: translateY(-1px); box-shadow: 0 2px 6px rgba(0,0,0,0.08); }
+        .week-event-card-continuation {
+            border-left-color: #64748b;
+            background: #f8fafc;
+        }
+        .wec-header {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 0.72rem;
+            color: #64748b;
+        }
+        .wec-time { font-weight: 700; color: #0f172a; }
+        .wec-title {
+            font-size: 0.8rem;
+            font-weight: 700;
+            color: #0f172a;
+            margin-top: 2px;
+            line-height: 1.3;
+        }
+        .wec-badge-cont {
+            background: #64748b;
+            color: #fff;
+            font-size: 0.62rem;
+            padding: 1px 4px;
+            border-radius: 3px;
+            font-weight: 800;
+        }
+        .wec-slot-badge {
+            font-size: 0.65rem;
+            color: #0284c7;
+            font-weight: 700;
+        }
+
+        .empty-day-placeholder {
+            text-align: center;
+            padding: 1.5rem 0.5rem;
+            color: #94a3b8;
+            font-size: 0.75rem;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+        }
+
+        /* ==========================================
+           モーダル（医師詳細、Google詳細、LINE連携）
+           ========================================== */
+        .modal-overlay {
             display: none;
             position: fixed;
             top: 0; left: 0; right: 0; bottom: 0;
-            background: rgba(15, 23, 42, 0.65);
+            background: rgba(15, 23, 42, 0.6);
             backdrop-filter: blur(4px);
             z-index: 10000;
             align-items: center;
             justify-content: center;
             padding: 16px;
         }
-        .line-modal-overlay.active { display: flex; animation: fade-in 0.2s; }
-
-        .line-modal-card {
+        .modal-overlay.active { display: flex; animation: fadeIn 0.2s; }
+        .modal-card {
             background: #ffffff;
             width: 100%;
-            max-width: 480px;
-            border-radius: 16px;
-            box-shadow: 0 12px 35px rgba(0,0,0,0.25);
+            max-width: 520px;
+            border-radius: 12px;
+            box-shadow: 0 15px 30px rgba(0,0,0,0.2);
             overflow: hidden;
             display: flex;
             flex-direction: column;
             max-height: 90vh;
         }
-        .line-modal-header {
-            background: #06c755;
-            color: #ffffff;
-            padding: 14px 18px;
+        .modal-header {
+            background: #f8fafc;
+            border-bottom: 1px solid var(--border-color);
+            padding: 12px 18px;
             display: flex;
             justify-content: space-between;
             align-items: center;
         }
-        .line-modal-header h3 {
-            margin: 0;
-            font-size: 1.05rem;
-            display: flex;
-            align-items: center;
-            gap: 6px;
-        }
-        .line-modal-close {
+        .modal-header h3 { margin: 0; font-size: 1rem; color: #0f172a; display: flex; align-items: center; gap: 6px; }
+        .modal-close {
             background: none;
             border: none;
-            color: #fff;
-            font-size: 1.5rem;
+            color: #64748b;
+            font-size: 1.4rem;
             cursor: pointer;
             line-height: 1;
-            padding: 0 4px;
-            opacity: 0.85;
         }
-        .line-modal-close:hover { opacity: 1; }
+        .modal-close:hover { color: #0f172a; }
+        .modal-body { padding: 18px; overflow-y: auto; font-size: 0.88rem; }
 
-        .line-modal-body {
-            padding: 18px 20px;
-            overflow-y: auto;
-        }
-        .line-step-box {
-            background: #f8fafc;
-            border: 1px solid #e2e8f0;
-            border-radius: 10px;
-            padding: 12px 14px;
-            margin-bottom: 12px;
-        }
-        .line-step-num {
-            display: inline-block;
-            background: #06c755;
-            color: #fff;
-            font-size: 0.72rem;
-            font-weight: 800;
-            padding: 2px 7px;
-            border-radius: 10px;
-            margin-right: 5px;
-        }
-        .line-step-title {
-            font-size: 0.88rem;
-            font-weight: 800;
-            color: #1e293b;
-        }
+        /* LINE連携モーダル用 */
+        .line-modal-card { max-width: 480px; }
         .link-code-digit {
-            font-family: 'Outfit', monospace;
-            font-size: 2.2rem;
+            font-family: monospace;
+            font-size: 2rem;
             font-weight: 900;
-            letter-spacing: 10px;
+            letter-spacing: 8px;
             color: #065f46;
             background: #ecfdf5;
             border: 2px dashed #06c755;
             border-radius: 8px;
-            padding: 8px 14px;
+            padding: 8px;
             text-align: center;
             margin: 10px 0;
         }
-        .btn-copy-code {
-            background: #ffffff;
-            border: 1px solid #cbd5e1;
-            color: #475569;
-            padding: 4px 10px;
-            border-radius: 4px;
-            font-size: 0.76rem;
-            font-weight: bold;
+        /* 📌 今月の重点目標・重要メモ（月メモ） */
+        .month-note-banner {
+            background: #fffbeb;
+            border: 1px solid #fef08a;
+            border-left: 5px solid #f59e0b;
+            border-radius: 8px;
+            padding: 8px 12px;
+            margin-bottom: 8px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.04);
             cursor: pointer;
+            transition: all 0.15s ease;
         }
-        .btn-copy-code:hover { background: #f1f5f9; color: #1e293b; }
-        .line-waiting-box {
+        .month-note-banner:hover {
+            background: #fefce8;
+            border-color: #f59e0b;
+        }
+        .month-note-header {
             display: flex;
             align-items: center;
-            gap: 10px;
-            font-size: 0.8rem;
-            color: #059669;
-            background: #f0fdf4;
-            padding: 8px 12px;
-            border-radius: 6px;
-            margin-top: 8px;
-            border: 1px solid #bbf7d0;
+            justify-content: space-between;
+            gap: 8px;
         }
-        .line-spinner {
+        .month-note-title {
+            font-size: 0.86rem;
+            font-weight: 800;
+            color: #92400e;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .month-note-body {
+            margin-top: 4px;
+        }
+        .month-note-text {
+            font-size: 0.9rem;
+            font-weight: 700;
+            color: #1e293b;
+            line-height: 1.45;
+        }
+        .month-note-placeholder {
+            font-size: 0.82rem;
+            color: #b45309;
+            opacity: 0.85;
+            font-weight: 600;
+        }
+        .btn-note-edit {
+            background: #ffffff;
+            border: 1px solid #fde68a;
+            color: #b45309;
+            font-size: 0.74rem;
+            font-weight: 700;
+            padding: 2px 8px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+        .btn-note-edit:hover {
+            background: #f59e0b;
+            color: #ffffff;
+            border-color: #f59e0b;
+        }
+
+        /* 📝 2週間カレンダー用 日付メモボタン＆カード */
+        .week-btn-note {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 22px;
+            height: 22px;
+            border-radius: 50%;
+            background: #f8fafc;
+            color: #64748b;
+            font-size: 0.8rem;
+            cursor: pointer;
+            border: 1px solid #e2e8f0;
+            transition: all 0.15s ease;
+            line-height: 1;
+            padding: 0;
+        }
+        .week-btn-note:hover {
+            background: #fef3c7;
+            color: #b45309;
+            border-color: #fde68a;
+            transform: scale(1.1);
+        }
+        .week-btn-note.has-note {
+            background: #fef3c7;
+            color: #b45309;
+            border-color: #fde68a;
+            font-weight: bold;
+        }
+        .week-note-card {
+            background: #fffbeb;
+            border: 1px solid #fef08a;
+            border-left: 4px solid #f59e0b;
+            border-radius: 5px;
+            padding: 4px 6px;
+            font-size: 0.76rem;
+            color: #78350f;
+            cursor: pointer;
+            display: flex;
+            align-items: flex-start;
+            gap: 4px;
+            line-height: 1.35;
+            margin-bottom: 3px;
+            font-weight: 600;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.03);
+            transition: all 0.15s ease;
+        }
+        .week-note-card:hover {
+            background: #fefce8;
+            border-color: #f59e0b;
+            transform: translateY(-1px);
+        }
+
+        /* 🗜️ 表示密度切替ボタン */
+        .btn-density-toggle {
+            background: #ffffff;
+            color: #475569;
+            border: 1px solid #cbd5e1;
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 0.78rem;
+            font-weight: 700;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            transition: all 0.15s ease;
+            white-space: nowrap;
+        }
+        .btn-density-toggle:hover {
+            background: #f1f5f9;
+            color: #0f172a;
+            border-color: #94a3b8;
+        }
+        .density-ultra .btn-density-toggle,
+        .btn-density-toggle.is-active {
+            background: #0284c7;
+            color: #ffffff;
+            border-color: #0284c7;
+            box-shadow: 0 1px 4px rgba(2, 132, 199, 0.35);
+        }
+        .density-ultra .btn-density-toggle:hover,
+        .btn-density-toggle.is-active:hover {
+            background: #0369a1;
+        }
+
+        /* ========================================================
+           🗜️ 限界圧縮モード（Ultra Compact Mode）
+           縦方向の余白・高さを極限まで削ぎ落とし、1画面に2週間を凝縮
+           ======================================================== */
+        .density-ultra header {
+            padding: 3px 12px;
+        }
+        .density-ultra .header-logo-icon { font-size: 1.1rem; }
+        .density-ultra .header-logo-text { font-size: 0.95rem; }
+        .density-ultra .header-nav-btn {
+            padding: 2px 8px;
+            font-size: 0.74rem;
+        }
+        .density-ultra main {
+            margin: 2px auto;
+            padding: 0 6px;
+            max-width: 100%;
+        }
+        .density-ultra .alert-notice {
+            padding: 3px 8px;
+            margin-bottom: 2px;
+            font-size: 0.78rem;
+        }
+        .density-ultra .doctor-memo-banner {
+            margin-bottom: 3px;
+            border-radius: 4px;
+            border-left-width: 3px;
+        }
+        .density-ultra .doctor-memo-header {
+            padding: 3px 8px;
+            font-size: 0.78rem;
+        }
+        .density-ultra .doctor-memo-title {
+            font-size: 0.78rem;
+            gap: 4px;
+        }
+        .density-ultra .doctor-memo-body {
+            padding: 6px 10px;
+            font-size: 0.78rem;
+            line-height: 1.3;
+        }
+        .density-ultra .filter-section {
+            padding: 3px 8px;
+            margin-bottom: 3px;
+            gap: 3px;
+            border-radius: 4px;
+        }
+        .density-ultra .btn-create {
+            padding: 3px 9px;
+            font-size: 0.76rem;
+        }
+        .density-ultra .view-mode-switch {
+            padding: 2px;
+        }
+        .density-ultra .btn-mode-tab {
+            padding: 2px 8px;
+            font-size: 0.74rem;
+        }
+        .density-ultra .btn-density-toggle {
+            padding: 2px 7px;
+            font-size: 0.72rem;
+        }
+        .density-ultra .search-input-box {
+            padding: 1px 4px;
+        }
+        .density-ultra .search-input {
+            font-size: 0.74rem;
+            padding: 1px 3px;
+            width: 130px;
+        }
+        .density-ultra .btn-search {
+            padding: 3px 8px;
+            font-size: 0.74rem;
+        }
+
+        /* 2週間カレンダーの極限圧縮 */
+        .density-ultra .week-view-wrapper {
+            gap: 3px;
+        }
+        .density-ultra .week-navbar {
+            padding: 3px 8px;
+            border-radius: 4px;
+        }
+        .density-ultra .cal-nav-btn {
+            padding: 2px 8px;
+            font-size: 0.72rem;
+        }
+        .density-ultra .week-nav-title {
+            font-size: 0.82rem;
+            gap: 4px;
+        }
+        .density-ultra .month-note-banner {
+            padding: 2px 8px;
+            margin-bottom: 3px;
+            border-left-width: 3px;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 6px;
+        }
+        .density-ultra .month-note-header {
+            display: inline-flex;
+            flex-shrink: 0;
+            gap: 4px;
+        }
+        .density-ultra .month-note-title {
+            font-size: 0.74rem;
+            white-space: nowrap;
+        }
+        .density-ultra .month-note-body {
+            margin-top: 0;
+            flex: 1;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .density-ultra .month-note-text {
+            font-size: 0.74rem;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            line-height: 1.2;
+        }
+        .density-ultra .month-note-placeholder {
+            font-size: 0.72rem;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .density-ultra .btn-note-edit {
+            padding: 1px 5px;
+            font-size: 0.66rem;
+            flex-shrink: 0;
+        }
+        .density-ultra .btn-gcal-sync {
+            padding: 2px 8px;
+            font-size: 0.72rem;
+        }
+        .density-ultra .gcal-toggle-bar {
+            padding: 2px 8px;
+            font-size: 0.72rem;
+            gap: 4px;
+            border-radius: 4px;
+        }
+        .density-ultra .gcal-toggle-pill {
+            padding: 1px 6px;
+            font-size: 0.68rem;
+        }
+        .density-ultra .week-block-header {
+            padding: 2px 6px;
+            font-size: 0.74rem;
+            margin-top: 1px;
+            border-radius: 3px;
+        }
+        .density-ultra .week-span-container {
+            padding: 2px 4px;
+            margin-bottom: -2px;
+        }
+        .density-ultra .week-span-bar {
+            padding: 1px 5px;
+            font-size: 0.66rem;
+            line-height: 1.2;
+        }
+        .density-ultra .week-grid-7cols {
+            gap: 3px;
+        }
+        .density-ultra .week-day-col {
+            min-height: 95px !important;
+            border-radius: 4px;
+        }
+        .density-ultra .week-day-header {
+            padding: 2px 4px;
+            gap: 1px;
+        }
+        .density-ultra .week-day-date {
+            font-size: 0.76rem;
+            gap: 2px;
+        }
+        .density-ultra .badge-today {
+            font-size: 0.58rem;
+            padding: 0 3px;
+        }
+        .density-ultra .week-btn-add,
+        .density-ultra .week-btn-note {
             width: 16px;
             height: 16px;
-            border: 2.5px solid #86efac;
-            border-top-color: #059669;
-            border-radius: 50%;
-            animation: spin 0.8s linear infinite;
+            font-size: 0.68rem;
         }
-        @keyframes spin { to { transform: rotate(360deg); } }
-
-        /* 📱 スマホ最適化 ＆ 超コンパクト化スタイル */
-        .header-menu-select {
-            display: none;
-            background: rgba(255, 255, 255, 0.22);
-            color: #ffffff;
-            border: 1px solid rgba(255, 255, 255, 0.45);
-            padding: 4px 8px;
-            border-radius: 5px;
-            font-size: 0.8rem;
-            font-weight: bold;
-            outline: none;
-            cursor: pointer;
+        .density-ultra .week-traditional-row {
+            margin-top: 0px;
+            gap: 2px;
         }
-        .header-menu-select option {
-            color: #1e293b;
-            background: #ffffff;
+        .density-ultra .trad-badge {
+            font-size: 0.58rem;
+            padding: 0 3px;
+            line-height: 1.1;
         }
-
-        .filter-select-group {
-            display: none;
-            gap: 6px;
-            width: 100%;
+        .density-ultra .trad-moon-mini {
+            font-size: 0.58rem;
         }
-        .filter-select {
-            flex: 1;
-            padding: 6px 8px;
-            border: 1px solid #cbd5e1;
-            border-radius: 6px;
-            font-size: 0.82rem;
-            background: #ffffff;
-            color: #334155;
-            font-weight: 600;
-            outline: none;
-            cursor: pointer;
-            box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+        .density-ultra .badge-duty {
+            font-size: 0.58rem;
+            padding: 0 3px;
+            line-height: 1.1;
         }
-
-        .post-date-tag {
-            font-size: 0.74rem;
-            color: #888;
+        .density-ultra .week-day-body {
+            padding: 2px;
+            gap: 2px;
+        }
+        .density-ultra .week-note-card {
+            padding: 1px 4px;
+            font-size: 0.68rem;
+            margin-bottom: 2px;
+            line-height: 1.15;
+            border-left-width: 2px;
+            border-radius: 3px;
+            box-shadow: none;
             white-space: nowrap;
-            margin-left: auto;
-            padding-left: 6px;
-            flex-shrink: 0;
-            align-self: flex-start;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .density-ultra .week-doctor-card,
+        .density-ultra .week-gcal-card,
+        .density-ultra .week-event-card {
+            padding: 1px 4px;
+            border-radius: 3px;
+            border-left-width: 2px;
+            box-shadow: none;
+        }
+        .density-ultra .wec-header {
+            font-size: 0.62rem;
+            gap: 2px;
+        }
+        .density-ultra .wec-time {
+            font-size: 0.62rem;
+        }
+        .density-ultra .doctor-badge-tag,
+        .density-ultra .gcal-cal-tag {
+            font-size: 0.56rem;
+            padding: 0 3px;
+            line-height: 1.1;
+        }
+        .density-ultra .wec-title {
+            font-size: 0.68rem;
+            line-height: 1.15;
+            margin-top: 0;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .density-ultra .wec-loc,
+        .density-ultra .wec-memo {
+            display: none;
         }
 
-        @media (max-width: 768px) {
-            header { padding: 0.5rem 0.8rem !important; }
-            .header-container { gap: 6px !important; }
-            .header-title h1 { font-size: 1.05rem !important; }
-            .header-right { gap: 6px !important; }
-            .desktop-only { display: none !important; }
-            .header-menu-select { display: inline-block !important; }
-            .user-info { font-size: 0.78rem !important; padding: 3px 6px !important; }
-            .btn-line-header { font-size: 0.72rem !important; padding: 3px 6px !important; }
-            
-            main { margin: 0.6rem auto !important; padding: 0 0.5rem !important; }
-            .filter-section { padding: 8px 10px !important; margin-bottom: 0.8rem !important; gap: 8px !important; }
-            .toolbar-group { gap: 6px !important; }
-            .btn-create { padding: 5px 12px !important; font-size: 0.82rem !important; }
-            .btn-toggle-compact { padding: 5px 10px !important; font-size: 0.78rem !important; }
-            .btn-print-top { display: none !important; }
-            
+        /* 一覧モードの限界圧縮 */
+        .density-ultra .post-list {
+            gap: 3px;
+        }
+        .density-ultra .post-card {
+            padding: 5px 8px;
+            border-radius: 4px;
+        }
+        .density-ultra .post-title {
+            font-size: 0.86rem;
+            margin-bottom: 1px;
+        }
+        .density-ultra .post-meta {
+            font-size: 0.70rem;
+            gap: 6px;
+            margin-bottom: 2px;
+        }
+        .density-ultra .post-body-preview {
+            font-size: 0.76rem;
+            line-height: 1.25;
+            margin-bottom: 3px;
+            display: -webkit-box;
+            -webkit-line-clamp: 1;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+        .density-ultra .read-action-bar {
+            padding: 2px 6px;
+            margin-bottom: 3px;
+        }
+
+        /* レスポンシブ最適化 */
+        @media (max-width: 900px) {
+            .week-grid-7cols { grid-template-columns: repeat(2, 1fr); }
+            .week-span-grid { display: none; }
+        }
+        @media (max-width: 640px) {
+            header { padding: 0.5rem 0.8rem; }
+            .header-logo-text { font-size: 1rem; }
+            .week-grid-7cols { grid-template-columns: 1fr; }
             .desktop-filter-pills { display: none !important; }
-            .filter-select-group { display: flex !important; }
-
-            .search-form-wrap { width: 100% !important; order: 3; }
-            .search-input-box { flex: 1 !important; }
-            .search-input { width: 100% !important; }
-            .pagination-container { flex-direction: column !important; align-items: center !important; gap: 8px !important; }
-
-            .post-card { padding: 10px 12px !important; }
-            .post-title { font-size: 1.05rem !important; }
-            .post-meta { font-size: 0.76rem !important; gap: 8px !important; margin-bottom: 6px !important; }
-        }
-
-        @media (max-width: 480px) {
-            .post-date-label { display: none !important; }
+            .search-input { width: 100%; }
+            .search-form-wrap { width: 100%; }
+            .search-input-box { width: 100%; }
         }
     </style>
 </head>
 <body>
 
+    <!-- 🌟 ヘッダー -->
     <header>
         <div class="header-container">
-            <div class="header-title">
-                <h1>📜 院内かわら版 一覧</h1>
-            </div>
-            <div class="header-right">
-                <a href="login.php?switch_user=1" class="user-info" title="クリックしてユーザーを切り替え">
-                    👤 <span style="font-weight:bold;"><?= htmlspecialchars($login_user['staff_name']) ?></span>
-                    <span style="font-size:0.7rem; background:rgba(255,255,255,0.3); padding:1px 5px; border-radius:3px; margin-left:2px;">切替</span>
+            <div class="header-left">
+                <a href="kawara_list.php" class="header-logo-link">
+                    <span class="header-logo-icon">📜</span>
+                    <span class="header-logo-text">院内かわら版</span>
                 </a>
-                <button type="button" class="btn-line-header <?= $has_line_id ? 'is-linked' : 'is-unlinked' ?>" id="headerLineBtn" onclick="openLineLinkModal()" title="LINE連携設定">
+            </div>
+
+            <div class="header-right">
+                <!-- 🏠 メインメニューへ -->
+                <a href="index.php" class="header-nav-btn btn-nav-menu" title="かわら版メニューへ">
+                    🏠 メニュー
+                </a>
+
+                <!-- 👔 事務長モード（管理者と山本太のみ表示！分かりやすい場所に独立配置） -->
+                <?php if ($can_see_jimucho): ?>
+                    <a href="jimucho_dashboard.php" class="header-nav-btn btn-nav-jimucho" title="事務長用ダッシュボードへ">
+                        👔 事務長モード
+                    </a>
+                <?php endif; ?>
+
+                <!-- 👤 ユーザー名＆切替 -->
+                <a href="login.php?switch_user=1" class="header-nav-btn btn-nav-user" title="クリックしてユーザー切替">
+                    👤 <?= htmlspecialchars($login_user['staff_name']) ?>
+                    <span class="badge-switch">切替</span>
+                </a>
+
+                <!-- 📱 LINE連携バッジ -->
+                <button type="button" class="btn-line-header <?= $has_line_id ? 'is-linked' : 'is-unlinked' ?>" onclick="openLineLinkModal()" title="LINE連携設定">
                     <?= $has_line_id ? '🟢 LINE済' : '📱 LINE未' ?>
                 </button>
 
-                <!-- 📱 スマホ用 メニューリストBOX -->
-                <select class="header-menu-select" onchange="handleHeaderMenu(this)">
-                    <option value="">☰ メニュー ▼</option>
-                    <option value="index.php">🏠 かわら版メニュー</option>
-                    <?php if ($is_admin || $current_staff_id === 15 || mb_strpos($login_user['role'] ?? '', '事務') !== false): ?>
-                        <option value="jimucho_dashboard.php">👔 事務長モード</option>
-                    <?php endif; ?>
-                    <option value="safety_contacts.php">🛡️ 連絡網・安否</option>
-                    <option value="/index.php">🏠 院内ポータル</option>
-                    <option value="help.php">❓ 使い方</option>
-                    <?php if ($is_admin): ?><option value="master_mente.php">⚙️ メンテ</option><?php endif; ?>
-                </select>
-
-                <!-- 💻 PC用 ヘッダーボタン群 -->
-                <div class="header-actions desktop-only">
-                    <a href="index.php" class="btn-header" style="background:#475569;">🏠 メニュー</a>
-                    <?php if ($is_admin || $current_staff_id === 15 || mb_strpos($login_user['role'] ?? '', '事務') !== false): ?>
-                        <a href="jimucho_dashboard.php" class="btn-header" style="background:#0284c7; font-weight:bold;">👔 事務長モード</a>
-                    <?php endif; ?>
-                    <a href="safety_contacts.php" class="btn-header" style="background:#28a745;">🛡️ 連絡網・安否</a>
-                    <a href="/index.php" class="btn-header">ポータル</a>
-                    <a href="help.php" class="btn-header" style="background:#17a2b8;" target="_blank">❓ 使い方</a>
-                    <?php if ($is_admin): ?><a href="master_mente.php" class="btn-header" style="background:#e67e22;">⚙️ メンテ</a><?php endif; ?>
+                <!-- ☰ その他メニュー ドロップダウン -->
+                <div class="header-dropdown" id="headerDropdown">
+                    <button type="button" class="header-nav-btn" onclick="toggleHeaderDropdown(event)">
+                        ☰ その他 ▼
+                    </button>
+                    <div class="dropdown-menu" id="dropdownMenu">
+                        <a href="safety_contacts.php" class="dropdown-item">🛡️ 連絡網・安否確認</a>
+                        <a href="/index.php" class="dropdown-item">🏥 院内ポータル</a>
+                        <a href="help.php" class="dropdown-item" target="_blank">❓ 使い方ガイド</a>
+                        <?php if ($is_admin): ?>
+                            <div class="dropdown-divider"></div>
+                            <a href="master_mente.php" class="dropdown-item text-admin">⚙️ システムマスタ管理</a>
+                        <?php endif; ?>
+                    </div>
                 </div>
             </div>
         </div>
     </header>
 
     <main>
+        <!-- セッション通知メッセージ -->
         <?php if ($notice_msg): ?>
             <div class="alert-notice"><?= htmlspecialchars($notice_msg) ?></div>
         <?php endif; ?>
 
-        <?php if (!$has_line_id): ?>
-            <div class="line-register-banner" id="lineNoticeBanner">
-                <div class="line-banner-left">
-                    <span class="line-banner-icon">📱</span>
-                    <div>
-                        <div class="line-banner-title">【BCP安否確認・重要連絡】LINEが未登録です</div>
-                        <div class="line-banner-desc">有事の生存点呼や緊急アナウンスをスマホで受け取れるよう、公式LINEとの連携をお願いします。</div>
-                    </div>
-                </div>
-                <button type="button" class="btn-line-banner" onclick="openLineLinkModal()">
-                    👉 LINE連携コードを発行する（約30秒）
-                </button>
+        <!-- 🛡️ BCP安否確認バナー -->
+        <?php if ($safety_mode !== 'normal' && !$my_safety_reported_today): ?>
+            <div style="background:#fef2f2; border:1px solid #fecaca; border-left:5px solid #dc2626; padding:8px 12px; border-radius:6px; margin-bottom:0.8rem; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+                <span style="font-size:0.84rem; color:#b91c1c; font-weight:bold;">
+                    🚨 【安否確認】本日の生存報告が未報告です
+                </span>
+                <a href="safety_contacts.php" style="background:#dc2626; color:#fff; font-size:0.78rem; font-weight:bold; padding:4px 10px; border-radius:4px; text-decoration:none;">
+                    1クリック報告 →
+                </a>
             </div>
         <?php endif; ?>
 
-        <!-- 🛡️ BCP安否確認バナー（平常モード時は非表示、訓練・災害時のみ表示） -->
-        <?php if ($safety_mode !== 'normal' && !$my_safety_reported_today): ?>
-            <?php if ($safety_mode === 'disaster'): ?>
-                <div style="background:#fef2f2; border:1px solid #fecaca; border-left:5px solid #dc2626; padding:8px 12px; border-radius:6px; margin-bottom:0.8rem; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
-                    <span style="font-size:0.84rem; color:#b91c1c; font-weight:bold;">
-                        🚨 【災害時緊急モード】生存報告（BCP安否確認）が未報告です
-                    </span>
-                    <a href="safety_contacts.php" style="background:#dc2626; color:#fff; font-size:0.78rem; font-weight:bold; padding:4px 10px; border-radius:4px; text-decoration:none; white-space:nowrap;">
-                        1クリック報告 →
-                    </a>
+        <!-- 🩺 医師予定表 申し送りメモ欄（アコーディオンバナー） -->
+        <?php if (!empty($doctor_memo) && !empty($doctor_memo['content'])): ?>
+            <div class="doctor-memo-banner" id="doctorMemoBanner">
+                <div class="doctor-memo-header" onclick="toggleDoctorMemo()">
+                    <div class="doctor-memo-title">
+                        <span class="doctor-memo-icon">🩺</span>
+                        <span>医師予定表 申し送りメモ</span>
+                        <?php if (!empty($doctor_memo['updated_at'])): ?>
+                            <span class="doctor-memo-date">(<?= date('n/j H:i', strtotime($doctor_memo['updated_at'])) ?> 更新)</span>
+                        <?php endif; ?>
+                    </div>
+                    <span class="doctor-memo-arrow" id="doctorMemoArrow">▼ 開く</span>
                 </div>
-            <?php else: /* drill (訓練モード) */ ?>
-                <div style="background:#fff8ee; border:1px solid #fde68a; border-left:5px solid #e67e22; padding:8px 12px; border-radius:6px; margin-bottom:0.8rem; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
-                    <span style="font-size:0.84rem; color:#b45309; font-weight:bold;">
-                        🛡️ 【安否訓練中】本日の生存チェックが未報告です
-                    </span>
-                    <a href="safety_contacts.php" style="background:#28a745; color:#fff; font-size:0.78rem; font-weight:bold; padding:4px 10px; border-radius:4px; text-decoration:none; white-space:nowrap;">
-                        1クリック報告 →
-                    </a>
+                <div class="doctor-memo-body" id="doctorMemoBody">
+                    <?= nl2br(htmlspecialchars($doctor_memo['content'])) ?>
                 </div>
-            <?php endif; ?>
+            </div>
         <?php endif; ?>
 
-        <!-- フィルター・ツールバーセクション（超コンパクト化） -->
+        <!-- ツールバー ＆ フィルターセクション -->
         <div class="filter-section">
             <div class="toolbar-group">
-                <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
+                <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
                     <a href="create_post.php" class="btn-create">✏️ 新規投稿</a>
-                    
-                    <button type="button" id="compactToggleBtn" class="btn-toggle-compact" onclick="toggleCompactMode()">
-                        📄 1行表示
+
+                    <!-- 🌟 2大表示モード切替（一覧 ⇄ 2週カード） -->
+                    <div class="view-mode-switch">
+                        <a href="<?= $build_url(null, null, 1, null, 'list') ?>" class="btn-mode-tab <?= $view_mode === 'list' ? 'active' : '' ?>">
+                            📋 一覧
+                        </a>
+                        <a href="<?= $build_url(null, null, 1, null, '2weeks') ?>" class="btn-mode-tab <?= $view_mode === '2weeks' ? 'active' : '' ?>">
+                            📅 2週カード
+                        </a>
+                    </div>
+
+                    <!-- 🗜️ 縦表示密度切替（標準圧縮 ⇄ 限界圧縮） -->
+                    <button type="button" class="btn-density-toggle" onclick="toggleDensityMode()" title="縦方向を極限まで圧縮して1画面に収めるモードを切り替えます">
+                        <span class="density-icon">🗜️</span> <span class="density-label">限界圧縮</span>
                     </button>
 
-                    <button type="button" class="btn-toggle-compact btn-print-top" onclick="window.print()" style="background:#6c757d; border-color:#5a6268;">
-                        🖨️ 一覧印刷
-                    </button>
+                    <?php if ($view_mode === 'list'): ?>
+                        <button type="button" class="btn-print-top" onclick="window.print()">
+                            🖨️ 印刷
+                        </button>
+                    <?php endif; ?>
                 </div>
 
                 <!-- 🔍 キーワード検索フォーム -->
                 <form method="GET" action="kawara_list.php" class="search-form-wrap">
+                    <?php if ($view_mode !== 'list'): ?><input type="hidden" name="mode" value="<?= htmlspecialchars($view_mode) ?>"><?php endif; ?>
                     <?php if ($date_filter !== 'all'): ?><input type="hidden" name="date_filter" value="<?= htmlspecialchars($date_filter) ?>"><?php endif; ?>
                     <?php if ($selected_cat > 0): ?><input type="hidden" name="cat" value="<?= $selected_cat ?>"><?php endif; ?>
                     <div class="search-input-box">
@@ -1040,706 +2278,1081 @@ foreach ($page_posts as $p) {
                     <button type="submit" class="btn-search">検索</button>
                 </form>
 
-                <!-- 💻 PC用 期間フィルター -->
-                <div class="date-filter-group desktop-filter-pills">
-                    <a href="<?= $build_url('all') ?>" class="btn-date <?= $date_filter === 'all' ? 'active' : '' ?>">全期間</a>
-                    <a href="<?= $build_url('today') ?>" class="btn-date <?= $date_filter === 'today' ? 'active' : '' ?>">今日</a>
-                    <a href="<?= $build_url('tomorrow') ?>" class="btn-date <?= $date_filter === 'tomorrow' ? 'active' : '' ?>">明日</a>
-                    <a href="<?= $build_url('plus7') ?>" class="btn-date <?= $date_filter === 'plus7' ? 'active' : '' ?>">+7日</a>
-                    <a href="<?= $build_url('this_month') ?>" class="btn-date <?= $date_filter === 'this_month' ? 'active' : '' ?>">今月</a>
-                    <a href="<?= $build_url('next_month') ?>" class="btn-date <?= $date_filter === 'next_month' ? 'active' : '' ?>">来月</a>
-                    <span style="color:#ced4da; margin:0 2px;">|</span>
-                    <a href="<?= $build_url('past') ?>" class="btn-date <?= $date_filter === 'past' ? 'active' : '' ?>" style="<?= $date_filter === 'past' ? 'background:#5c636a; color:#fff;' : '' ?>">📁 過去分</a>
-                    <a href="<?= $build_url('all_history') ?>" class="btn-date <?= $date_filter === 'all_history' ? 'active' : '' ?>" style="<?= $date_filter === 'all_history' ? 'background:#17a2b8; color:#fff;' : '' ?>">🌐 全履歴</a>
-                </div>
+                <?php if ($view_mode === 'list'): ?>
+                    <!-- 💻 PC用 期間フィルター -->
+                    <div class="date-filter-group desktop-filter-pills">
+                        <a href="<?= $build_url('all') ?>" class="btn-date <?= $date_filter === 'all' ? 'active' : '' ?>">全期間</a>
+                        <a href="<?= $build_url('today') ?>" class="btn-date <?= $date_filter === 'today' ? 'active' : '' ?>">今日</a>
+                        <a href="<?= $build_url('tomorrow') ?>" class="btn-date <?= $date_filter === 'tomorrow' ? 'active' : '' ?>">明日</a>
+                        <a href="<?= $build_url('plus7') ?>" class="btn-date <?= $date_filter === 'plus7' ? 'active' : '' ?>">+7日</a>
+                        <a href="<?= $build_url('this_month') ?>" class="btn-date <?= $date_filter === 'this_month' ? 'active' : '' ?>">今月</a>
+                        <a href="<?= $build_url('next_month') ?>" class="btn-date <?= $date_filter === 'next_month' ? 'active' : '' ?>">来月</a>
+                        <span style="color:#cbd5e1; margin:0 2px;">|</span>
+                        <a href="<?= $build_url('past') ?>" class="btn-date <?= $date_filter === 'past' ? 'active' : '' ?>" style="<?= $date_filter === 'past' ? 'background:#64748b; color:#fff;' : '' ?>">📁 過去分</a>
+                        <a href="<?= $build_url('all_history') ?>" class="btn-date <?= $date_filter === 'all_history' ? 'active' : '' ?>" style="<?= $date_filter === 'all_history' ? 'background:#0284c7; color:#fff;' : '' ?>">🌐 全履歴</a>
+                    </div>
+                <?php endif; ?>
             </div>
 
-            <!-- 📱 スマホ用 期間＆カテゴリ 2列ドロップダウン（超コンパクト！） -->
-            <div class="filter-select-group">
-                <select class="filter-select" onchange="if(this.value) location.href=this.value;">
-                    <option value="<?= $build_url('all') ?>" <?= $date_filter === 'all' ? 'selected' : '' ?>>📅 期間: 全期間</option>
-                    <option value="<?= $build_url('today') ?>" <?= $date_filter === 'today' ? 'selected' : '' ?>>📅 期間: 今日</option>
-                    <option value="<?= $build_url('tomorrow') ?>" <?= $date_filter === 'tomorrow' ? 'selected' : '' ?>>📅 期間: 明日</option>
-                    <option value="<?= $build_url('plus7') ?>" <?= $date_filter === 'plus7' ? 'selected' : '' ?>>📅 期間: 直近+7日</option>
-                    <option value="<?= $build_url('this_month') ?>" <?= $date_filter === 'this_month' ? 'selected' : '' ?>>📅 期間: 今月</option>
-                    <option value="<?= $build_url('next_month') ?>" <?= $date_filter === 'next_month' ? 'selected' : '' ?>>📅 期間: 来月</option>
-                    <option value="<?= $build_url('past') ?>" <?= $date_filter === 'past' ? 'selected' : '' ?>>📁 期間: 過去の投稿</option>
-                    <option value="<?= $build_url('all_history') ?>" <?= $date_filter === 'all_history' ? 'selected' : '' ?>>🌐 期間: 全履歴(過去含)</option>
-                </select>
-
-                <select class="filter-select" onchange="if(this.value) location.href=this.value;">
-                    <option value="<?= $build_url(null, 0) ?>" <?= $selected_cat === 0 ? 'selected' : '' ?>>🏷️ カテゴリ: 全て</option>
+            <?php if ($view_mode === 'list'): ?>
+                <!-- 💻 PC用 カテゴリタブ -->
+                <div class="cat-tabs desktop-filter-pills">
+                    <a href="<?= $build_url(null, 0) ?>" class="cat-tab <?= $selected_cat === 0 ? 'active' : '' ?>">全て</a>
                     <?php foreach ($categories as $cat): ?>
-                        <option value="<?= $build_url(null, $cat['category_id']) ?>" <?= $selected_cat == $cat['category_id'] ? 'selected' : '' ?>>
+                        <a href="<?= $build_url(null, $cat['category_id']) ?>" class="cat-tab <?= $selected_cat == $cat['category_id'] ? 'active' : '' ?>">
                             <?= $cat['icon_emoji'] ?> <?= htmlspecialchars($cat['category_name']) ?>
-                        </option>
+                        </a>
                     <?php endforeach; ?>
-                </select>
-            </div>
-
-            <!-- 💻 PC用 カテゴリタブ -->
-            <div class="cat-tabs desktop-filter-pills">
-                <a href="<?= $build_url(null, 0) ?>" class="cat-tab <?= $selected_cat === 0 ? 'active' : '' ?>">全て</a>
-                <?php foreach ($categories as $cat): ?>
-                    <a href="<?= $build_url(null, $cat['category_id']) ?>" class="cat-tab <?= $selected_cat == $cat['category_id'] ? 'active' : '' ?>">
-                        <?= $cat['icon_emoji'] ?> <?= htmlspecialchars($cat['category_name']) ?>
-                    </a>
-                <?php endforeach; ?>
-            </div>
+                </div>
+            <?php endif; ?>
         </div>
 
-        <!-- 🔍 キーワード検索中バナー -->
-        <?php if ($search_query !== ''): ?>
-            <div class="search-result-banner">
-                <div class="search-result-info">
-                    🔍 キーワード「<strong><?= htmlspecialchars($search_query) ?></strong>」の検索結果: <strong><?= $total_posts ?></strong> 件
-                    <?php if ($date_filter === 'past'): ?><span class="badge" style="background:#6c757d; color:#fff; margin-left:6px;">過去分から検索</span><?php endif; ?>
-                    <?php if ($date_filter === 'all_history'): ?><span class="badge" style="background:#0284c7; color:#fff; margin-left:6px;">全履歴から検索</span><?php endif; ?>
-                </div>
-                <div style="display:flex; gap:6px; align-items:center;">
-                    <?php if ($date_filter !== 'all_history'): ?>
-                        <a href="<?= $build_url('all_history', null, 1, $search_query) ?>" class="btn-search-scope" title="過去分も含めた全履歴から探す">
-                            🌐 過去分・全履歴も含めて再検索
+        <!-- ==========================================
+             メインコンテンツの切り替え
+             ========================================== -->
+        <?php if ($view_mode === '2weeks'): ?>
+            <!-- 🌟 2週間カード表示（7列×2週 グリッド） -->
+            <div class="week-view-wrapper">
+                <!-- 週間ナビゲーションバー -->
+                <div class="week-navbar">
+                    <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                        <a href="?mode=2weeks&date=<?= $prev_2weeks_date ?>" class="cal-nav-btn">
+                            ◀ 前2週
                         </a>
-                    <?php endif; ?>
-                    <a href="<?= $build_url(null, null, 1, '') ?>" class="btn-search-clear">✕ 検索解除</a>
-                </div>
-            </div>
-        <?php endif; ?>
-
-        <?php if ($date_filter === 'past' && $search_query === ''): ?>
-            <div style="background:#f1f3f5; border:1px solid #ced4da; border-left:5px solid #6c757d; padding:10px 14px; border-radius:6px; margin-bottom:1.2rem; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
-                <div>
-                    <strong style="color:#495057; font-size:0.95rem;">📁 過去の投稿（掲載終了・過去分）を表示しています</strong>
-                    <span style="font-size:0.82rem; color:#666; margin-left:8px;">（合計 <?= $total_posts ?> 件）</span>
-                </div>
-                <a href="<?= $build_url('all') ?>" style="font-size:0.82rem; color:#005a9c; text-decoration:none; font-weight:bold; background:#fff; border:1px solid #005a9c; padding:4px 10px; border-radius:4px;">🔙 通常表示（掲載中のみ）に戻る</a>
-            </div>
-        <?php elseif ($date_filter === 'all_history' && $search_query === ''): ?>
-            <div style="background:#eef6fc; border:1px solid #b8daff; border-left:5px solid #005a9c; padding:10px 14px; border-radius:6px; margin-bottom:1.2rem; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
-                <div>
-                    <strong style="color:#004085; font-size:0.95rem;">🌐 全履歴（過去を含むすべての投稿）を表示しています</strong>
-                    <span style="font-size:0.82rem; color:#666; margin-left:8px;">（合計 <?= $total_posts ?> 件）</span>
-                </div>
-                <a href="<?= $build_url('all') ?>" style="font-size:0.82rem; color:#005a9c; text-decoration:none; font-weight:bold; background:#fff; border:1px solid #005a9c; padding:4px 10px; border-radius:4px;">🔙 通常表示（掲載中のみ）に戻る</a>
-            </div>
-        <?php endif; ?>
-
-        <div class="post-list">
-            <?php if (empty($posts)): ?>
-                <div style="text-align:center; padding: 3rem; background:#fff; border-radius:8px; color:#888;">
-                    <?= $date_filter === 'past' ? '過去の投稿はありません。' : '該当するお知らせや予定はありません。' ?>
-                </div>
-            <?php else: ?>
-                <?php foreach ($posts as $p): 
-                    $p_lvl = $p['priority_level'];
-                    $is_read = (bool)$p['is_my_read'];
-                    $is_expired = !empty($p['display_until']) && strtotime($p['display_until']) < time();
-                    $is_past_event = empty($p['display_until']) && !empty($p['target_datetime']) && strtotime($p['target_datetime']) < strtotime($today_str);
-                    $expired_class = ($is_expired || $is_past_event) ? 'is-expired' : '';
-
-                    $card_class = "p-{$p_lvl} " . ($is_read ? 'is-read' : 'is-unread') . " " . $expired_class;
-                    $can_edit = ($is_admin || $p['author_id'] == $current_staff_id);
-                    
-                    $read_cnt   = $p['read_count'];
-                    $total_cnt  = $p['total_targets'];
-                    $unread_cnt = max(0, $total_cnt - $read_cnt);
-                ?>
-                    <div class="post-card <?= $card_class ?>" 
-                         data-is-read="<?= $is_read ? '1' : '0' ?>"
-                         data-priority="<?= $p_lvl ?>"
-                         data-within-24h="<?= $p['is_within_24h'] ? '1' : '0' ?>">
-                        
-                        <div class="post-header">
-                            <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
-                                <?php if ($is_expired): ?>
-                                    <span class="badge" style="background:#6c757d; color:#ffffff;">⏱️ 掲載終了</span>
-                                <?php elseif ($is_past_event): ?>
-                                    <span class="badge" style="background:#6c757d; color:#ffffff;">📜 過去の予定</span>
-                                <?php endif; ?>
-
-                                <?php if ($p_lvl === 'urgent' && !$is_expired && !$is_past_event): ?>
-                                    <span class="badge badge-urgent">🚨 直近/緊急</span>
-                                <?php elseif ($p['is_within_24h'] && !$is_expired && !$is_past_event): ?>
-                                    <span class="badge badge-24h">⏰ 24時間以内</span>
-                                <?php endif; ?>
-
-                                <?php if (!$is_read): ?>
-                                    <span class="badge badge-unread">🟣 未読</span>
-                                <?php else: ?>
-                                    <span class="badge badge-read">🩵 既読</span>
-                                <?php endif; ?>
-
-                                <?php if ($p['is_new_post']): ?>
-                                    <span class="badge-new">NEW</span>
-                                <?php endif; ?>
-
-                                <?php if ($p['is_pinned']): ?><span class="badge badge-pinned">📌 固定</span><?php endif; ?>
-                                
-                                <span class="badge-cat" style="background-color: <?= $p['color_code'] ?? '#005a9c' ?>;">
-                                    <?= $p['icon_emoji'] ?> <?= htmlspecialchars($p['category_name'] ?? '一般') ?>
-                                </span>
-                            </div>
-                            <span class="post-date-tag"><span class="post-date-label">投稿: </span><?= date('n/j H:i', strtotime($p['created_at'])) ?></span>
+                        <div class="week-nav-title">
+                            📅 <?= date('Y年n月j日', $week_monday_ts) ?>(月) 〜 <?= date('n月j日', $period_sunday_ts) ?>(日)
+                            <span style="font-size:0.78rem; color:#0284c7; background:#e0f2fe; padding:2px 8px; border-radius:12px; margin-left:6px; font-weight:800;">2週間カード</span>
                         </div>
+                        <a href="?mode=2weeks&date=<?= $next_2weeks_date ?>" class="cal-nav-btn">
+                            翌2週 ▶
+                        </a>
+                        <a href="?mode=2weeks&date=<?= $today_str ?>" class="cal-nav-btn" style="background:#e0f2fe; color:#0369a1;">
+                            今週へ
+                        </a>
 
-                        <div class="post-title-wrapper">
-                            <a href="view_post.php?id=<?= $p['post_id'] ?>" 
-                               class="post-title <?= $p_lvl === 'urgent' ? 'text-urgent' : '' ?>"
-                               title="<?= htmlspecialchars($p['plain_summary']) ?>">
-                                <?= htmlspecialchars($p['title']) ?>
-                            </a>
-                            <span class="post-author-tag">(<?= htmlspecialchars($p['author_dept'] ?? '事務部') ?>)</span>
-                        </div>
-
-                        <div class="post-meta">
-                            <span>👤 投稿者: <?= htmlspecialchars($p['author_name'] ?? '事務部') ?> (<?= htmlspecialchars($p['author_dept']) ?>)</span>
-                            <?php if ($p['image_count'] > 0): ?><span>🖼 画像: <?= $p['image_count'] ?>枚</span><?php endif; ?>
-                            <!-- 🆕 掲載期限を追加 -->
-                            <span>掲載期限: <?= empty($p['display_until']) ? '♾️ 無期限' : date('Y/m/d 23:59', strtotime($p['display_until'])) ?></span>
-                        </div>
-
-                        <?php if ($p['formatted_event_date']): ?>
-                            <div class="event-box <?= $p_lvl === 'urgent' ? 'urgent-box' : '' ?>">
-                                🗓 実施・対象日時: <?= $p['formatted_event_date'] ?>
-                            </div>
+                        <?php if (!empty($gcal_channels)): ?>
+                            <button type="button" class="btn-gcal-sync" id="btnGcalSync" onclick="syncGoogleCalendar()">
+                                <span id="gcalSyncIcon">🔄</span> Google同期
+                            </button>
                         <?php endif; ?>
+                    </div>
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <span style="font-size:0.8rem; color:#64748b;">💡 クリックで詳細</span>
+                    </div>
+                </div>
 
-                        <div class="post-body-preview">
-                            <?= $p['content'] ?>
-                        </div>
-
-                        <?php if (!$is_read): ?>
-                            <form method="POST" class="read-action-bar">
-                                <input type="hidden" name="action_type" value="mark_read">
-                                <input type="hidden" name="post_id" value="<?= $p['post_id'] ?>">
-                                
-                                <button type="submit" style="background:#28a745; color:white; border:none; padding:7px 16px; border-radius:4px; font-weight:bold; cursor:pointer; font-size:0.88rem; box-shadow:0 2px 4px rgba(0,0,0,0.1);">
-                                     内容を確認しました（既読を付ける）
-                                </button>
-
-                                <label style="font-size:0.82rem; color:#0f5132; font-weight:bold; cursor:pointer; display:inline-flex; align-items:center; gap:4px;">
-                                    <input type="checkbox" name="send_self_line" value="1" <?= $has_line_id ? 'checked' : '' ?> onclick="checkLineIdStatus(event, <?= $has_line_id ? 'true' : 'false' ?>)" style="accent-color:#198754; width:16px; height:16px;">
-                                    <span>📲 自分のLINEにも内容をメモとして送信する</span>
-                                </label>
-                            </form>
+                <!-- 📌 今月の重点目標・重要メモ（2週間カレンダー用） -->
+                <div class="month-note-banner" 
+                     data-note-type="month"
+                     data-note-key="<?= htmlspecialchars($cur_month_key, ENT_QUOTES) ?>"
+                     data-note-content="<?= htmlspecialchars($month_note ?? '', ENT_QUOTES) ?>"
+                     data-note-label="<?= htmlspecialchars($cur_month_label, ENT_QUOTES) ?>"
+                     onclick="openNoteModal(this, null, null, null, event)">
+                    <div class="month-note-header">
+                        <span class="month-note-title">
+                            <span>📌</span> <?= htmlspecialchars($cur_month_label) ?>の重点目標・重要メモ
+                        </span>
+                        <button type="button" class="btn-note-edit" 
+                                data-note-type="month"
+                                data-note-key="<?= htmlspecialchars($cur_month_key, ENT_QUOTES) ?>"
+                                data-note-content="<?= htmlspecialchars($month_note ?? '', ENT_QUOTES) ?>"
+                                data-note-label="<?= htmlspecialchars($cur_month_label, ENT_QUOTES) ?>"
+                                onclick="event.stopPropagation(); openNoteModal(this, null, null, null, event);">
+                            ✏️ 編集
+                        </button>
+                    </div>
+                    <div class="month-note-body">
+                        <?php if (!empty($month_note)): ?>
+                            <div class="month-note-text"><?= nl2br(htmlspecialchars($month_note)) ?></div>
                         <?php else: ?>
-                            <div style="display:flex; justify-content:space-between; align-items:center; background:#e0f2fe; padding:6px 12px; border-radius:6px; margin-bottom:10px; flex-wrap:wrap; gap:5px;">
-                                <span style="font-size:0.82rem; color:#0369a1; font-weight:bold;">🩵 このお知らせは確認済み（既読）です</span>
-                                <form method="POST" style="margin:0;">
-                                    <input type="hidden" name="action_type" value="mark_unread">
-                                    <input type="hidden" name="post_id" value="<?= $p['post_id'] ?>">
-                                    <button type="submit" class="btn-unread-reset">↩️ 未読に戻す</button>
-                                </form>
-                            </div>
+                            <div class="month-note-placeholder">＋ 今月の重点目標・重要メモを追加（例：10月内視鏡システム最終レビュー、ISO更新審査対応）</div>
                         <?php endif; ?>
+                    </div>
+                </div>
 
-                        <div class="toggle-bar">
-                            <button type="button" class="toggle-btn" onclick="toggleAccordion('comments_<?= $p['post_id'] ?>', this)">
-                                💬 コメント・スタンプ (<?= $p['comment_count'] ?>件) ▼
-                            </button>
-                            <button type="button" class="toggle-btn" onclick="toggleAccordion('reads_<?= $p['post_id'] ?>', this)">
-                                👀 既読 <?= $read_cnt ?> / 未読 <?= $unread_cnt ?>名 (対象<?= $total_cnt ?>名) ▼
-                            </button>
+                <?php if (!empty($gcal_channels)): ?>
+                    <!-- Googleカレンダー表示切り替えバー -->
+                    <div class="gcal-toggle-bar">
+                        <span class="gcal-toggle-label">📅 Googleカレンダー:</span>
+                        <div class="gcal-toggle-group">
+                            <?php foreach ($gcal_channels as $ch): ?>
+                                <label class="gcal-toggle-pill">
+                                    <input type="checkbox" class="gcal-channel-chk" checked onchange="toggleGcalChannel(<?= $ch['channel_id'] ?>, this.checked)">
+                                    <span class="gcal-toggle-dot" style="background: <?= htmlspecialchars($ch['color_theme']) ?>;"></span>
+                                    <span><?= htmlspecialchars($ch['calendar_name']) ?></span>
+                                </label>
+                            <?php endforeach; ?>
                         </div>
+                    </div>
+                <?php endif; ?>
 
-                        <div id="comments_<?= $p['post_id'] ?>" class="accordion-content">
-                            <?php
-                            $stmt_cm = $pdo->prepare("SELECT cm.*, s.staff_name FROM post_comments cm LEFT JOIN staff s ON cm.author_id = s.staff_id WHERE cm.post_id = :pid ORDER BY cm.created_at ASC");
-                            $stmt_cm->execute([':pid' => $p['post_id']]);
-                            $comments = $stmt_cm->fetchAll();
-                            ?>
+                <!-- 週グループ展開（第1週・第2週） -->
+                <?php foreach ($week_groups as $w_idx => $w_days): 
+                    $w_span_events = $week_span_events[$w_idx] ?? [];
+                ?>
+                    <div class="week-block-header">
+                        <span>🗓️ 第<?= $w_idx + 1 ?>週：<?= date('Y/n/j', $w_days[0]['ts']) ?>(月) 〜 <?= date('n/j', $w_days[6]['ts']) ?>(日)</span>
+                        <span style="font-size:0.76rem; font-weight:normal; color:#64748b;">7日間</span>
+                    </div>
 
-                            <?php if (!empty($comments)): ?>
-                                <div style="margin-bottom:10px;">
-                                    <?php foreach ($comments as $cm): ?>
-                                        <div class="comment-item">
-                                            <div>
-                                                <b><?= htmlspecialchars($cm['staff_name']) ?>:</b> 
-                                                <?= htmlspecialchars($cm['comment_text']) ?>
-                                                <?php if ($cm['stamp_code']): ?>
-                                                    <span class="stamp-badge"><?= htmlspecialchars($cm['stamp_code']) ?></span>
-                                                <?php endif; ?>
-                                            </div>
-                                            <span style="font-size:0.75rem; color:#999;"><?= date('m/d H:i', strtotime($cm['created_at'])) ?></span>
-                                        </div>
-                                    <?php endforeach; ?>
-                                </div>
-                            <?php else: ?>
-                                <p style="color:#888; margin-bottom:10px;">コメントやスタンプはまだありません。</p>
-                            <?php endif; ?>
-
-                            <form method="POST" style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
-                                <input type="hidden" name="action_type" value="add_comment">
-                                <input type="hidden" name="post_id" value="<?= $p['post_id'] ?>">
-                                
-                                <input type="text" name="comment_text" placeholder="一言コメントを入力..." style="flex:1; padding:6px; border:1px solid #ccc; border-radius:4px; font-size:0.85rem;">
-                                
-                                <button type="submit" name="stamp_code" value="👍 了解です" class="stamp-select-btn">👍 了解</button>
-                                <button type="submit" name="stamp_code" value="🙏 感謝" class="stamp-select-btn">🙏 感謝</button>
-                                <button type="submit" name="stamp_code" value="👌 確認済" class="stamp-select-btn">👌 確認済</button>
-
-                                <button type="submit" style="background:#005a9c; color:white; border:none; padding:6px 12px; border-radius:4px; font-weight:bold; cursor:pointer; font-size:0.82rem;">送信</button>
-                            </form>
-                        </div>
-
-                        <div id="reads_<?= $p['post_id'] ?>" class="accordion-content">
-                            <div style="font-size:0.8rem; color:#666; margin-bottom:5px;">対象スタッフの確認状況（グリーン: 既読 / ピンク: 未読）:</div>
-                            <div class="read-grid">
-                                <?php foreach ($p['target_members'] as $st): 
-                                    $is_st_read = in_array($st['staff_id'], $p['read_staff_ids']);
-                                ?>
-                                    <div class="read-user-badge <?= $is_st_read ? 'is-read' : 'is-unread' ?>">
-                                        <?= htmlspecialchars($st['staff_name']) ?> <?= $is_st_read ? '✓' : '' ?>
+                    <?php if (!empty($w_span_events)): ?>
+                        <!-- Googleカレンダー 終日・複数日 帯レーン -->
+                        <div class="week-span-container">
+                            <div class="week-span-grid">
+                                <?php foreach ($w_span_events as $gev): ?>
+                                    <div class="week-span-bar gcal-item gcal-ch-<?= $gev['channel_id'] ?>"
+                                         style="grid-column: <?= $gev['start_col'] ?> / span <?= $gev['col_span'] ?>; background-color: <?= htmlspecialchars($gev['color_theme']) ?>;"
+                                         onclick='openGcalDetailModal(<?= json_encode($gev, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP) ?>)'
+                                         title="<?= htmlspecialchars($gev['title']) ?> (<?= htmlspecialchars($gev['calendar_name']) ?>)">
+                                        <span>🗓️</span>
+                                        <span><?= htmlspecialchars($gev['title']) ?></span>
                                     </div>
                                 <?php endforeach; ?>
                             </div>
                         </div>
+                    <?php endif; ?>
 
-                        <div class="post-footer">
-                            <div>
-                                <a href="print_post.php?id=<?= $p['post_id'] ?>" target="_blank" class="btn-print">🖨️ 単体印刷</a>
-                                <span style="margin-left: 10px;">掲載期限: <?= empty($p['display_until']) ? '♾️ 無期限' : date('Y/m/d 23:59', strtotime($p['display_until'])) ?></span>
+                    <!-- 7列カードグリッド (月曜〜日曜) -->
+                    <div class="week-grid-7cols">
+                        <?php foreach ($w_days as $wd): 
+                            $duty = $wd['duty_info'];
+                            $has_absence_warn = ($duty['is_closed'] && count($wd['events']) > 0);
+                        ?>
+                            <div class="week-day-col <?= $wd['is_today'] ? 'is-today' : '' ?>">
+                                <!-- カラムヘッダー -->
+                                <div class="week-day-header">
+                                    <div class="week-day-header-top">
+                                        <div class="week-day-date">
+                                            <span><?= $wd['month_num'] ?>/<?= $wd['day_num'] ?></span>
+                                            <span style="font-size:0.82rem; color:<?= (int)date('w', $wd['ts']) === 0 ? '#dc2626' : ((int)date('w', $wd['ts']) === 6 ? '#7c3aed' : '#334155') ?>;">(<?= $wd['dow_text'] ?>)</span>
+                                            <?php if ($wd['is_today']): ?>
+                                                <span class="badge-today">今日</span>
+                                            <?php endif; ?>
+                                        </div>
+                                        <div style="display:flex; align-items:center; gap:4px;">
+                                            <button type="button" 
+                                                    class="week-btn-note <?= !empty($wd['day_note']) ? 'has-note' : '' ?>" 
+                                                    title="この日のメモを入力・編集"
+                                                    data-note-type="date"
+                                                    data-note-key="<?= htmlspecialchars($wd['date_str'], ENT_QUOTES) ?>"
+                                                    data-note-content="<?= htmlspecialchars($wd['day_note'] ?? '', ENT_QUOTES) ?>"
+                                                    data-note-label="<?= htmlspecialchars($wd['date_str'], ENT_QUOTES) ?>"
+                                                    onclick="openNoteModal(this, null, null, null, event);">
+                                                📝
+                                            </button>
+                                            <a href="create_post.php?date=<?= $wd['date_str'] ?>" class="week-btn-add" title="この日に新しい予定を登録">
+                                                ＋
+                                            </a>
+                                        </div>
+                                    </div>
+
+                                    <!-- 六曜・二十四節気・月齢バッジ -->
+                                    <?php 
+                                        $trad = $wd['traditional'] ?? null;
+                                        if ($trad):
+                                            $rokuyo = $trad['rokuyo'];
+                                            $r_class = 'rokuyo-default';
+                                            if ($rokuyo === '大安') $r_class = 'rokuyo-taian';
+                                            elseif ($rokuyo === '友引') $r_class = 'rokuyo-tomobiki';
+                                            elseif ($rokuyo === '仏滅') $r_class = 'rokuyo-butsumetsu';
+                                    ?>
+                                        <div class="week-traditional-row">
+                                            <span class="trad-badge trad-rokuyo <?= $r_class ?>" title="六曜: <?= htmlspecialchars($rokuyo) ?>">
+                                                <?= htmlspecialchars($rokuyo) ?>
+                                            </span>
+                                            <?php if (!empty($trad['solar_term'])): ?>
+                                                <span class="trad-badge trad-solar" title="二十四節気: <?= htmlspecialchars($trad['solar_term']) ?>">
+                                                    🌿 <?= htmlspecialchars($trad['solar_term']) ?>
+                                                </span>
+                                            <?php endif; ?>
+                                            <span class="trad-moon-mini" title="月齢 <?= $trad['moon_age'] ?>">
+                                                <?= $trad['moon_phase_emoji'] ?><small><?= $trad['moon_age'] ?></small>
+                                            </span>
+                                        </div>
+                                    <?php endif; ?>
+
+                                    <!-- 外来休診・午後休診バッジ -->
+                                    <?php if (!empty($duty['badge_label'])): ?>
+                                        <div class="week-day-badges">
+                                            <span class="badge-duty badge-duty-<?= htmlspecialchars($duty['badge_type']) ?>">
+                                                <?= htmlspecialchars($duty['badge_label']) ?>
+                                            </span>
+                                        </div>
+                                    <?php endif; ?>
+                                </div>
+
+                                <!-- イベントリスト -->
+                                <div class="week-day-body">
+                                    <!-- 🌟 日付メモ（登録されている場合、最上部に付箋表示） -->
+                                    <?php if (!empty($wd['day_note'])): ?>
+                                        <div class="week-note-card" 
+                                             data-note-type="date"
+                                             data-note-key="<?= htmlspecialchars($wd['date_str'], ENT_QUOTES) ?>"
+                                             data-note-content="<?= htmlspecialchars($wd['day_note'], ENT_QUOTES) ?>"
+                                             data-note-label="<?= htmlspecialchars($wd['date_str'], ENT_QUOTES) ?>"
+                                             onclick="openNoteModal(this, null, null, null, event);" 
+                                             title="クリックしてメモを編集">
+                                            <span style="font-size:0.85rem; flex-shrink:0;">📌</span>
+                                            <span style="flex:1; word-break:break-word;"><?= nl2br(htmlspecialchars($wd['day_note'])) ?></span>
+                                        </div>
+                                    <?php endif; ?>
+
+                                    <!-- 🩺 医師予定表（休診・不在・出張・診察） -->
+                                    <?php if (!empty($doctor_events_by_date[$wd['date_str']])): ?>
+                                        <?php foreach ($doctor_events_by_date[$wd['date_str']] as $dev): 
+                                            $d_doc = $dev['doctor'] ?? [];
+                                            $d_is_absence = ($dev['event_type'] === 'absence');
+                                            $d_time_text = $dev['is_all_day'] ? '終日' : (($dev['start_time'] ?? '') . (!empty($dev['end_time']) ? '〜' . $dev['end_time'] : ''));
+                                            $d_card_border = $d_is_absence ? '#dc2626' : ($d_doc['department_color'] ?? '#0284c7');
+                                            $d_bg = $d_is_absence ? '#fff5f5' : '#f0f9ff';
+                                        ?>
+                                            <div class="week-doctor-card"
+                                                 style="border-left-color: <?= htmlspecialchars($d_card_border) ?>; background: <?= htmlspecialchars($d_bg) ?>;"
+                                                 onclick='openDoctorDetailModal(<?= json_encode($dev, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP) ?>)'
+                                                 title="🩺 <?= htmlspecialchars($dev['title']) ?> (<?= htmlspecialchars($d_doc['name'] ?? '') ?>)">
+                                                <div class="wec-header">
+                                                    <span><?= htmlspecialchars($dev['event_icon'] ?? ($d_is_absence ? '🔴' : '🩺')) ?></span>
+                                                    <span class="wec-time" style="color:<?= $d_is_absence ? '#b91c1c' : '#0369a1' ?>;"><?= htmlspecialchars($d_time_text) ?></span>
+                                                    <span class="doctor-badge-tag" style="background:<?= htmlspecialchars($d_doc['department_color'] ?? '#475569') ?>;">
+                                                        <?= htmlspecialchars($d_doc['short_name'] ?? $d_doc['name'] ?? '医師') ?>
+                                                    </span>
+                                                </div>
+                                                <div class="wec-title" style="color:<?= $d_is_absence ? '#991b1b' : '#0f172a' ?>;">
+                                                    <?= htmlspecialchars($dev['title']) ?>
+                                                </div>
+                                            </div>
+                                        <?php endforeach; ?>
+                                    <?php endif; ?>
+
+                                    <!-- 🗓️ Googleカレンダー 時間指定予定 -->
+                                    <?php if (!empty($gcal_timed_events_by_date[$wd['date_str']])): ?>
+                                        <?php foreach ($gcal_timed_events_by_date[$wd['date_str']] as $gte): ?>
+                                            <div class="week-gcal-card gcal-item gcal-ch-<?= $gte['channel_id'] ?>"
+                                                 style="border-left-color: <?= htmlspecialchars($gte['color_theme']) ?>;"
+                                                 onclick='openGcalDetailModal(<?= json_encode($gte, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP) ?>)'
+                                                 title="<?= htmlspecialchars($gte['title']) ?> (<?= htmlspecialchars($gte['calendar_name']) ?>)">
+                                                <div class="wec-header">
+                                                    <span>🗓️</span>
+                                                    <span class="wec-time"><?= date('H:i', strtotime($gte['start_datetime'])) ?><?= !empty($gte['end_datetime']) ? '〜' . date('H:i', strtotime($gte['end_datetime'])) : '' ?></span>
+                                                    <span class="gcal-cal-tag" style="background-color: <?= htmlspecialchars($gte['color_theme']) ?>;">
+                                                        <?= htmlspecialchars($gte['calendar_name']) ?>
+                                                    </span>
+                                                </div>
+                                                <div class="wec-title"><?= htmlspecialchars($gte['title']) ?></div>
+                                            </div>
+                                        <?php endforeach; ?>
+                                    <?php endif; ?>
+
+                                    <!-- 📜 かわら版 記事イベントカード -->
+                                    <?php 
+                                        $has_any_events = !empty($wd['events']) || !empty($gcal_timed_events_by_date[$wd['date_str']]) || !empty($doctor_events_by_date[$wd['date_str']]);
+                                    ?>
+                                    <?php if (!$has_any_events): ?>
+                                        <div class="empty-day-placeholder">
+                                            <span style="font-size:1.2rem; opacity:0.35;">☕</span>
+                                            <span>予定なし</span>
+                                        </div>
+                                    <?php else: ?>
+                                        <?php foreach ($wd['events'] as $ev): ?>
+                                            <?php if ($ev['is_continuation']): ?>
+                                                <!-- 2日目以降 (続) カード -->
+                                                <div class="week-event-card week-event-card-continuation" onclick="location.href='view_post.php?id=<?= $ev['post_id'] ?>'">
+                                                    <div class="wec-header">
+                                                        <span class="wec-badge-cont">続</span>
+                                                        <span class="wec-time"><?= $ev['start_time'] ?><?= !empty($ev['end_time']) ? '〜' . $ev['end_time'] : '' ?></span>
+                                                    </div>
+                                                    <div class="wec-title">
+                                                        <?= htmlspecialchars($ev['title']) ?>
+                                                        <span class="wec-slot-badge"><?= $ev['slot_badge'] ?></span>
+                                                    </div>
+                                                </div>
+                                            <?php else: ?>
+                                                <!-- 初日 メインカード -->
+                                                <div class="week-event-card" onclick="location.href='view_post.php?id=<?= $ev['post_id'] ?>'">
+                                                    <div class="wec-header">
+                                                        <span><?= htmlspecialchars($ev['icon']) ?></span>
+                                                        <span class="wec-time"><?= $ev['start_time'] ?><?= !empty($ev['end_time']) ? '〜' . $ev['end_time'] : '' ?></span>
+                                                    </div>
+                                                    <div class="wec-title"><?= htmlspecialchars($ev['title']) ?></div>
+                                                    <?php if ($ev['total_slots'] > 1): ?>
+                                                        <div class="wec-slot-badge">全<?= $ev['total_slots'] ?>日程 (第1回)</div>
+                                                    <?php endif; ?>
+                                                </div>
+                                            <?php endif; ?>
+                                        <?php endforeach; ?>
+                                    <?php endif; ?>
+                                </div>
                             </div>
-                            
-                            <div>
-                                <a href="view_post.php?id=<?= $p['post_id'] ?>" style="color:#005a9c; text-decoration:none; font-weight:bold; margin-right:12px;">詳細をみる →</a>
-                                <?php if ($can_edit): ?>
-                                    <a href="create_post.php?id=<?= $p['post_id'] ?>" style="color:#e67e22; text-decoration:none; font-weight:bold;">✏️ 編集</a>
-                                <?php endif; ?>
-                            </div>
-                        </div>
+                        <?php endforeach; ?>
                     </div>
                 <?php endforeach; ?>
-            <?php endif; ?>
-        </div>
+            </div>
 
-        <!-- 📄 ページネーション（件数表示 ＆ ページ送り） -->
-        <?php if ($total_posts > 0): ?>
-            <div class="pagination-container">
-                <div class="pagination-info">
-                    全 <strong><?= $total_posts ?></strong> 件中 <strong><?= $offset + 1 ?>〜<?= min($total_posts, $offset + $per_page) ?></strong> 件を表示 (ページ <?= $current_page ?> / <?= $total_pages ?>)
-                </div>
-
-                <?php if ($total_pages > 1): ?>
-                    <div class="pagination-nav">
-                        <!-- 最初のページ « -->
-                        <?php if ($current_page > 1): ?>
-                            <a href="<?= $build_url(null, null, 1) ?>" class="page-btn" title="最初のページ">«</a>
-                            <a href="<?= $build_url(null, null, $current_page - 1) ?>" class="page-btn" title="前のページ">‹</a>
-                        <?php else: ?>
-                            <span class="page-btn disabled" title="前のページはありません">«</span>
-                            <span class="page-btn disabled" title="前のページはありません">‹</span>
-                        <?php endif; ?>
-
-                        <!-- ページ番号群 -->
-                        <?php
-                        $start_p = max(1, $current_page - 2);
-                        $end_p   = min($total_pages, $current_page + 2);
-
-                        if ($start_p > 1): ?>
-                            <a href="<?= $build_url(null, null, 1) ?>" class="page-btn">1</a>
-                            <?php if ($start_p > 2): ?><span class="page-ellipsis">…</span><?php endif; ?>
-                        <?php endif; ?>
-
-                        <?php for ($p_num = $start_p; $p_num <= $end_p; $p_num++): ?>
-                            <?php if ($p_num === $current_page): ?>
-                                <span class="page-btn active"><?= $p_num ?></span>
-                            <?php else: ?>
-                                <a href="<?= $build_url(null, null, $p_num) ?>" class="page-btn"><?= $p_num ?></a>
-                            <?php endif; ?>
-                        <?php endfor; ?>
-
-                        <?php if ($end_p < $total_pages): ?>
-                            <?php if ($end_p < $total_pages - 1): ?><span class="page-ellipsis">…</span><?php endif; ?>
-                            <a href="<?= $build_url(null, null, $total_pages) ?>" class="page-btn"><?= $total_pages ?></a>
-                        <?php endif; ?>
-
-                        <!-- 次のページ › » -->
-                        <?php if ($current_page < $total_pages): ?>
-                            <a href="<?= $build_url(null, null, $current_page + 1) ?>" class="page-btn" title="次のページ">›</a>
-                            <a href="<?= $build_url(null, null, $total_pages) ?>" class="page-btn" title="最後のページ">»</a>
-                        <?php else: ?>
-                            <span class="page-btn disabled" title="次のページはありません">›</span>
-                            <span class="page-btn disabled" title="次のページはありません">»</span>
-                        <?php endif; ?>
+        <?php else: ?>
+            <!-- 📋 一覧表示モード -->
+            <!-- 🔍 キーワード検索中バナー -->
+            <?php if ($search_query !== ''): ?>
+                <div style="background:#eff6ff; border:1px solid #bfdbfe; border-left:4px solid var(--accent); padding:8px 12px; border-radius:6px; margin-bottom:0.8rem; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; font-size:0.84rem;">
+                    <div style="color:#1e3a8a; font-weight:600;">
+                        🔍 「<strong><?= htmlspecialchars($search_query) ?></strong>」の検索結果: <strong><?= $total_posts ?></strong> 件
                     </div>
+                    <a href="<?= $build_url(null, null, 1, '') ?>" style="color:#0284c7; text-decoration:none; font-weight:700;">✕ 検索解除</a>
+                </div>
+            <?php endif; ?>
+
+            <div class="post-list">
+                <?php if (empty($posts)): ?>
+                    <div style="text-align:center; padding: 3rem; background:#fff; border-radius:8px; color:#888; border:1px solid var(--border-color);">
+                        <?= $date_filter === 'past' ? '過去の投稿はありません。' : '該当するお知らせや予定はありません。' ?>
+                    </div>
+                <?php else: ?>
+                    <?php foreach ($posts as $p): 
+                        $p_lvl = $p['priority_level'];
+                        $is_read = (bool)$p['is_my_read'];
+                        $is_expired = !empty($p['display_until']) && strtotime($p['display_until']) < time();
+                        $is_past_event = empty($p['display_until']) && !empty($p['target_datetime']) && strtotime($p['target_datetime']) < strtotime($today_str);
+                        $card_class = "p-{$p_lvl} " . ($is_read ? 'is-read' : 'is-unread');
+                        
+                        $read_cnt   = $p['read_count'];
+                        $total_cnt  = $p['total_targets'];
+                        $unread_cnt = max(0, $total_cnt - $read_cnt);
+                    ?>
+                        <div class="post-card <?= $card_class ?>">
+                            <!-- 未読パルス発光インジケーター -->
+                            <?php if (!$is_read): ?>
+                                <div class="unread-indicator" title="未読のお知らせです">
+                                    <span class="unread-dot"></span>
+                                    <span>未読</span>
+                                </div>
+                            <?php endif; ?>
+
+                            <div class="post-header">
+                                <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
+                                    <?php if ($is_expired): ?>
+                                        <span class="badge" style="background:#64748b; color:#fff;">⏱️ 掲載終了</span>
+                                    <?php elseif ($is_past_event): ?>
+                                        <span class="badge" style="background:#64748b; color:#fff;">📜 過去の予定</span>
+                                    <?php endif; ?>
+
+                                    <?php if ($p_lvl === 'urgent' && !$is_expired && !$is_past_event): ?>
+                                        <span class="badge badge-urgent">🚨 直近/緊急</span>
+                                    <?php elseif ($p['is_within_24h'] && !$is_expired && !$is_past_event): ?>
+                                        <span class="badge badge-24h">⏰ 24時間以内</span>
+                                    <?php endif; ?>
+
+                                    <?php if ($p['is_new_post']): ?>
+                                        <span class="badge-new">NEW</span>
+                                    <?php endif; ?>
+
+                                    <?php if ($p['is_pinned']): ?>
+                                        <span class="badge badge-pinned">📌 固定</span>
+                                    <?php endif; ?>
+
+                                    <span class="badge-cat" style="background-color: <?= $p['color_code'] ?? '#0284c7' ?>;">
+                                        <?= $p['icon_emoji'] ?> <?= htmlspecialchars($p['category_name'] ?? '一般') ?>
+                                    </span>
+                                </div>
+                            </div>
+
+                            <div class="post-title-wrapper">
+                                <a href="view_post.php?id=<?= $p['post_id'] ?>" 
+                                   class="post-title <?= $p_lvl === 'urgent' ? 'text-urgent' : '' ?>"
+                                   title="<?= htmlspecialchars($p['plain_summary']) ?>">
+                                    <?= htmlspecialchars($p['title']) ?>
+                                </a>
+                                <span class="post-author-tag">(<?= htmlspecialchars($p['author_dept'] ?? '事務部') ?>)</span>
+                            </div>
+
+                            <div class="post-meta">
+                                <span>👤 投稿者: <?= htmlspecialchars($p['author_name'] ?? '事務部') ?></span>
+                                <span>📅 投稿: <?= date('n/j H:i', strtotime($p['created_at'])) ?></span>
+                                <?php if ($p['image_count'] > 0): ?><span>🖼 画像: <?= $p['image_count'] ?>枚</span><?php endif; ?>
+                                <span>掲載期限: <?= empty($p['display_until']) ? '♾️ 無期限' : date('Y/m/d 23:59', strtotime($p['display_until'])) ?></span>
+                            </div>
+
+                            <?php if ($p['formatted_event_date']): ?>
+                                <div class="event-box <?= $p_lvl === 'urgent' ? 'urgent-box' : '' ?>">
+                                    🗓 実施・対象日時: <?= $p['formatted_event_date'] ?>
+                                </div>
+                            <?php endif; ?>
+
+                            <div class="post-body-preview">
+                                <?= $p['content'] ?>
+                            </div>
+
+                            <?php if (!$is_read): ?>
+                                <form method="POST" class="read-action-bar">
+                                    <input type="hidden" name="action_type" value="mark_read">
+                                    <input type="hidden" name="post_id" value="<?= $p['post_id'] ?>">
+                                    
+                                    <button type="submit" style="background:#10b981; color:white; border:none; padding:6px 14px; border-radius:6px; font-weight:bold; cursor:pointer; font-size:0.84rem;">
+                                        ✓ 内容を確認しました（既読を付ける）
+                                    </button>
+
+                                    <label style="font-size:0.8rem; color:#065f46; font-weight:bold; cursor:pointer; display:inline-flex; align-items:center; gap:4px;">
+                                        <input type="checkbox" name="send_self_line" value="1" <?= $has_line_id ? 'checked' : '' ?> onclick="checkLineIdStatus(event, <?= $has_line_id ? 'true' : 'false' ?>)" style="accent-color:#10b981; width:15px; height:15px;">
+                                        <span>📲 自分のLINE宛てにも本文メモを送信</span>
+                                    </label>
+                                </form>
+                            <?php else: ?>
+                                <div style="display:flex; justify-content:space-between; align-items:center; background:#f1f5f9; padding:5px 12px; border-radius:6px; margin-bottom:8px; flex-wrap:wrap; gap:5px;">
+                                    <span style="font-size:0.8rem; color:#475569; font-weight:bold;">🩵 このお知らせは確認済み（既読）です</span>
+                                    <form method="POST" style="margin:0;">
+                                        <input type="hidden" name="action_type" value="mark_unread">
+                                        <input type="hidden" name="post_id" value="<?= $p['post_id'] ?>">
+                                        <button type="submit" class="btn-unread-reset">↩️ 未読に戻す</button>
+                                    </form>
+                                </div>
+                            <?php endif; ?>
+
+                            <div class="toggle-bar">
+                                <button type="button" class="toggle-btn" onclick="toggleAccordion('comments_<?= $p['post_id'] ?>', this)">
+                                    💬 コメント (<?= $p['comment_count'] ?>件) ▼
+                                </button>
+                                <button type="button" class="toggle-btn" onclick="toggleAccordion('reads_<?= $p['post_id'] ?>', this)">
+                                    👀 既読 <?= $read_cnt ?> / 未読 <?= $unread_cnt ?>名 (対象<?= $total_cnt ?>名) ▼
+                                </button>
+                            </div>
+
+                            <div id="comments_<?= $p['post_id'] ?>" class="accordion-content">
+                                <?php
+                                $stmt_cm = $pdo->prepare("SELECT cm.*, s.staff_name FROM post_comments cm LEFT JOIN staff s ON cm.author_id = s.staff_id WHERE cm.post_id = :pid ORDER BY cm.created_at ASC");
+                                $stmt_cm->execute([':pid' => $p['post_id']]);
+                                $comments = $stmt_cm->fetchAll();
+                                ?>
+                                <?php if (empty($comments)): ?>
+                                    <div style="color:#888;">コメントはまだありません。</div>
+                                <?php else: ?>
+                                    <?php foreach ($comments as $cm): ?>
+                                        <div style="border-bottom:1px dashed #e2e8f0; padding:4px 0; margin-bottom:4px;">
+                                            <strong><?= htmlspecialchars($cm['staff_name'] ?? 'スタッフ') ?></strong>
+                                            <span style="font-size:0.72rem; color:#888;"><?= date('n/j H:i', strtotime($cm['created_at'])) ?></span>:
+                                            <?= htmlspecialchars($cm['comment_text'] ?? '') ?>
+                                        </div>
+                                    <?php endforeach; ?>
+                                <?php endif; ?>
+
+                                <form method="POST" style="margin-top:8px; display:flex; gap:6px;">
+                                    <input type="hidden" name="action_type" value="add_comment">
+                                    <input type="hidden" name="post_id" value="<?= $p['post_id'] ?>">
+                                    <input type="text" name="comment_text" placeholder="コメントを入力..." style="flex:1; padding:4px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.8rem;">
+                                    <button type="submit" style="background:#0284c7; color:#fff; border:none; padding:4px 10px; border-radius:4px; font-weight:bold; cursor:pointer;">送信</button>
+                                </form>
+                            </div>
+
+                            <div id="reads_<?= $p['post_id'] ?>" class="accordion-content">
+                                <div style="display:flex; flex-wrap:wrap; gap:4px;">
+                                    <?php foreach ($p['target_members'] as $tm): 
+                                        $tm_read = in_array($tm['staff_id'], $p['read_staff_ids']);
+                                    ?>
+                                        <span style="font-size:0.72rem; padding:1px 6px; border-radius:3px; background:<?= $tm_read ? '#dcfce7' : '#f1f5f9' ?>; color:<?= $tm_read ? '#15803d' : '#94a3b8' ?>;">
+                                            <?= $tm_read ? '✓' : '未' ?> <?= htmlspecialchars($tm['staff_name']) ?>
+                                        </span>
+                                    <?php endforeach; ?>
+                                </div>
+                            </div>
+                        </div>
+                    <?php endforeach; ?>
                 <?php endif; ?>
             </div>
+
+            <!-- ページネーション -->
+            <?php if ($total_pages > 1): ?>
+                <div class="pagination-container">
+                    <div style="font-size:0.82rem; color:#64748b;">
+                        合計 <?= $total_posts ?> 件中 <?= $offset + 1 ?>〜<?= min($offset + $per_page, $total_posts) ?> 件を表示
+                    </div>
+                    <div class="pagination">
+                        <?php if ($current_page > 1): ?>
+                            <a href="<?= $build_url(null, null, $current_page - 1) ?>" class="page-link">◀ 前へ</a>
+                        <?php endif; ?>
+                        
+                        <?php for ($i = max(1, $current_page - 2); $i <= min($total_pages, $current_page + 2); $i++): ?>
+                            <a href="<?= $build_url(null, null, $i) ?>" class="page-link <?= $i === $current_page ? 'active' : '' ?>">
+                                <?= $i ?>
+                            </a>
+                        <?php endfor; ?>
+
+                        <?php if ($current_page < $total_pages): ?>
+                            <a href="<?= $build_url(null, null, $current_page + 1) ?>" class="page-link">次へ ▶</a>
+                        <?php endif; ?>
+                    </div>
+                </div>
+            <?php endif; ?>
         <?php endif; ?>
     </main>
 
-<!-- 📱 LINE公式アカウント連携モーダル -->
-<div id="lineLinkModal" class="line-modal-overlay" onclick="if(event.target===this) closeLineLinkModal()">
-    <div class="line-modal-card">
-        <div class="line-modal-header">
-            <h3>📱 公式LINE 連携設定</h3>
-            <button type="button" class="line-modal-close" onclick="closeLineLinkModal()">&times;</button>
-        </div>
-        <div class="line-modal-body">
-            <!-- ユーザー表示 -->
-            <div style="display:flex; justify-content:space-between; align-items:center; background:#f1f5f9; padding:8px 12px; border-radius:8px; margin-bottom:14px;">
-                <div style="font-size:0.85rem; font-weight:bold; color:#1e293b;">
-                    👤 <?= htmlspecialchars($login_user['staff_name']) ?> 様 (<?= htmlspecialchars($login_user['role']) ?>)
-                </div>
-                <div id="modalLineBadge" style="font-size:0.75rem; font-weight:bold; padding:2px 8px; border-radius:12px;">
-                    確認中...
-                </div>
+    <!-- 🌟 モーダル群 -->
+
+    <!-- 0. 📝 ダッシュボードメモ（月・日）編集モーダル -->
+    <div class="modal-overlay" id="modal-dashboard-note" onclick="if(event.target===this) closeModal('modal-dashboard-note')">
+        <div class="modal-card" style="max-width:520px;">
+            <div class="modal-header" style="border-bottom: 2px solid #f59e0b;">
+                <h3><span>📝</span> <span id="note-modal-title">メモの編集</span></h3>
+                <button type="button" class="modal-close" onclick="closeModal('modal-dashboard-note')">×</button>
             </div>
-
-            <!-- 状態 A: 未連携の場合（3ステップ連携フロー） -->
-            <div id="modalUnlinkedView">
-                <div class="line-step-box">
-                    <div style="display:flex; align-items:center; margin-bottom:8px;">
-                        <span class="line-step-num">Step 1</span>
-                        <span class="line-step-title">公式LINEを友だち追加</span>
-                    </div>
-                    <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
-                        <div style="text-align:center;">
-                            <img id="lineQrImg" src="https://api.qrserver.com/v1/create-qr-code/?size=110x110&data=https%3A%2F%2Fline.me%2FR%2Fti%2Fp%2F%40tmw3446q" alt="LINE友だち追加QR" style="width:100px; height:100px; border:1px solid #cbd5e1; border-radius:6px; padding:3px; background:#fff;">
-                            <div style="font-size:0.65rem; color:#64748b; margin-top:2px;">QRコードをスキャン</div>
-                        </div>
-                        <div style="flex:1; min-width:180px;">
-                            <div style="font-size:0.8rem; color:#334155; margin-bottom:6px;">
-                                スマホのLINEカメラでQRを読み取るか、以下から友だち追加してください。
-                            </div>
-                            <a id="btnLineAddFriend" href="https://line.me/R/ti/p/@tmw3446q" target="_blank" style="display:inline-flex; align-items:center; gap:6px; background:#06c755; color:#fff; padding:6px 12px; border-radius:6px; font-size:0.78rem; font-weight:bold; text-decoration:none;">
-                                💬 LINEで友だち追加を開く
-                            </a>
-                            <div style="font-size:0.7rem; color:#64748b; margin-top:4px;">
-                                ID検索: <span id="modalBotId" style="font-weight:bold; color:#0f172a;">@tmw3446q</span>
-                            </div>
-                        </div>
-                    </div>
+            <div class="modal-body" style="display:flex; flex-direction:column; gap:12px;">
+                <input type="hidden" id="note-modal-type" value="">
+                <input type="hidden" id="note-modal-key" value="">
+                
+                <div style="font-size:0.86rem; color:#64748b;" id="note-modal-desc">
+                    対象: <b id="note-modal-target-label" style="color:#0f172a;"></b>
                 </div>
 
-                <div class="line-step-box">
-                    <div style="display:flex; align-items:center; margin-bottom:6px;">
-                        <span class="line-step-num">Step 2</span>
-                        <span class="line-step-title">トーク画面でこのコードを送信</span>
-                    </div>
-                    <div style="font-size:0.78rem; color:#475569;">
-                        公式アカウントのトーク画面に、下記の【数字4桁】をそのまま送信してください：
-                    </div>
-                    <div class="link-code-digit" id="lineLinkCode">
-                        ----
-                    </div>
-                    <div style="display:flex; justify-content:space-between; align-items:center;">
-                        <button type="button" class="btn-copy-code" onclick="copyLinkCode()">📋 コードをコピー</button>
-                        <div style="font-size:0.74rem; color:#64748b;">
-                            有効期限: <span id="lineCodeCountdown" style="font-weight:bold; color:#d97706;">--:--</span>
-                            <button type="button" onclick="generateNewLinkCode()" style="background:none; border:none; color:#0284c7; cursor:pointer; font-size:0.72rem; text-decoration:underline; margin-left:4px;">再発行</button>
-                        </div>
-                    </div>
+                <div>
+                    <textarea id="note-modal-content" rows="4" style="width:100%; border:1px solid #cbd5e1; border-radius:8px; padding:10px; font-size:0.92rem; line-height:1.5; box-sizing:border-box; resize:vertical; font-family:inherit;" placeholder="メモ内容を入力してください"></textarea>
                 </div>
-
-                <div class="line-waiting-box">
-                    <div class="line-spinner"></div>
-                    <div>
-                        <strong>Step 3: トークからの送信を待機しています...</strong>
-                        <div style="font-size:0.72rem; color:#065f46; margin-top:2px;">コードが送信されると、約2〜3秒で自動的に連携完了へ切り替わります。</div>
-                    </div>
+                <div style="font-size:0.75rem; color:#94a3b8;">
+                    💡 空欄にして「保存」または「削除」を押すとメモが消去されます。一般スタッフを含め全員に共有されます。
                 </div>
-            </div>
-
-            <!-- 状態 B: 連携済みの場合（完了画面） -->
-            <div id="modalLinkedView" style="display:none; text-align:center; padding:10px 0;">
-                <div style="font-size:3rem; margin-bottom:8px;">🎉</div>
-                <h4 style="margin:0 0 6px 0; color:#065f46; font-size:1.15rem;">LINE連携が完了しています</h4>
-                <p style="font-size:0.82rem; color:#475569; margin:0 0 16px 0;">
-                    有事のBCP安否確認や緊急アナウンスがあなたのLINEへ届きます。<br>
-                    登録ID: <span id="modalMaskedId" style="font-family:monospace; background:#e2e8f0; padding:2px 6px; border-radius:4px; font-weight:bold;"></span>
-                </p>
-                <div style="display:flex; gap:10px; justify-content:center;">
-                    <button type="button" onclick="closeLineLinkModal()" style="background:#06c755; color:#fff; border:none; padding:8px 20px; border-radius:6px; font-weight:bold; cursor:pointer;">
-                        閉じる
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px;">
+                    <button type="button" onclick="clearDashboardNote()" style="background:#fee2e2; color:#b91c1c; border:1px solid #fecaca; padding:6px 12px; border-radius:6px; font-size:0.82rem; font-weight:bold; cursor:pointer;">
+                        🗑️ 削除
                     </button>
-                    <button type="button" onclick="unlinkMyLine()" style="background:#fff; color:#dc2626; border:1px solid #fca5a5; padding:8px 14px; border-radius:6px; font-size:0.78rem; font-weight:bold; cursor:pointer;">
-                        連携を解除
-                    </button>
-                </div>
-            </div>
-
-            <!-- アコーディオン：テスト・手動入力用（Webhook未開通環境でも確実にテスト可能） -->
-            <div style="margin-top:14px; border-top:1px dashed #cbd5e1; padding-top:10px;">
-                <details style="font-size:0.76rem; color:#64748b;">
-                    <summary style="cursor:pointer; font-weight:bold; color:#475569;">🛠️ 手動登録 / 開発テスト用連携メニュー</summary>
-                    <div style="background:#f8fafc; padding:10px; border-radius:6px; margin-top:6px; border:1px solid #e2e8f0;">
-                        <p style="margin:0 0 6px 0;">直接LINE User ID（U...）を入力して登録するか、テスト用の模擬IDで即座に連携をテストできます：</p>
-                        <div style="display:flex; gap:6px; margin-bottom:6px;">
-                            <input type="text" id="manualLineUserId" placeholder="例: U1234567890abcdef..." style="flex:1; padding:4px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.75rem; font-family:monospace;">
-                            <button type="button" onclick="manualSaveLineId()" style="background:#0284c7; color:#fff; border:none; padding:4px 10px; border-radius:4px; font-weight:bold; cursor:pointer;">保存</button>
-                        </div>
-                        <button type="button" onclick="simulateTestLink()" style="background:#e2e8f0; color:#1e293b; border:1px solid #cbd5e1; padding:3px 8px; border-radius:4px; font-size:0.72rem; cursor:pointer;">
-                            ⚡ 模擬LINE IDで即時テスト連携
+                    <div style="display:flex; gap:8px;">
+                        <button type="button" onclick="closeModal('modal-dashboard-note')" style="background:#fff; border:1px solid #cbd5e1; padding:6px 14px; border-radius:6px; font-size:0.84rem; cursor:pointer; color:#475569;">
+                            キャンセル
+                        </button>
+                        <button type="button" id="btn-save-note" onclick="saveDashboardNote()" style="background:#f59e0b; color:#fff; border:none; padding:6px 16px; border-radius:6px; font-size:0.84rem; font-weight:bold; cursor:pointer;">
+                            💾 保存する
                         </button>
                     </div>
-                </details>
+                </div>
             </div>
         </div>
     </div>
-</div>
 
-<script>
-function checkLineIdStatus(e, hasLine) {
-    if (e.target.checked && !hasLine) {
-        if (confirm("LINE IDがまだ登録されていません。\n今すぐLINE連携を設定しますか？")) {
-            openLineLinkModal();
+    <!-- 1. 医師予定詳細モーダル -->
+    <div class="modal-overlay" id="modal-doctor-detail" onclick="if(event.target===this) closeModal('modal-doctor-detail')">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h3><span id="doc-detail-icon">🩺</span> <span id="doc-detail-title">医師予定詳細</span></h3>
+                <button type="button" class="modal-close" onclick="closeModal('modal-doctor-detail')">×</button>
+            </div>
+            <div class="modal-body">
+                <div style="display:flex; gap:6px; align-items:center; margin-bottom:12px;">
+                    <span id="doc-detail-badge" class="badge" style="background:#0284c7; color:#fff;">診察</span>
+                    <span id="doc-detail-dept-badge" class="badge" style="background:#475569; color:#fff;">診療科</span>
+                    <strong id="doc-detail-doctor-name" style="font-size:1.05rem; color:#0f172a;"></strong>
+                </div>
+                <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:10px; margin-bottom:12px;">
+                    <div style="font-size:0.78rem; color:#64748b;">日時</div>
+                    <div id="doc-detail-time" style="font-size:0.95rem; font-weight:800; color:#0f172a;"></div>
+                </div>
+                <div style="margin-bottom:12px;">
+                    <div style="font-size:0.78rem; color:#64748b;">予定内容</div>
+                    <div id="doc-detail-event-title" style="font-size:1rem; font-weight:700; color:#0f172a; margin-top:2px;"></div>
+                </div>
+                <div id="doc-detail-note-box" style="display:none; background:#fffbeb; border:1px solid #fef3c7; border-radius:6px; padding:10px; margin-bottom:12px;">
+                    <div style="font-size:0.78rem; color:#b45309; font-weight:bold;">備考・申し送り</div>
+                    <div id="doc-detail-note" style="font-size:0.88rem; color:#78350f; margin-top:4px; white-space:pre-wrap;"></div>
+                </div>
+                <div style="text-align:right;">
+                    <a id="doc-detail-link" href="../yotei/calendar.php" target="_blank" style="font-size:0.82rem; color:#0284c7; text-decoration:none; font-weight:bold;">
+                        📅 医師予定表システムを開く →
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 2. Googleカレンダー予定詳細モーダル -->
+    <div class="modal-overlay" id="modal-gcal-detail" onclick="if(event.target===this) closeModal('modal-gcal-detail')">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h3><span>🗓️</span> <span id="gcal-detail-title">予定詳細</span></h3>
+                <button type="button" class="modal-close" onclick="closeModal('modal-gcal-detail')">×</button>
+            </div>
+            <div class="modal-body">
+                <div style="display:flex; gap:6px; align-items:center; margin-bottom:12px;">
+                    <span id="gcal-detail-cal-badge" class="badge" style="background:#1a73e8; color:#fff;">Google</span>
+                    <span id="gcal-detail-acct" style="font-size:0.78rem; color:#64748b;"></span>
+                </div>
+                <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:10px; margin-bottom:12px;">
+                    <div style="font-size:0.78rem; color:#64748b;">日時</div>
+                    <div id="gcal-detail-time" style="font-size:0.95rem; font-weight:800; color:#0f172a;"></div>
+                </div>
+                <div id="gcal-detail-loc-box" style="display:none; margin-bottom:12px;">
+                    <div style="font-size:0.78rem; color:#64748b;">場所</div>
+                    <div id="gcal-detail-location" style="font-size:0.9rem; font-weight:600; color:#0f172a;"></div>
+                </div>
+                <div id="gcal-detail-desc-box" style="display:none; margin-bottom:12px;">
+                    <div style="font-size:0.78rem; color:#64748b;">説明</div>
+                    <div id="gcal-detail-desc" style="font-size:0.86rem; color:#334155; white-space:pre-wrap; background:#f8fafc; padding:8px; border-radius:6px; border:1px solid #e2e8f0;"></div>
+                </div>
+                <div style="text-align:right;">
+                    <a id="gcal-detail-link" href="#" target="_blank" style="font-size:0.82rem; color:#1a73e8; text-decoration:none; font-weight:bold;">
+                        🔗 Googleカレンダーで開く →
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 3. 📱 LINE連携モーダル -->
+    <div class="modal-overlay" id="lineLinkModal" onclick="if(event.target===this) closeLineLinkModal()">
+        <div class="modal-card line-modal-card">
+            <div class="modal-header" style="background:#06c755; color:#fff;">
+                <h3 style="color:#fff;">📱 LINE公式アカウント連携</h3>
+                <button type="button" class="modal-close" style="color:#fff;" onclick="closeLineLinkModal()">×</button>
+            </div>
+            <div class="modal-body">
+                <div style="text-align:center; margin-bottom:14px;">
+                    <div id="modalLineBadge" style="display:inline-block; font-size:0.8rem; font-weight:800; padding:3px 10px; border-radius:12px;">
+                        確認中...
+                    </div>
+                </div>
+
+                <div id="modalUnlinkedView">
+                    <p style="font-size:0.86rem; color:#334155; margin-bottom:10px;">
+                        院内かわら版公式LINEと友だち追加し、下の連携コードを送信してください。
+                    </p>
+                    <div class="link-code-digit" id="lineLinkCode">----</div>
+                    <div style="text-align:center; margin-bottom:12px;">
+                        <button type="button" onclick="copyLinkCode()" style="background:#fff; border:1px solid #cbd5e1; padding:4px 12px; border-radius:4px; font-size:0.8rem; font-weight:bold; cursor:pointer;">
+                            📋 コードをコピー
+                        </button>
+                    </div>
+                    <div style="text-align:center;">
+                        <a id="btnLineAddFriend" href="#" target="_blank" style="background:#06c755; color:#fff; text-decoration:none; padding:8px 16px; border-radius:6px; font-weight:bold; font-size:0.88rem; display:inline-block;">
+                            👉 LINEで友だち追加する
+                        </a>
+                    </div>
+                </div>
+
+                <div id="modalLinkedView" style="display:none; text-align:center; padding:10px 0;">
+                    <div style="font-size:2.5rem; margin-bottom:6px;">✅</div>
+                    <h4 style="color:#15803d; margin-bottom:6px;">LINE連携完了済み</h4>
+                    <p style="font-size:0.84rem; color:#64748b; margin-bottom:14px;">
+                        緊急連絡やBCP安否確認があなたのLINEへ届きます。<br>
+                        登録ID: <span id="modalMaskedId" style="font-family:monospace; background:#e2e8f0; padding:2px 6px; border-radius:4px;"></span>
+                    </p>
+                    <button type="button" onclick="unlinkMyLine()" style="background:#fff; color:#dc2626; border:1px solid #fca5a5; padding:6px 12px; border-radius:6px; font-size:0.78rem; font-weight:bold; cursor:pointer;">
+                        連携を解除する
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==========================================
+         JavaScript スクリプト
+         ========================================== -->
+    <script>
+        // ☰ その他ドロップダウン開閉
+        function toggleHeaderDropdown(e) {
+            e.stopPropagation();
+            const menu = document.getElementById('dropdownMenu');
+            if (menu) {
+                menu.classList.toggle('active');
+            }
         }
-        e.target.checked = false;
-    }
-}
+        document.addEventListener('click', function(e) {
+            const menu = document.getElementById('dropdownMenu');
+            if (menu && !menu.contains(e.target)) {
+                menu.classList.remove('active');
+            }
+        });
 
-let isCompact = (localStorage.getItem('kawara_is_compact') === '1');
+        // 🩺 医師申し送りメモ アコーディオン開閉
+        function toggleDoctorMemo() {
+            const banner = document.getElementById('doctorMemoBanner');
+            const arrow = document.getElementById('doctorMemoArrow');
+            if (banner) {
+                banner.classList.toggle('is-open');
+                if (arrow) {
+                    arrow.textContent = banner.classList.contains('is-open') ? '▲ 閉じる' : '▼ 開く';
+                }
+            }
+        }
 
-function applyCompactMode() {
-    const btn = document.getElementById('compactToggleBtn');
-    if (isCompact) {
-        document.body.classList.add('mode-compact');
-        btn.classList.add('is-active');
-        btn.innerHTML = '🖼️ 通常表示に戻す';
-    } else {
-        document.body.classList.remove('mode-compact');
-        btn.classList.remove('is-active');
-        btn.innerHTML = '📄 1行コンパクト表示';
-    }
-}
+        // コメント・既読 アコーディオン開閉
+        function toggleAccordion(targetId, btn) {
+            const target = document.getElementById(targetId);
+            const isVisible = (target.style.display === 'block');
 
-function toggleCompactMode() {
-    isCompact = !isCompact;
-    localStorage.setItem('kawara_is_compact', isCompact ? '1' : '0');
-    applyCompactMode();
-}
+            const card = btn.closest('.post-card');
+            card.querySelectorAll('.accordion-content').forEach(el => el.style.display = 'none');
+            card.querySelectorAll('.toggle-btn').forEach(el => el.classList.remove('active'));
 
-document.addEventListener('DOMContentLoaded', applyCompactMode);
+            if (!isVisible) {
+                target.style.display = 'block';
+                btn.classList.add('active');
+            }
+        }
 
-function toggleAccordion(targetId, btn) {
-    const target = document.getElementById(targetId);
-    const isVisible = (target.style.display === 'block');
+        // モーダル共通制御
+        function openModal(id) {
+            const m = document.getElementById(id);
+            if (m) m.classList.add('active');
+        }
+        function closeModal(id) {
+            const m = document.getElementById(id);
+            if (m) m.classList.remove('active');
+        }
 
-    const card = btn.closest('.post-card');
-    card.querySelectorAll('.accordion-content').forEach(el => el.style.display = 'none');
-    card.querySelectorAll('.toggle-btn').forEach(el => el.classList.remove('active'));
+        // 📝 ダッシュボードメモ（月・日）の入力・編集
+        function openNoteModal(typeOrEl, key, currentContent, label, ev) {
+            if (ev && typeof ev.preventDefault === 'function') {
+                ev.preventDefault();
+                ev.stopPropagation();
+            }
+            if (window.event) {
+                if (typeof window.event.preventDefault === 'function') window.event.preventDefault();
+                if (typeof window.event.stopPropagation === 'function') window.event.stopPropagation();
+            }
 
-    if (!isVisible) {
-        target.style.display = 'block';
-        btn.classList.add('active');
-    }
-}
+            let type = 'date';
+            let targetKey = '';
+            let content = '';
+            let targetText = '';
 
-// ==========================================
-// 📱 LINE連携モーダル制御 & 自動ポーリングJS
-// ==========================================
-let linePollingTimer = null;
-let lineCountdownTimer = null;
-let lineRemainingSeconds = 0;
-
-async function openLineLinkModal() {
-    document.getElementById('lineLinkModal').classList.add('active');
-    await refreshLineStatus();
-}
-
-function closeLineLinkModal() {
-    document.getElementById('lineLinkModal').classList.remove('active');
-    stopLinePolling();
-    stopLineCountdown();
-}
-
-async function refreshLineStatus() {
-    try {
-        const res = await fetch('api/line_link_status.php?action=status', { cache: 'no-store' });
-        if (!res.ok) return;
-        const data = await res.json();
-        if (!data.success) return;
-
-        updateModalUI(data);
-
-        if (!data.is_linked) {
-            if (!data.active_code || data.remaining_sec <= 30) {
-                await generateNewLinkCode();
+            if (typeOrEl && typeof typeOrEl === 'object' && (typeOrEl.dataset || typeOrEl.getAttribute)) {
+                type = typeOrEl.dataset?.noteType || typeOrEl.getAttribute('data-note-type') || 'date';
+                targetKey = typeOrEl.dataset?.noteKey || typeOrEl.getAttribute('data-note-key') || '';
+                content = typeOrEl.dataset?.noteContent || typeOrEl.getAttribute('data-note-content') || '';
+                targetText = typeOrEl.dataset?.noteLabel || typeOrEl.getAttribute('data-note-label') || targetKey;
             } else {
-                displayLinkCode(data.active_code, data.remaining_sec);
-                startLinePolling();
+                type = typeOrEl || 'date';
+                targetKey = key || '';
+                content = currentContent || '';
+                targetText = label || targetKey;
             }
-        } else {
-            stopLinePolling();
-            stopLineCountdown();
-        }
-    } catch (e) {
-        console.error(e);
-    }
-}
 
-function updateModalUI(data) {
-    const badge = document.getElementById('modalLineBadge');
-    const unlinkedView = document.getElementById('modalUnlinkedView');
-    const linkedView = document.getElementById('modalLinkedView');
-    const maskedIdEl = document.getElementById('modalMaskedId');
-    const botIdEl = document.getElementById('modalBotId');
-    const btnFriend = document.getElementById('btnLineAddFriend');
-    const qrImg = document.getElementById('lineQrImg');
-    const headerBtn = document.getElementById('headerLineBtn');
-    const topBanner = document.getElementById('lineNoticeBanner');
+            const typeInput = document.getElementById('note-modal-type');
+            const keyInput = document.getElementById('note-modal-key');
+            const contentArea = document.getElementById('note-modal-content');
+            const titleEl = document.getElementById('note-modal-title');
+            const targetLabel = document.getElementById('note-modal-target-label');
 
-    if (data.bot_basic_id) {
-        botIdEl.textContent = data.bot_basic_id;
-        btnFriend.href = data.bot_add_url;
-        qrImg.src = 'https://api.qrserver.com/v1/create-qr-code/?size=110x110&data=' + encodeURIComponent(data.bot_add_url);
-    }
+            if (!typeInput || !keyInput || !contentArea) return;
 
-    if (data.is_linked) {
-        badge.textContent = '🟢 連携中';
-        badge.style.background = '#dcfce7';
-        badge.style.color = '#15803d';
-        unlinkedView.style.display = 'none';
-        linkedView.style.display = 'block';
-        maskedIdEl.textContent = data.line_user_id_mask;
-        if (headerBtn) {
-            headerBtn.className = 'btn-line-header is-linked';
-            headerBtn.textContent = '🟢 LINE連携済';
-        }
-        if (topBanner) topBanner.style.display = 'none';
-    } else {
-        badge.textContent = '⚠️ 未連携';
-        badge.style.background = '#fef3c7';
-        badge.style.color = '#b45309';
-        unlinkedView.style.display = 'block';
-        linkedView.style.display = 'none';
-        if (headerBtn) {
-            headerBtn.className = 'btn-line-header is-unlinked';
-            headerBtn.textContent = '📱 LINE未登録';
-        }
-    }
-}
+            typeInput.value = type;
+            keyInput.value = targetKey;
+            contentArea.value = content || '';
 
-async function generateNewLinkCode() {
-    try {
-        const res = await fetch('api/line_link_status.php?action=generate_code', { method: 'POST', cache: 'no-store' });
-        const data = await res.json();
-        if (data.success) {
-            displayLinkCode(data.link_code, data.remaining_sec);
-            startLinePolling();
-        }
-    } catch (e) {
-        console.error(e);
-    }
-}
-
-function displayLinkCode(code, sec) {
-    document.getElementById('lineLinkCode').textContent = code;
-    lineRemainingSeconds = sec;
-    startLineCountdown();
-}
-
-function startLineCountdown() {
-    stopLineCountdown();
-    updateCountdownText();
-    lineCountdownTimer = setInterval(() => {
-        lineRemainingSeconds--;
-        if (lineRemainingSeconds <= 0) {
-            stopLineCountdown();
-            generateNewLinkCode();
-        } else {
-            updateCountdownText();
-        }
-    }, 1000);
-}
-
-function updateCountdownText() {
-    const m = Math.floor(lineRemainingSeconds / 60);
-    const s = lineRemainingSeconds % 60;
-    const txt = `${m}:${s < 10 ? '0' : ''}${s}`;
-    const el = document.getElementById('lineCodeCountdown');
-    if (el) el.textContent = txt;
-}
-
-function stopLineCountdown() {
-    if (lineCountdownTimer) clearInterval(lineCountdownTimer);
-    lineCountdownTimer = null;
-}
-
-function startLinePolling() {
-    stopLinePolling();
-    linePollingTimer = setInterval(async () => {
-        try {
-            const res = await fetch('api/line_link_status.php?action=status', { cache: 'no-store' });
-            if (!res.ok) return;
-            const data = await res.json();
-            if (data.success && data.is_linked) {
-                stopLinePolling();
-                stopLineCountdown();
-                updateModalUI(data);
+            if (type === 'month') {
+                if (titleEl) titleEl.textContent = '📌 今月の重点目標・重要メモ';
+                if (targetLabel) targetLabel.textContent = targetText ? `${targetText} の重点メモ` : targetKey;
+                contentArea.placeholder = '例：10月内視鏡システム最終レビュー、ISO更新審査、新電子カルテ導入説明会';
+            } else {
+                if (titleEl) titleEl.textContent = '📝 日付メモの編集';
+                if (targetLabel) targetLabel.textContent = targetText ? `${targetText} のメモ` : targetKey;
+                contentArea.placeholder = '例：午前中に消防署立ち入り検査、薬品棚卸し、医師ミーティングなど';
             }
-        } catch (e) {}
-    }, 3000);
-}
 
-function stopLinePolling() {
-    if (linePollingTimer) clearInterval(linePollingTimer);
-    linePollingTimer = null;
-}
-
-function copyLinkCode() {
-    const code = document.getElementById('lineLinkCode').textContent.trim();
-    if (!code || code === '----') return;
-    navigator.clipboard.writeText(code).then(() => {
-        alert('連携コード【' + code + '】をコピーしました！LINEのトーク画面に貼り付けて送信してください。');
-    }).catch(() => {
-        alert('コード：' + code);
-    });
-}
-
-async function unlinkMyLine() {
-    if (!confirm('LINE連携を解除しますか？\n（解除すると緊急安否確認やお知らせが届かなくなります）')) return;
-    try {
-        const res = await fetch('api/line_link_status.php?action=unlink', { method: 'POST' });
-        const data = await res.json();
-        if (data.success) {
-            alert('LINE連携を解除しました。');
-            refreshLineStatus();
+            openModal('modal-dashboard-note');
+            setTimeout(() => {
+                contentArea.focus();
+            }, 150);
         }
-    } catch (e) {
-        alert('解除に失敗しました。');
-    }
-}
 
-async function manualSaveLineId() {
-    const val = document.getElementById('manualLineUserId').value.trim();
-    if (!val) {
-        alert('LINE IDを入力してください。');
-        return;
-    }
-    const fd = new FormData();
-    fd.append('action', 'manual_link');
-    fd.append('line_user_id', val);
-    const res = await fetch('api/line_link_status.php', { method: 'POST', body: fd });
-    const data = await res.json();
-    if (data.success) {
-        alert('LINE IDを登録しました！');
-        refreshLineStatus();
-    }
-}
+        function clearDashboardNote() {
+            if (!confirm('このメモを削除しますか？')) return;
+            document.getElementById('note-modal-content').value = '';
+            saveDashboardNote();
+        }
 
-async function simulateTestLink() {
-    const fd = new FormData();
-    fd.append('action', 'manual_link');
-    const res = await fetch('api/line_link_status.php', { method: 'POST', body: fd });
-    const data = await res.json();
-    if (data.success) {
-        alert('テスト用LINE IDで連携しました！');
-        refreshLineStatus();
-    }
-}
-function handleHeaderMenu(sel) {
-    if (!sel || !sel.value) return;
-    if (sel.value === 'help.php' || sel.value.startsWith('http')) {
-        window.open(sel.value, '_blank');
-    } else {
-        window.location.href = sel.value;
-    }
-    sel.value = '';
-}
-</script>
+        function saveDashboardNote() {
+            const type = document.getElementById('note-modal-type').value;
+            const key = document.getElementById('note-modal-key').value;
+            const content = document.getElementById('note-modal-content').value.trim();
+            const btn = document.getElementById('btn-save-note');
+            
+            if (btn) btn.disabled = true;
+            
+            const formData = new FormData();
+            formData.append('action', 'save_dashboard_note');
+            formData.append('target_type', type);
+            formData.append('target_key', key);
+            formData.append('content', content);
+            
+            fetch('kawara_list.php', {
+                method: 'POST',
+                body: formData
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    closeModal('modal-dashboard-note');
+                    location.reload();
+                } else {
+                    if (btn) btn.disabled = false;
+                    alert('⚠️ メモ保存エラー: ' + (data.error || '不明なエラー'));
+                }
+            })
+            .catch(err => {
+                if (btn) btn.disabled = false;
+                alert('⚠️ 通信エラー: ' + err.message);
+            });
+        }
 
+        // 🩺 医師予定詳細モーダル
+        function openDoctorDetailModal(ev) {
+            if (!ev) return;
+            const doc = ev.doctor || {};
+            const isAbsence = (ev.event_type === 'absence');
+
+            document.getElementById('doc-detail-icon').textContent = ev.event_icon || (isAbsence ? '🔴' : '🩺');
+            document.getElementById('doc-detail-title').textContent = (doc.name || '医師') + ' の予定詳細';
+
+            const badge = document.getElementById('doc-detail-badge');
+            badge.textContent = ev.event_type_label || (isAbsence ? '休診・不在' : '診察予定');
+            badge.style.backgroundColor = isAbsence ? '#dc2626' : '#0284c7';
+
+            const deptBadge = document.getElementById('doc-detail-dept-badge');
+            deptBadge.textContent = doc.department_name || '診療科';
+            deptBadge.style.backgroundColor = doc.department_color || '#475569';
+
+            document.getElementById('doc-detail-doctor-name').textContent = (doc.name || '') + (doc.title ? ' ' + doc.title : '');
+
+            let timeStr = '';
+            const dateStr = (ev.date || ev.start_date || '').replace(/-/g, '/');
+            if (ev.is_all_day) {
+                timeStr = `${dateStr} 終日`;
+            } else {
+                const sTime = ev.start_time || '';
+                const eTime = ev.end_time || '';
+                timeStr = `${dateStr} ${sTime}${eTime ? ' 〜 ' + eTime : ''}`;
+            }
+            document.getElementById('doc-detail-time').textContent = timeStr;
+            document.getElementById('doc-detail-event-title').textContent = ev.title || '(無題)';
+
+            const noteBox = document.getElementById('doc-detail-note-box');
+            const noteEl = document.getElementById('doc-detail-note');
+            if (ev.note && ev.note.trim() !== '') {
+                noteEl.textContent = ev.note;
+                noteBox.style.display = 'block';
+            } else {
+                noteBox.style.display = 'none';
+            }
+
+            const linkBtn = document.getElementById('doc-detail-link');
+            const yStr = (ev.date || ev.start_date || '').substring(0, 4);
+            const mStr = parseInt((ev.date || ev.start_date || '').substring(5, 7), 10) || '';
+            linkBtn.href = `../yotei/calendar.php?year=${yStr}&month=${mStr}`;
+
+            openModal('modal-doctor-detail');
+        }
+
+        // 🗓️ Googleカレンダー予定詳細モーダル
+        function openGcalDetailModal(ev) {
+            if (!ev) return;
+            document.getElementById('gcal-detail-title').textContent = ev.title || '(無題の予定)';
+            
+            const badge = document.getElementById('gcal-detail-cal-badge');
+            badge.textContent = ev.calendar_name || 'Googleカレンダー';
+            badge.style.backgroundColor = ev.color_theme || '#1a73e8';
+
+            const acct = document.getElementById('gcal-detail-acct');
+            acct.textContent = ev.account_name ? `(${ev.account_name})` : '';
+
+            let timeStr = '';
+            const sDate = ev.start_datetime ? ev.start_datetime.substring(0, 10).replace(/-/g, '/') : '';
+            const eDate = ev.end_datetime ? ev.end_datetime.substring(0, 10).replace(/-/g, '/') : '';
+            const isAllDay = (ev.is_all_day == 1 || ev.is_all_day === true || ev.is_all_day === 'true');
+
+            if (isAllDay) {
+                timeStr = (sDate === eDate || !eDate) ? `${sDate} 終日` : `${sDate} 〜 ${eDate} 終日`;
+            } else {
+                const sTime = ev.start_datetime ? ev.start_datetime.substring(11, 16) : '';
+                const eTime = ev.end_datetime ? ev.end_datetime.substring(11, 16) : '';
+                timeStr = (sDate === eDate) ? `${sDate} ${sTime} 〜 ${eTime}` : `${sDate} ${sTime} 〜 ${eDate} ${eTime}`;
+            }
+            document.getElementById('gcal-detail-time').textContent = timeStr;
+
+            const locBox = document.getElementById('gcal-detail-loc-box');
+            const locEl = document.getElementById('gcal-detail-location');
+            if (ev.location && ev.location.trim() !== '') {
+                locEl.textContent = ev.location;
+                locBox.style.display = 'block';
+            } else {
+                locBox.style.display = 'none';
+            }
+
+            const descBox = document.getElementById('gcal-detail-desc-box');
+            const descEl = document.getElementById('gcal-detail-desc');
+            if (ev.description && ev.description.trim() !== '') {
+                descEl.textContent = ev.description;
+                descBox.style.display = 'block';
+            } else {
+                descBox.style.display = 'none';
+            }
+
+            const linkBtn = document.getElementById('gcal-detail-link');
+            if (ev.html_link) {
+                linkBtn.href = ev.html_link;
+                linkBtn.style.display = 'inline-flex';
+            } else {
+                linkBtn.style.display = 'none';
+            }
+
+            openModal('modal-gcal-detail');
+        }
+
+        // Googleカレンダー チャンネルトグル
+        function toggleGcalChannel(channelId, isChecked) {
+            const items = document.querySelectorAll(`.gcal-ch-${channelId}`);
+            items.forEach(el => {
+                el.style.display = isChecked ? '' : 'none';
+            });
+        }
+
+        // Googleカレンダー手動同期
+        function syncGoogleCalendar() {
+            const btn = document.getElementById('btnGcalSync');
+            const icon = document.getElementById('gcalSyncIcon');
+            if (btn) btn.disabled = true;
+            if (icon) icon.textContent = '⏳';
+
+            fetch('kawara_list.php?action=sync_gcal')
+                .then(res => res.json())
+                .then(data => {
+                    if (data.success) {
+                        alert(data.message || '同期が完了しました');
+                        location.reload();
+                    } else {
+                        if (btn) btn.disabled = false;
+                        if (icon) icon.textContent = '🔄';
+                        alert('⚠️ 同期エラー: ' + (data.message || ''));
+                    }
+                })
+                .catch(err => {
+                    if (btn) btn.disabled = false;
+                    if (icon) icon.textContent = '🔄';
+                    alert('通信エラーが発生しました: ' + err.message);
+                });
+        }
+
+        // ==========================================
+        // 📱 LINE連携モーダル制御
+        // ==========================================
+        let linePollingTimer = null;
+        async function openLineLinkModal() {
+            openModal('lineLinkModal');
+            await refreshLineStatus();
+        }
+        function closeLineLinkModal() {
+            closeModal('lineLinkModal');
+            if (linePollingTimer) clearInterval(linePollingTimer);
+        }
+        async function refreshLineStatus() {
+            try {
+                const res = await fetch('api/line_link_status.php?action=status', { cache: 'no-store' });
+                if (!res.ok) return;
+                const data = await res.json();
+                if (!data.success) return;
+
+                const badge = document.getElementById('modalLineBadge');
+                const unlinkedView = document.getElementById('modalUnlinkedView');
+                const linkedView = document.getElementById('modalLinkedView');
+                const maskedIdEl = document.getElementById('modalMaskedId');
+                const btnFriend = document.getElementById('btnLineAddFriend');
+
+                if (data.bot_add_url && btnFriend) {
+                    btnFriend.href = data.bot_add_url;
+                }
+
+                if (data.is_linked) {
+                    badge.textContent = '🟢 連携中';
+                    badge.style.background = '#dcfce7';
+                    badge.style.color = '#15803d';
+                    unlinkedView.style.display = 'none';
+                    linkedView.style.display = 'block';
+                    maskedIdEl.textContent = data.line_user_id_mask;
+                    if (linePollingTimer) clearInterval(linePollingTimer);
+                } else {
+                    badge.textContent = '⚠️ 未連携';
+                    badge.style.background = '#fef3c7';
+                    badge.style.color = '#b45309';
+                    unlinkedView.style.display = 'block';
+                    linkedView.style.display = 'none';
+
+                    if (data.active_code) {
+                        document.getElementById('lineLinkCode').textContent = data.active_code;
+                    } else {
+                        const codeRes = await fetch('api/line_link_status.php?action=generate_code', { method: 'POST' });
+                        const codeData = await codeRes.json();
+                        if (codeData.success) {
+                            document.getElementById('lineLinkCode').textContent = codeData.link_code;
+                        }
+                    }
+
+                    if (!linePollingTimer) {
+                        linePollingTimer = setInterval(refreshLineStatus, 4000);
+                    }
+                }
+            } catch (e) {
+                console.error(e);
+            }
+        }
+
+        function copyLinkCode() {
+            const code = document.getElementById('lineLinkCode').textContent.trim();
+            if (!code || code === '----') return;
+            navigator.clipboard.writeText(code).then(() => {
+                alert('連携コード【' + code + '】をコピーしました！LINEのトーク画面に貼り付けて送信してください。');
+            }).catch(() => {
+                alert('コード：' + code);
+            });
+        }
+
+        async function unlinkMyLine() {
+            if (!confirm('LINE連携を解除しますか？')) return;
+            try {
+                const res = await fetch('api/line_link_status.php?action=unlink', { method: 'POST' });
+                const data = await res.json();
+                if (data.success) {
+                    alert('LINE連携を解除しました。');
+                    refreshLineStatus();
+                }
+            } catch (e) {
+                alert('解除に失敗しました。');
+            }
+        }
+
+        function checkLineIdStatus(e, hasLine) {
+            if (e.target.checked && !hasLine) {
+                if (confirm("LINE IDがまだ登録されていません。\n今すぐLINE連携を設定しますか？")) {
+                    openLineLinkModal();
+                }
+                e.target.checked = false;
+            }
+        }
+
+        // 🗜️ 縦表示密度（限界圧縮モード）切り替え
+        function toggleDensityMode() {
+            const isUltra = document.documentElement.classList.toggle('density-ultra');
+            try {
+                localStorage.setItem('kawara_density_mode', isUltra ? 'ultra' : 'normal');
+            } catch (e) {}
+            syncDensityButtonUI(isUltra);
+        }
+
+        function syncDensityButtonUI(isUltra) {
+            if (isUltra === undefined) {
+                isUltra = document.documentElement.classList.contains('density-ultra');
+            }
+            const btns = document.querySelectorAll('.btn-density-toggle');
+            btns.forEach(btn => {
+                const icon = btn.querySelector('.density-icon');
+                const label = btn.querySelector('.density-label');
+                if (isUltra) {
+                    btn.classList.add('is-active');
+                    if (icon) icon.textContent = '📐';
+                    if (label) label.textContent = '標準圧縮に戻す';
+                    btn.setAttribute('title', '標準の圧縮表示に戻します');
+                } else {
+                    btn.classList.remove('is-active');
+                    if (icon) icon.textContent = '🗜️';
+                    if (label) label.textContent = '限界圧縮';
+                    btn.setAttribute('title', '縦方向を極限まで圧縮して1画面に収めるモードに切り替えます');
+                }
+            });
+        }
+        document.addEventListener('DOMContentLoaded', () => {
+            syncDensityButtonUI();
+        });
+    </script>
 </body>
 </html>

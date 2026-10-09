@@ -122,6 +122,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $active_tab = 'staff';
     }
 
+    if ($action === 'toggle_kawara_display') {
+        $ch_id = (int)($_GET['channel_id'] ?? 0);
+        $state = !empty($_GET['state']) ? 'TRUE' : 'FALSE';
+        if ($ch_id > 0) {
+            $stmt_tog = $pdo->prepare("UPDATE google_calendar_channels SET show_in_kawara = {$state}, updated_at = NOW() WHERE channel_id = :id");
+            $stmt_tog->execute([':id' => $ch_id]);
+            $msg = 'かわら版カレンダーの表示設定を更新しました。';
+        }
+        $active_tab = 'gcal';
+    }
+
     if ($action === 'save_gcal_channel') {
         $ch_id        = (int)($_POST['channel_id'] ?? 0);
         $acct_name    = trim($_POST['account_name'] ?? '');
@@ -130,6 +141,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $color_theme  = trim($_POST['color_theme'] ?? '#4285f4');
         $disp_order   = (int)($_POST['display_order'] ?? 10);
         $is_enabled   = isset($_POST['is_enabled']) ? 'TRUE' : 'FALSE';
+        $show_in_kawara = isset($_POST['show_in_kawara']) ? 'TRUE' : 'FALSE';
 
         if ($cal_id !== '' && $cal_name !== '') {
             if ($ch_id > 0) {
@@ -140,6 +152,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                     color_theme = :color,
                     display_order = :ord,
                     is_enabled = {$is_enabled},
+                    show_in_kawara = {$show_in_kawara},
                     updated_at = NOW()
                     WHERE channel_id = :id");
                 $stmt_up_ch->execute([
@@ -153,9 +166,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 $msg = "Googleカレンダー「{$cal_name}」の設定を更新しました。";
             } else {
                 $stmt_in_ch = $pdo->prepare("INSERT INTO google_calendar_channels (
-                    account_name, calendar_id, calendar_name, color_theme, is_enabled, display_order, created_at, updated_at
+                    account_name, calendar_id, calendar_name, color_theme, is_enabled, show_in_kawara, display_order, created_at, updated_at
                 ) VALUES (
-                    :acct, :cal_id, :name, :color, {$is_enabled}, :ord, NOW(), NOW()
+                    :acct, :cal_id, :name, :color, {$is_enabled}, {$show_in_kawara}, :ord, NOW(), NOW()
                 )");
                 $stmt_in_ch->execute([
                     ':acct'  => $acct_name,
@@ -565,10 +578,15 @@ $gcal_event_count = $pdo->query("SELECT COUNT(*) FROM google_calendar_events_cac
                     </div>
                 </div>
 
-                <div style="display:flex; justify-content:space-between; align-items:center;">
-                    <label style="cursor:pointer; font-weight:bold; font-size:0.88rem; color:#1a73e8;">
-                        <input type="checkbox" name="is_enabled" id="f_gcal_is_enabled" value="1" checked> 🟢 カレンダー連携を有効にする
-                    </label>
+                <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+                    <div style="display:flex; flex-direction:column; gap:6px;">
+                        <label style="cursor:pointer; font-weight:bold; font-size:0.88rem; color:#1a73e8;">
+                            <input type="checkbox" name="is_enabled" id="f_gcal_is_enabled" value="1" checked> 🟢 カレンダー連携を有効にする
+                        </label>
+                        <label style="cursor:pointer; font-weight:bold; font-size:0.88rem; color:#0d9488;">
+                            <input type="checkbox" name="show_in_kawara" id="f_gcal_show_in_kawara" value="1" checked> 📜 院内かわら版（2週間カレンダー・全体画面）に表示する
+                        </label>
+                    </div>
                     <div>
                         <button type="submit" class="btn-submit" id="btnGcalSubmit" style="background:#1a73e8;">カレンダーを登録する</button>
                         <button type="button" class="btn-cancel" id="btnGcalReset" onclick="resetGcalForm()" style="display:none;">キャンセル</button>
@@ -587,14 +605,15 @@ $gcal_event_count = $pdo->query("SELECT COUNT(*) FROM google_calendar_events_cac
                     <th>アカウント名</th>
                     <th>表示名 (カラー)</th>
                     <th>カレンダーID</th>
-                    <th style="width:80px; text-align:center;">状態</th>
+                    <th style="width:70px; text-align:center;">連携状態</th>
+                    <th style="width:110px; text-align:center;">かわら版表示</th>
                     <th style="width:230px; text-align:center;">操作</th>
                 </tr>
             </thead>
             <tbody>
                 <?php if (empty($gcal_channels)): ?>
                     <tr>
-                        <td colspan="6" style="text-align:center; color:#888; padding:20px;">
+                        <td colspan="7" style="text-align:center; color:#888; padding:20px;">
                             登録されているGoogleカレンダーはありません。上のフォームから追加してください。
                         </td>
                     </tr>
@@ -613,6 +632,21 @@ $gcal_event_count = $pdo->query("SELECT COUNT(*) FROM google_calendar_events_cac
                                     <span style="color:#0f5132; background:#d1e7dd; padding:2px 8px; border-radius:10px; font-size:0.75rem; font-weight:bold;">有効</span>
                                 <?php else: ?>
                                     <span style="color:#666; background:#e2e8f0; padding:2px 8px; border-radius:10px; font-size:0.75rem; font-weight:bold;">無効</span>
+                                <?php endif; ?>
+                            </td>
+                            <td style="text-align:center;">
+                                <?php if (!empty($ch['show_in_kawara'])): ?>
+                                    <a href="?tab=gcal&action=toggle_kawara_display&channel_id=<?= $ch['channel_id'] ?>&state=0" 
+                                       style="display:inline-block; text-decoration:none; color:#065f46; background:#d1fae5; border:1px solid #a7f3d0; padding:3px 8px; border-radius:12px; font-size:0.76rem; font-weight:bold;"
+                                       title="クリックでかわら版カレンダー非表示に切替">
+                                        🟢 表示中
+                                    </a>
+                                <?php else: ?>
+                                    <a href="?tab=gcal&action=toggle_kawara_display&channel_id=<?= $ch['channel_id'] ?>&state=1" 
+                                       style="display:inline-block; text-decoration:none; color:#64748b; background:#f1f5f9; border:1px solid #cbd5e1; padding:3px 8px; border-radius:12px; font-size:0.76rem; font-weight:bold;"
+                                       title="クリックでかわら版カレンダー表示に切替">
+                                        ⚪ 非表示
+                                    </a>
                                 <?php endif; ?>
                             </td>
                             <td style="text-align:center;">
@@ -689,6 +723,7 @@ function editGcalChannel(ch) {
     document.getElementById('f_gcal_color_theme').value = ch.color_theme || '#1a73e8';
     document.getElementById('f_gcal_display_order').value = ch.display_order || 10;
     document.getElementById('f_gcal_is_enabled').checked = (ch.is_enabled == true || ch.is_enabled == "1");
+    document.getElementById('f_gcal_show_in_kawara').checked = (ch.show_in_kawara == true || ch.show_in_kawara == "1" || ch.show_in_kawara === undefined);
 
     document.getElementById('btnGcalSubmit').textContent = '更新保存する';
     document.getElementById('btnGcalReset').style.display = 'inline-block';
@@ -702,6 +737,8 @@ function resetGcalForm() {
     document.getElementById('f_gcal_channel_id').value = '0';
     document.getElementById('gcalForm').reset();
     document.getElementById('f_gcal_color_theme').value = '#1a73e8';
+    document.getElementById('f_gcal_is_enabled').checked = true;
+    document.getElementById('f_gcal_show_in_kawara').checked = true;
     document.getElementById('btnGcalSubmit').textContent = 'カレンダーを登録する';
     document.getElementById('btnGcalReset').style.display = 'none';
 }

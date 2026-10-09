@@ -1014,7 +1014,10 @@ if ($focus_post_id > 0) {
         .badge-duty-work { background: #e0f2fe; color: #0369a1; }
         .badge-duty-thu  { background: #e0f2fe; color: #0284c7; }
         .badge-duty-sat  { background: #f3e8ff; color: #7e22ce; }
-        .badge-duty-hol  { background: #ffe4e6; color: #be123c; }
+        .badge-duty-hol,
+        .badge-duty-closed { background: #fee2e2; color: #dc2626; border: 1px solid #fecaca; }
+        .badge-duty-pm_closed,
+        .badge-duty-pm-closed { background: #e0f2fe; color: #0369a1; border: 1px solid #bae6fd; }
 
         /* イベントリスト（マス内） */
         .cal-events-list {
@@ -2784,21 +2787,20 @@ if ($today_status['is_pre_off_day']) {
                             </div>
                         <?php endif; ?>
 
-                        <div class="week-day-badges">
-                            <span class="badge-duty badge-duty-<?= $duty['badge_type'] ?>">
-                                <?= htmlspecialchars($duty['badge_label']) ?>
-                            </span>
-                            <?php if ($duty['is_pre_off_day']): ?>
-                                <span class="badge-duty" style="background:#fef3c7; color:#b45309; border:1px solid #fde68a;">
-                                    🔔 不在前日
-                                </span>
-                            <?php endif; ?>
-                            <?php if ($has_absence_warn): ?>
-                                <span class="badge-duty" style="background:#fee2e2; color:#b91c1c; border:1px solid #fecaca;">
-                                    ⚠️ 不在日作業
-                                </span>
-                            <?php endif; ?>
-                        </div>
+                        <?php if (!empty($duty['badge_label']) || $has_absence_warn): ?>
+                            <div class="week-day-badges">
+                                <?php if (!empty($duty['badge_label'])): ?>
+                                    <span class="badge-duty badge-duty-<?= $duty['badge_type'] ?>">
+                                        <?= htmlspecialchars($duty['badge_label']) ?>
+                                    </span>
+                                <?php endif; ?>
+                                <?php if ($has_absence_warn): ?>
+                                    <span class="badge-duty" style="background:#fee2e2; color:#b91c1c; border:1px solid #fecaca;">
+                                        ⚠️ 休診日作業
+                                    </span>
+                                <?php endif; ?>
+                            </div>
+                        <?php endif; ?>
                     </div>
 
                     <!-- イベント一覧リスト -->
@@ -3042,12 +3044,10 @@ if ($today_status['is_pre_off_day']) {
                     // 短縮バッジラベル（幅圧迫を防ぐ）
                     $raw_badge_label = $duty_info['badge_label'];
                     $short_badge_label = $raw_badge_label;
-                    if ($raw_badge_label === '出勤日') {
-                        $short_badge_label = '出勤';
-                    } elseif ($raw_badge_label === '木曜公休' || $raw_badge_label === '土曜公休') {
-                        $short_badge_label = '公休';
-                    } elseif ($raw_badge_label === '日祝休診') {
+                    if ($raw_badge_label === '外来休診') {
                         $short_badge_label = '休診';
+                    } elseif ($raw_badge_label === '午後休診') {
+                        $short_badge_label = '午後休';
                     }
                 ?>
                     <a href="?view=month&year=<?= $year ?>&month=<?= $month ?>&date=<?= $cur_date_str ?>" 
@@ -3067,9 +3067,11 @@ if ($today_status['is_pre_off_day']) {
                                         onclick="event.preventDefault(); event.stopPropagation(); openNoteModal(this, null, null, null, event);">
                                     📝
                                 </button>
-                                <span class="badge-duty badge-duty-<?= $duty_info['badge_type'] ?>" title="<?= htmlspecialchars($raw_badge_label) ?>">
-                                    <?= htmlspecialchars($short_badge_label) ?>
-                                </span>
+                                <?php if (!empty($raw_badge_label)): ?>
+                                    <span class="badge-duty badge-duty-<?= $duty_info['badge_type'] ?>" title="<?= htmlspecialchars($raw_badge_label) ?>">
+                                        <?= htmlspecialchars($short_badge_label) ?>
+                                    </span>
+                                <?php endif; ?>
                             </div>
                         </div>
 
@@ -3186,9 +3188,11 @@ if ($today_status['is_pre_off_day']) {
                 <div class="panel-date-title" style="display:flex; align-items:center; justify-content:space-between; width:100%; flex-wrap:wrap; gap:6px;">
                     <div style="display:flex; align-items:center; gap:8px;">
                         <span>🗓 <?= date('Y/m/d', strtotime($selected_date)) ?> (<?= ['日','月','火','水','木','金','土'][(int)date('w', strtotime($selected_date))] ?>)</span>
-                        <span class="badge-duty badge-duty-<?= $selected_status['badge_type'] ?>" style="font-size:0.8rem; padding:3px 8px;">
-                            <?= htmlspecialchars($selected_status['badge_label']) ?>
-                        </span>
+                        <?php if (!empty($selected_status['badge_label'])): ?>
+                            <span class="badge-duty badge-duty-<?= $selected_status['badge_type'] ?>" style="font-size:0.8rem; padding:3px 8px;">
+                                <?= htmlspecialchars($selected_status['badge_label']) ?>
+                            </span>
+                        <?php endif; ?>
                         <?php if ($selected_status['is_closed'] && count($selected_day_events) > 0): ?>
                             <span style="background:#fee2e2; color:#b91c1c; font-size:0.75rem; font-weight:bold; padding:2px 8px; border-radius:4px;">
                                 ⚠️ 不在日作業

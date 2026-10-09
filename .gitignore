@@ -8,6 +8,7 @@ uploads/temp_print/*
 !uploads/temp_print/.gitkeep
 *.tmp
 *_backup.php
+*_draft.php
 
 # OS / Editor files
 Thumbs.db
