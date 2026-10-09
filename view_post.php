@@ -362,9 +362,9 @@ foreach ($target_members as $tm) {
                         </div>
                         <?php if ($gcal_url !== '#'): ?>
                             <a href="<?= htmlspecialchars($gcal_url) ?>" target="_blank" rel="noopener noreferrer" 
-                               style="display:inline-flex; align-items:center; gap:4px; background:#1a73e8; color:#fff; text-decoration:none; padding:3px 10px; border-radius:4px; font-size:0.78rem; font-weight:bold; box-shadow:0 1px 2px rgba(0,0,0,0.1); white-space:nowrap;"
-                               title="この日程をご自身のGoogleカレンダーに追加">
-                                <span>📅</span> Googleカレンダー登録
+                               style="display:inline-flex; align-items:center; gap:4px; background:#1a73e8; color:#fff; text-decoration:none; padding:4px 12px; border-radius:6px; font-size:0.80rem; font-weight:bold; box-shadow:0 1px 2px rgba(0,0,0,0.12); white-space:nowrap;"
+                               title="この日程をご自身の個人のGoogleカレンダーに追加">
+                                <span>📅</span> 個人のGoogleカレンダーに登録
                             </a>
                         <?php endif; ?>
                     </div>
@@ -393,8 +393,8 @@ foreach ($target_members as $tm) {
                 <?php if ($single_gcal_url !== '#'): ?>
                     <a href="<?= htmlspecialchars($single_gcal_url) ?>" target="_blank" rel="noopener noreferrer" 
                        style="display:inline-flex; align-items:center; gap:5px; background:#1a73e8; color:#fff; text-decoration:none; padding:5px 12px; border-radius:6px; font-size:0.82rem; font-weight:bold; box-shadow:0 1px 3px rgba(0,0,0,0.1); white-space:nowrap;"
-                       title="この予定をご自身のGoogleカレンダーに追加">
-                        <span>📅</span> 自分のGoogleカレンダーに登録
+                       title="この予定をご自身の個人のGoogleカレンダーに追加">
+                        <span>📅</span> 個人のGoogleカレンダーに登録
                     </a>
                 <?php endif; ?>
             </div>

@@ -3780,7 +3780,7 @@ if ($today_status['is_pre_off_day']) {
         <div class="modal-footer" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
             <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
                 <a id="gcal-detail-add-my-cal" href="#" target="_blank" rel="noopener noreferrer" class="tool-btn" style="background:#1a73e8; color:#fff; text-decoration:none; display:inline-flex; align-items:center; gap:6px; font-weight:bold;">
-                    <span>📅</span> 自分のGoogleカレンダーに登録
+                    <span>📅</span> 個人のGoogleカレンダーに登録
                 </a>
                 <a id="gcal-detail-link" href="#" target="_blank" rel="noopener noreferrer" class="tool-btn" style="background:#f1f5f9; color:#475569; border:1px solid #cbd5e1; text-decoration:none; display:inline-flex; align-items:center; gap:6px;">
                     <span>🌐</span> 元の予定を開く
@@ -3826,7 +3826,7 @@ if ($today_status['is_pre_off_day']) {
         <div class="modal-footer" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
             <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
                 <a id="doc-detail-add-my-cal" href="#" target="_blank" rel="noopener noreferrer" class="tool-btn" style="background:#1a73e8; color:#fff; text-decoration:none; display:inline-flex; align-items:center; gap:6px; font-weight:bold;">
-                    <span>📅</span> 自分のGoogleカレンダーに登録
+                    <span>📅</span> 個人のGoogleカレンダーに登録
                 </a>
                 <a id="doc-detail-link" href="../yotei/calendar.php" target="_blank" rel="noopener noreferrer" class="tool-btn" style="background:#b91c1c; color:#fff; text-decoration:none; display:inline-flex; align-items:center; gap:6px;">
                     <span>🩺</span> 医師予定表で確認 ↗

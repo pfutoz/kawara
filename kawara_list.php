@@ -2850,7 +2850,7 @@ foreach ($paged_raw_posts as $p) {
                 <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-top:14px; padding-top:12px; border-top:1px solid #e2e8f0;">
                     <a id="doc-detail-add-my-cal" href="#" target="_blank" rel="noopener noreferrer" 
                        style="display:inline-flex; align-items:center; gap:6px; background:#1a73e8; color:#fff; padding:6px 14px; border-radius:6px; font-size:0.84rem; font-weight:bold; text-decoration:none; box-shadow:0 1px 3px rgba(0,0,0,0.15);">
-                        <span>📅</span> 自分のGoogleカレンダーに登録
+                        <span>📅</span> 個人のGoogleカレンダーに登録
                     </a>
                     <a id="doc-detail-link" href="../yotei/calendar.php" target="_blank" rel="noopener noreferrer" style="font-size:0.82rem; color:#64748b; text-decoration:none; font-weight:600;">
                         医師予定表システムを開く →
@@ -2887,7 +2887,7 @@ foreach ($paged_raw_posts as $p) {
                 <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-top:14px; padding-top:12px; border-top:1px solid #e2e8f0;">
                     <a id="gcal-detail-add-my-cal" href="#" target="_blank" rel="noopener noreferrer" 
                        style="display:inline-flex; align-items:center; gap:6px; background:#1a73e8; color:#fff; padding:6px 14px; border-radius:6px; font-size:0.84rem; font-weight:bold; text-decoration:none; box-shadow:0 1px 3px rgba(0,0,0,0.15);">
-                        <span>📅</span> 自分のGoogleカレンダーに登録
+                        <span>📅</span> 個人のGoogleカレンダーに登録
                     </a>
                     <a id="gcal-detail-link" href="#" target="_blank" rel="noopener noreferrer" style="font-size:0.82rem; color:#64748b; text-decoration:none; font-weight:600;">
                         元の予定を開く →
