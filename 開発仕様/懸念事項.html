@@ -372,17 +372,18 @@
                         <small>Google Calendar API ＆ サービスアカウント秘密鍵</small>
                     </td>
                     <td>
-                        <strong>開発用Googleアカウント</strong><br>
+                        <strong>開発用サービスアカウント</strong><br>
                         <code>kawara-calendar-sync@...</code>
                     </td>
                     <td>
                         <ul>
                             <li>担当者変更時にGoogle Cloud Consoleへログインできず、APIクォータ確認や新秘密鍵の再発行が不能になる。</li>
-                            <li>病院公式アカウントをプロジェクトの「オーナー」に招待して二重化していないと、鍵失効時の復旧が遅延する。</li>
-                            <li>秘密鍵JSONファイルのローカル保管場所やバックアップ体制が属人化するリスク。</li>
+                            <li>各Googleカレンダー側でサービスアカウントに「予定の変更権限（Make changes to events）」を付与していないと、双方向書き込みAPIが <code>403 Forbidden</code> で失敗する。</li>
+                            <li>病院公式アカウントをGCPプロジェクトの「オーナー」に招待して二重化していないと、鍵失効時の復旧が遅延する。</li>
+                            <li>秘密鍵JSONファイル（<code>config/google_service_account.json</code>）のローカル保管場所やバックアップ体制が属人化するリスク。</li>
                         </ul>
                     </td>
-                    <td><span class="badge badge-warn">中〜高（カレンダー同期停止リスク）</span></td>
+                    <td><span class="badge badge-warn">中〜高（カレンダー同期・書き込み停止リスク）</span></td>
                 </tr>
             </tbody>
         </table>
@@ -476,21 +477,63 @@
         </div>
     </div>
 
+    <!-- Solution 3: Google Cloud & Calendar Permissions -->
+    <div class="card">
+        <div class="card-header">
+            <h2 class="card-title"><span>🗓️</span> 4. 対策手順：Google Cloud ＆ 共有カレンダー権限の組織管理</h2>
+            <span class="badge badge-warn">Google 連携・権限管理</span>
+        </div>
+        <p style="margin-bottom: 1rem; font-size: 0.95rem;">
+            Google Calendar API（双方向CRUD書き込み）の安定運用には、<strong>「GCPプロジェクトの組織共有」</strong>および<strong>「各Googleカレンダーでの適切なアクセス権限付与」</strong>の2点が不可欠です。
+        </p>
+
+        <div class="step-list">
+            <div class="step-item" style="border-left-color: #2563eb;">
+                <span class="step-num">Step 1</span>
+                <div class="step-title">Google Cloud プロジェクトの「オーナー」二重化</div>
+                <p style="font-size: 0.92rem; color: var(--text-sub); margin-bottom: 0.5rem;">
+                    1. <a href="https://console.cloud.google.com/" target="_blank" style="color: var(--primary); font-weight: bold;">Google Cloud Console</a> にログイン<br>
+                    2. 「IAM と管理」→「IAM」を開く<br>
+                    3. 「アクセス権を付与」から、病院共有Googleアカウント（または法人管理用アドレス）を追加し、ロールに<strong>「オーナー（Owner）」</strong>を設定
+                </p>
+                <div style="background: #eff6ff; border: 1px solid #bfdbfe; padding: 8px 12px; border-radius: 6px; font-size: 0.85rem; color: #1e40af;">
+                    💡 <strong>効果:</strong> これにより、担当者退職時にもGCPコンソールへログインでき、秘密鍵の再発行やAPIクォータ管理を安全に引き継げます。
+                </div>
+            </div>
+
+            <div class="step-item" style="border-left-color: #2563eb;">
+                <span class="step-num">Step 2</span>
+                <div class="step-title">共有Googleカレンダーでの「予定の変更権限」付与確認</div>
+                <p style="font-size: 0.92rem; color: var(--text-sub);">
+                    かわら版からGoogleカレンダーへ予定を作成・編集・削除するためには、対象カレンダーの「設定と共有」→「特定のユーザーとの共有」にて、サービスアカウント（<code>kawara-calendar-sync@...iam.gserviceaccount.com</code>）の権限が<strong>「予定の変更権限（Make changes to events）」</strong>または「予定の管理権限」に設定されている必要があります。「閲覧のみ」では書き込みAPIが失敗するため注意してください。
+                </p>
+            </div>
+
+            <div class="step-item" style="border-left-color: #2563eb;">
+                <span class="step-num">Step 3</span>
+                <div class="step-title">サービスアカウント秘密鍵のセキュア配置</div>
+                <p style="font-size: 0.92rem; color: var(--text-sub);">
+                    秘密鍵JSONは <code>config/google_service_account.json</code> に配置され、Gitリポジトリからは除外（<code>.gitignore</code>）されています。サーバー移行時や再構築時は、マスタ管理画面（<code>master_mente.php?tab=gcal</code>）から直接アップロード可能です。
+                </p>
+            </div>
+        </div>
+    </div>
+
     <!-- Action Plan / Roadmap -->
     <div class="card">
         <div class="card-header">
-            <h2 class="card-title"><span>📋</span> 4. 移行タイムラインとアクションプラン</h2>
+            <h2 class="card-title"><span>📋</span> 5. 移行タイムラインとアクションプラン</h2>
             <span class="badge badge-warn">ロードマップ</span>
         </div>
 
         <ul class="checklist">
             <li>
                 <strong>【現在・検証フェーズ】</strong><br>
-                動作確認・システム開発を最優先し、現行の山本アカウントにてトンネルおよびWebhookの動作を完全確立する。（※現状）
+                動作確認・システム開発を最優先し、現行の山本アカウントにてトンネルおよびWebhook、Googleカレンダー双方向書き込みの動作を完全確立する。（※現状完了）
             </li>
             <li class="critical">
                 <strong>【本番サーバー移行時（重要）】</strong><br>
-                専用の院内本番サーバーへシステムを移行する際、病院公式の共有Googleアカウント（または法人ドメインメール）を取得し、Cloudflareの管理権限を移行する。
+                専用の院内本番サーバーへシステムを移行する際、病院公式の共有Googleアカウント（または法人ドメインメール）を取得し、CloudflareおよびGCPプロジェクトの管理権限を移行・二重化する。
             </li>
             <li class="critical">
                 <strong>【本番サーバー移行時（重要）】</strong><br>
@@ -506,7 +549,7 @@
     <!-- Emergency Access Sheet -->
     <div class="card">
         <div class="card-header">
-            <h2 class="card-title"><span>🔐</span> 5. 認証情報保管ルール（セキュリティガイドライン）</h2>
+            <h2 class="card-title"><span>🔐</span> 6. 認証情報保管ルール（セキュリティガイドライン）</h2>
             <span class="badge badge-success">セキュリティ規程</span>
         </div>
         <p style="font-size: 0.93rem; color: var(--text-sub); margin-bottom: 1rem;">
@@ -530,6 +573,11 @@
                     <td><strong>Cloudflare 接続トークン</strong></td>
                     <td>トンネルトークン文字列、ログイン用ID（<code>pfuto07@gmail.com</code>）</td>
                     <td>院内金庫（封書）/ システム管理台帳</td>
+                </tr>
+                <tr>
+                    <td><strong>Google サービスアカウント秘密鍵</strong></td>
+                    <td>サービスアカウントID、秘密鍵JSONファイル（<code>config/google_service_account.json</code>）</td>
+                    <td>院内金庫（USB/封書）/ サーバー内セキュア領域</td>
                 </tr>
                 <tr>
                     <td><strong>PostgreSQL 接続情報</strong></td>
