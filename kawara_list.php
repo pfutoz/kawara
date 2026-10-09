@@ -2847,9 +2847,13 @@ foreach ($paged_raw_posts as $p) {
                     <div style="font-size:0.78rem; color:#b45309; font-weight:bold;">備考・申し送り</div>
                     <div id="doc-detail-note" style="font-size:0.88rem; color:#78350f; margin-top:4px; white-space:pre-wrap;"></div>
                 </div>
-                <div style="text-align:right;">
-                    <a id="doc-detail-link" href="../yotei/calendar.php" target="_blank" style="font-size:0.82rem; color:#0284c7; text-decoration:none; font-weight:bold;">
-                        📅 医師予定表システムを開く →
+                <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-top:14px; padding-top:12px; border-top:1px solid #e2e8f0;">
+                    <a id="doc-detail-add-my-cal" href="#" target="_blank" rel="noopener noreferrer" 
+                       style="display:inline-flex; align-items:center; gap:6px; background:#1a73e8; color:#fff; padding:6px 14px; border-radius:6px; font-size:0.84rem; font-weight:bold; text-decoration:none; box-shadow:0 1px 3px rgba(0,0,0,0.15);">
+                        <span>📅</span> 自分のGoogleカレンダーに登録
+                    </a>
+                    <a id="doc-detail-link" href="../yotei/calendar.php" target="_blank" rel="noopener noreferrer" style="font-size:0.82rem; color:#64748b; text-decoration:none; font-weight:600;">
+                        医師予定表システムを開く →
                     </a>
                 </div>
             </div>
@@ -2880,9 +2884,13 @@ foreach ($paged_raw_posts as $p) {
                     <div style="font-size:0.78rem; color:#64748b;">説明</div>
                     <div id="gcal-detail-desc" style="font-size:0.86rem; color:#334155; white-space:pre-wrap; background:#f8fafc; padding:8px; border-radius:6px; border:1px solid #e2e8f0;"></div>
                 </div>
-                <div style="text-align:right;">
-                    <a id="gcal-detail-link" href="#" target="_blank" style="font-size:0.82rem; color:#1a73e8; text-decoration:none; font-weight:bold;">
-                        🔗 Googleカレンダーで開く →
+                <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-top:14px; padding-top:12px; border-top:1px solid #e2e8f0;">
+                    <a id="gcal-detail-add-my-cal" href="#" target="_blank" rel="noopener noreferrer" 
+                       style="display:inline-flex; align-items:center; gap:6px; background:#1a73e8; color:#fff; padding:6px 14px; border-radius:6px; font-size:0.84rem; font-weight:bold; text-decoration:none; box-shadow:0 1px 3px rgba(0,0,0,0.15);">
+                        <span>📅</span> 自分のGoogleカレンダーに登録
+                    </a>
+                    <a id="gcal-detail-link" href="#" target="_blank" rel="noopener noreferrer" style="font-size:0.82rem; color:#64748b; text-decoration:none; font-weight:600;">
+                        元の予定を開く →
                     </a>
                 </div>
             </div>
@@ -3132,6 +3140,30 @@ foreach ($paged_raw_posts as $p) {
             const mStr = parseInt((ev.date || ev.start_date || '').substring(5, 7), 10) || '';
             linkBtn.href = `../yotei/calendar.php?year=${yStr}&month=${mStr}`;
 
+            // 📅 自分のGoogleカレンダーに登録リンク生成
+            const addDocCalBtn = document.getElementById('doc-detail-add-my-cal');
+            if (addDocCalBtn) {
+                const docFullName = (doc.name || '') + (doc.title ? ' ' + doc.title : '');
+                const docTitle = docFullName + ' - ' + (ev.title || '医師予定');
+                const docDate = ev.date || ev.start_date || '';
+                const docAllDay = !!ev.is_all_day;
+                let startDt = docDate;
+                let endDt = null;
+                if (!docAllDay && ev.start_time) {
+                    startDt = `${docDate} ${ev.start_time}:00`;
+                    if (ev.end_time) endDt = `${docDate} ${ev.end_time}:00`;
+                }
+                const docDtl = `【医師予定表】${docFullName}\n科: ${doc.department_name || ''}\n${ev.note ? '備考: ' + ev.note : ''}`;
+                addDocCalBtn.href = generateGoogleCalendarUrl({
+                    title: docTitle,
+                    startDatetime: startDt,
+                    endDatetime: endDt,
+                    isAllDay: docAllDay,
+                    details: docDtl,
+                    location: '小野寺病院'
+                });
+            }
+
             openModal('modal-doctor-detail');
         }
 
@@ -3187,8 +3219,89 @@ foreach ($paged_raw_posts as $p) {
                 linkBtn.style.display = 'none';
             }
 
+            // 📅 自分のGoogleカレンダーに登録リンク生成
+            const addGcalBtn = document.getElementById('gcal-detail-add-my-cal');
+            if (addGcalBtn) {
+                let dtl = ev.description || '';
+                if (ev.account_name || ev.calendar_name) {
+                    dtl = `【${ev.calendar_name || 'Google予定'} (${ev.account_name || ''})】\n` + dtl;
+                }
+                addGcalBtn.href = generateGoogleCalendarUrl({
+                    title: ev.title || '予定',
+                    startDatetime: ev.start_datetime,
+                    endDatetime: ev.end_datetime,
+                    isAllDay: isAllDay,
+                    details: dtl.trim(),
+                    location: ev.location || ''
+                });
+            }
+
             openModal('modal-gcal-detail');
         }
+
+        // 📅 自分のGoogleカレンダーに登録用URL生成ヘルパー
+        function generateGoogleCalendarUrl(options) {
+            const { title, startDatetime, endDatetime, isAllDay, details, location } = options;
+            if (!title || !startDatetime) return '#';
+
+            const cleanStart = String(startDatetime).trim();
+            const cleanEnd = endDatetime ? String(endDatetime).trim() : '';
+
+            let datesStr = '';
+            if (isAllDay) {
+                const sYmd = cleanStart.substring(0, 10).replace(/[^0-9]/g, '');
+                let eDateObj;
+                if (cleanEnd) {
+                    const eYmd = cleanEnd.substring(0, 10);
+                    eDateObj = new Date(eYmd + 'T00:00:00');
+                } else {
+                    const sYmdHyphen = cleanStart.substring(0, 10);
+                    eDateObj = new Date(sYmdHyphen + 'T00:00:00');
+                }
+                eDateObj.setDate(eDateObj.getDate() + 1);
+                const eY = eDateObj.getFullYear();
+                const eM = String(eDateObj.getMonth() + 1).padStart(2, '0');
+                const eD = String(eDateObj.getDate()).padStart(2, '0');
+                datesStr = `${sYmd}/${eY}${eM}${eD}`;
+            } else {
+                const parseToGcalTime = (dtStr) => {
+                    const d = new Date(dtStr.replace(' ', 'T'));
+                    if (isNaN(d.getTime())) return '';
+                    const y = d.getFullYear();
+                    const m = String(d.getMonth() + 1).padStart(2, '0');
+                    const day = String(d.getDate()).padStart(2, '0');
+                    const h = String(d.getHours()).padStart(2, '0');
+                    const min = String(d.getMinutes()).padStart(2, '0');
+                    const s = String(d.getSeconds()).padStart(2, '0');
+                    return `${y}${m}${day}T${h}${min}${s}`;
+                };
+                const sFormatted = parseToGcalTime(cleanStart);
+                let eFormatted = cleanEnd ? parseToGcalTime(cleanEnd) : '';
+                if (!eFormatted && sFormatted) {
+                    const d = new Date(cleanStart.replace(' ', 'T'));
+                    d.setHours(d.getHours() + 1);
+                    const y = d.getFullYear();
+                    const m = String(d.getMonth() + 1).padStart(2, '0');
+                    const day = String(d.getDate()).padStart(2, '0');
+                    const h = String(d.getHours()).padStart(2, '0');
+                    const min = String(d.getMinutes()).padStart(2, '0');
+                    const s = String(d.getSeconds()).padStart(2, '0');
+                    eFormatted = `${y}${m}${day}T${h}${min}${s}`;
+                }
+                datesStr = `${sFormatted}/${eFormatted}`;
+            }
+
+            const params = new URLSearchParams();
+            params.set('action', 'TEMPLATE');
+            params.set('text', title);
+            params.set('dates', datesStr);
+            params.set('ctz', 'Asia/Tokyo');
+            if (details) params.set('details', details);
+            if (location) params.set('location', location);
+
+            return 'https://calendar.google.com/calendar/render?' + params.toString();
+        }
+
 
         // Googleカレンダー チャンネルトグル
         function toggleGcalChannel(channelId, isChecked) {

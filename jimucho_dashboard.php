@@ -3777,10 +3777,15 @@ if ($today_status['is_pre_off_day']) {
                 <div id="gcal-detail-desc" style="font-size:0.88rem; color:#334155; line-height:1.6; white-space:pre-wrap; max-height:180px; overflow-y:auto;"></div>
             </div>
         </div>
-        <div class="modal-footer" style="display:flex; justify-content:space-between; align-items:center;">
-            <a id="gcal-detail-link" href="#" target="_blank" class="tool-btn" style="background:#1a73e8; color:#fff; text-decoration:none; display:inline-flex; align-items:center; gap:6px;">
-                <span>🌐</span> Googleカレンダーで開く
-            </a>
+        <div class="modal-footer" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+            <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                <a id="gcal-detail-add-my-cal" href="#" target="_blank" rel="noopener noreferrer" class="tool-btn" style="background:#1a73e8; color:#fff; text-decoration:none; display:inline-flex; align-items:center; gap:6px; font-weight:bold;">
+                    <span>📅</span> 自分のGoogleカレンダーに登録
+                </a>
+                <a id="gcal-detail-link" href="#" target="_blank" rel="noopener noreferrer" class="tool-btn" style="background:#f1f5f9; color:#475569; border:1px solid #cbd5e1; text-decoration:none; display:inline-flex; align-items:center; gap:6px;">
+                    <span>🌐</span> 元の予定を開く
+                </a>
+            </div>
             <button type="button" class="tool-btn" onclick="closeModal('modal-gcal-detail')">閉じる</button>
         </div>
     </div>
@@ -3818,10 +3823,15 @@ if ($today_status['is_pre_off_day']) {
                 <div id="doc-detail-note" style="font-size:0.88rem; color:#334155; line-height:1.6; white-space:pre-wrap; max-height:180px; overflow-y:auto;"></div>
             </div>
         </div>
-        <div class="modal-footer" style="display:flex; justify-content:space-between; align-items:center;">
-            <a id="doc-detail-link" href="../yotei/calendar.php" target="_blank" class="tool-btn" style="background:#b91c1c; color:#fff; text-decoration:none; display:inline-flex; align-items:center; gap:6px;">
-                <span>🩺</span> 医師予定表で確認・編集 ↗
-            </a>
+        <div class="modal-footer" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+            <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                <a id="doc-detail-add-my-cal" href="#" target="_blank" rel="noopener noreferrer" class="tool-btn" style="background:#1a73e8; color:#fff; text-decoration:none; display:inline-flex; align-items:center; gap:6px; font-weight:bold;">
+                    <span>📅</span> 自分のGoogleカレンダーに登録
+                </a>
+                <a id="doc-detail-link" href="../yotei/calendar.php" target="_blank" rel="noopener noreferrer" class="tool-btn" style="background:#b91c1c; color:#fff; text-decoration:none; display:inline-flex; align-items:center; gap:6px;">
+                    <span>🩺</span> 医師予定表で確認 ↗
+                </a>
+            </div>
             <button type="button" class="tool-btn" onclick="closeModal('modal-doctor-detail')">閉じる</button>
         </div>
     </div>
@@ -4138,6 +4148,23 @@ function openGcalDetailModal(ev) {
         linkBtn.style.display = 'none';
     }
 
+    // 📅 自分のGoogleカレンダーに登録リンク生成
+    const addGcalBtn = document.getElementById('gcal-detail-add-my-cal');
+    if (addGcalBtn) {
+        let dtl = ev.description || '';
+        if (ev.account_name || ev.calendar_name) {
+            dtl = `【${ev.calendar_name || 'Google予定'} (${ev.account_name || ''})】\n` + dtl;
+        }
+        addGcalBtn.href = generateGoogleCalendarUrl({
+            title: ev.title || '予定',
+            startDatetime: ev.start_datetime,
+            endDatetime: ev.end_datetime,
+            isAllDay: isAllDay,
+            details: dtl.trim(),
+            location: ev.location || ''
+        });
+    }
+
     openModal('modal-gcal-detail');
 }
 
@@ -4194,8 +4221,96 @@ function openDoctorDetailModal(ev) {
     const mStr = parseInt((ev.date || ev.start_date || '').substring(5, 7), 10) || '';
     linkBtn.href = `../yotei/calendar.php?year=${yStr}&month=${mStr}`;
 
+    // 📅 自分のGoogleカレンダーに登録リンク生成
+    const addDocCalBtn = document.getElementById('doc-detail-add-my-cal');
+    if (addDocCalBtn) {
+        const docFullName = (doc.name || '') + (doc.title ? ' ' + doc.title : '');
+        const docTitle = docFullName + ' - ' + (ev.title || '医師予定');
+        const docDate = ev.date || ev.start_date || '';
+        const docAllDay = !!ev.is_all_day;
+        let startDt = docDate;
+        let endDt = null;
+        if (!docAllDay && ev.start_time) {
+            startDt = `${docDate} ${ev.start_time}:00`;
+            if (ev.end_time) endDt = `${docDate} ${ev.end_time}:00`;
+        }
+        const docDtl = `【医師予定表】${docFullName}\n科: ${doc.department_name || ''}\n${ev.note ? '備考: ' + ev.note : ''}`;
+        addDocCalBtn.href = generateGoogleCalendarUrl({
+            title: docTitle,
+            startDatetime: startDt,
+            endDatetime: endDt,
+            isAllDay: docAllDay,
+            details: docDtl,
+            location: '小野寺病院'
+        });
+    }
+
     openModal('modal-doctor-detail');
 }
+
+// 📅 自分のGoogleカレンダーに登録用URL生成ヘルパー
+function generateGoogleCalendarUrl(options) {
+    const { title, startDatetime, endDatetime, isAllDay, details, location } = options;
+    if (!title || !startDatetime) return '#';
+
+    const cleanStart = String(startDatetime).trim();
+    const cleanEnd = endDatetime ? String(endDatetime).trim() : '';
+
+    let datesStr = '';
+    if (isAllDay) {
+        const sYmd = cleanStart.substring(0, 10).replace(/[^0-9]/g, '');
+        let eDateObj;
+        if (cleanEnd) {
+            const eYmd = cleanEnd.substring(0, 10);
+            eDateObj = new Date(eYmd + 'T00:00:00');
+        } else {
+            const sYmdHyphen = cleanStart.substring(0, 10);
+            eDateObj = new Date(sYmdHyphen + 'T00:00:00');
+        }
+        eDateObj.setDate(eDateObj.getDate() + 1);
+        const eY = eDateObj.getFullYear();
+        const eM = String(eDateObj.getMonth() + 1).padStart(2, '0');
+        const eD = String(eDateObj.getDate()).padStart(2, '0');
+        datesStr = `${sYmd}/${eY}${eM}${eD}`;
+    } else {
+        const parseToGcalTime = (dtStr) => {
+            const d = new Date(dtStr.replace(' ', 'T'));
+            if (isNaN(d.getTime())) return '';
+            const y = d.getFullYear();
+            const m = String(d.getMonth() + 1).padStart(2, '0');
+            const day = String(d.getDate()).padStart(2, '0');
+            const h = String(d.getHours()).padStart(2, '0');
+            const min = String(d.getMinutes()).padStart(2, '0');
+            const s = String(d.getSeconds()).padStart(2, '0');
+            return `${y}${m}${day}T${h}${min}${s}`;
+        };
+        const sFormatted = parseToGcalTime(cleanStart);
+        let eFormatted = cleanEnd ? parseToGcalTime(cleanEnd) : '';
+        if (!eFormatted && sFormatted) {
+            const d = new Date(cleanStart.replace(' ', 'T'));
+            d.setHours(d.getHours() + 1);
+            const y = d.getFullYear();
+            const m = String(d.getMonth() + 1).padStart(2, '0');
+            const day = String(d.getDate()).padStart(2, '0');
+            const h = String(d.getHours()).padStart(2, '0');
+            const min = String(d.getMinutes()).padStart(2, '0');
+            const s = String(d.getSeconds()).padStart(2, '0');
+            eFormatted = `${y}${m}${day}T${h}${min}${s}`;
+        }
+        datesStr = `${sFormatted}/${eFormatted}`;
+    }
+
+    const params = new URLSearchParams();
+    params.set('action', 'TEMPLATE');
+    params.set('text', title);
+    params.set('dates', datesStr);
+    params.set('ctz', 'Asia/Tokyo');
+    if (details) params.set('details', details);
+    if (location) params.set('location', location);
+
+    return 'https://calendar.google.com/calendar/render?' + params.toString();
+}
+
 
 // 部署プリンタ設定の読み込み
 let installedPrinters = [];

@@ -422,3 +422,62 @@ function get_cached_google_events_for_range(PDO $pdo, string $startDate, string 
     $stmt->execute($params);
     return $stmt->fetchAll(PDO::FETCH_ASSOC);
 }
+
+/**
+ * 📅 自分のGoogleカレンダーに登録するためのURL（Web Intent）を生成
+ * 
+ * @param string          $title        予定のタイトル
+ * @param string|int      $start        開始日時（'YYYY-MM-DD', 'YYYY-MM-DD HH:MM:SS', またはUnixタイムスタンプ）
+ * @param string|int|null $end          終了日時（省略時は開始から1時間後、終日なら当日中）
+ * @param bool            $is_all_day   終日フラグ
+ * @param string          $details      詳細メモ・URLなど
+ * @param string          $location     場所
+ * @return string Googleカレンダー登録用URL
+ */
+function build_google_calendar_add_url(
+    string $title,
+    $start,
+    $end = null,
+    bool $is_all_day = false,
+    string $details = '',
+    string $location = ''
+): string {
+    $s_ts = is_numeric($start) ? (int)$start : strtotime((string)$start);
+    if (!$s_ts) return '#';
+
+    if ($is_all_day) {
+        $s_str = date('Ymd', $s_ts);
+        if ($end) {
+            $e_ts = is_numeric($end) ? (int)$end : strtotime((string)$end);
+            $e_str = date('Ymd', strtotime('+1 day', $e_ts));
+        } else {
+            $e_str = date('Ymd', strtotime('+1 day', $s_ts));
+        }
+        $dates = "{$s_str}/{$e_str}";
+    } else {
+        $s_str = date('Ymd\THis', $s_ts);
+        if ($end) {
+            $e_ts = is_numeric($end) ? (int)$end : strtotime((string)$end);
+            $e_str = date('Ymd\THis', $e_ts);
+        } else {
+            $e_str = date('Ymd\THis', strtotime('+1 hour', $s_ts));
+        }
+        $dates = "{$s_str}/{$e_str}";
+    }
+
+    $params = [
+        'action' => 'TEMPLATE',
+        'text'   => $title,
+        'dates'  => $dates,
+        'ctz'    => 'Asia/Tokyo'
+    ];
+    if ($details !== '') {
+        $params['details'] = $details;
+    }
+    if ($location !== '') {
+        $params['location'] = $location;
+    }
+
+    return 'https://calendar.google.com/calendar/render?' . http_build_query($params);
+}
+

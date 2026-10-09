@@ -6,6 +6,9 @@ require_once __DIR__ . '/includes/db.php';
 if (file_exists(__DIR__ . '/includes/line_helper.php')) {
     require_once __DIR__ . '/includes/line_helper.php';
 }
+if (file_exists(__DIR__ . '/includes/google_calendar_helper.php')) {
+    require_once __DIR__ . '/includes/google_calendar_helper.php';
+}
 
 // 📱 端末固定Cookieがあれば自動ログイン！なければlogin.phpへ
 $login_user = checkAuthOrAutoLogin($pdo, $_SERVER['REQUEST_URI'] ?? '');
@@ -326,28 +329,77 @@ foreach ($target_members as $tm) {
         ?>
 
         <?php if (!empty($multi_schedules)): ?>
-            <div class="event-box" style="display:flex; flex-direction:column; gap:6px;">
-                <div style="font-weight:bold; font-size:1.05rem; border-bottom:1px solid #b8daff; padding-bottom:4px; margin-bottom:4px;">
-                    🗓 実施・対象日程 (全 <?= count($multi_schedules) ?> 回)
+            <div class="event-box" style="display:flex; flex-direction:column; gap:8px;">
+                <div style="font-weight:bold; font-size:1.05rem; border-bottom:1px solid #b8daff; padding-bottom:4px; margin-bottom:4px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px;">
+                    <span>🗓 実施・対象日程 (全 <?= count($multi_schedules) ?> 回)</span>
+                    <span style="font-size:0.78rem; font-weight:normal; color:#0369a1;">💡 ボタンから個人のGoogleカレンダーへ直接予定を追加できます</span>
                 </div>
                 <?php foreach ($multi_schedules as $idx => $sch): 
                     $s_ts = !empty($sch['date']) ? strtotime($sch['date']) : (!empty($sch['start_datetime']) ? strtotime($sch['start_datetime']) : null);
                     $w_name = $s_ts ? $week_names[(int)date('w', $s_ts)] : '';
                     $d_str = $s_ts ? date('Y/m/d', $s_ts) . '(' . $w_name . ')' : ($sch['date'] ?? '未定');
                     $t_str = !empty($sch['is_all_day']) ? '終日' : ($sch['start_time'] ?? '') . ' 〜 ' . ($sch['end_time'] ?? '');
-                    $loc   = !empty($sch['location']) ? '📍 場所: ' . htmlspecialchars($sch['location']) : '';
-                    $memo  = !empty($sch['memo']) ? '※' . htmlspecialchars($sch['memo']) : '';
+                    $loc   = !empty($sch['location']) ? htmlspecialchars($sch['location']) : '';
+                    $memo  = !empty($sch['memo']) ? htmlspecialchars($sch['memo']) : '';
+
+                    // Googleカレンダー登録URL
+                    $gcal_url = '#';
+                    if (function_exists('build_google_calendar_add_url') && $s_ts) {
+                        $sch_is_all_day = !empty($sch['is_all_day']);
+                        $start_val = $sch_is_all_day ? date('Y-m-d', $s_ts) : date('Y-m-d', $s_ts) . ' ' . (!empty($sch['start_time']) ? $sch['start_time'] . ':00' : '09:00:00');
+                        $end_val = null;
+                        if (!$sch_is_all_day && !empty($sch['end_time'])) {
+                            $end_val = date('Y-m-d', $s_ts) . ' ' . $sch['end_time'] . ':00';
+                        }
+                        $host = $_SERVER['HTTP_HOST'] ?? '192.168.1.16';
+                        $dtl = "【院内かわら版】" . $post['title'] . "\n" . ($memo ? "メモ: " . $memo . "\n" : "") . "http://" . $host . "/kawara/view_post.php?id=" . $post_id;
+                        $gcal_url = build_google_calendar_add_url($post['title'] . " (第" . ($idx + 1) . "回)", $start_val, $end_val, $sch_is_all_day, $dtl, $loc);
+                    }
                 ?>
-                    <div style="font-size:0.95rem;">
-                        <b>第 <?= $idx + 1 ?> 回:</b> <?= $d_str ?> <?= $t_str ?> <?= $loc ? ' | ' . $loc : '' ?> <?= $memo ? ' | <span style="color:#c2410c;">' . $memo . '</span>' : '' ?>
+                    <div style="font-size:0.92rem; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; background:rgba(255,255,255,0.7); padding:6px 10px; border-radius:6px; border:1px solid #bfdbfe;">
+                        <div>
+                            <b>第 <?= $idx + 1 ?> 回:</b> <?= $d_str ?> <?= $t_str ?> <?= $loc ? ' | 📍 ' . $loc : '' ?> <?= $memo ? ' | <span style="color:#c2410c;">※' . $memo . '</span>' : '' ?>
+                        </div>
+                        <?php if ($gcal_url !== '#'): ?>
+                            <a href="<?= htmlspecialchars($gcal_url) ?>" target="_blank" rel="noopener noreferrer" 
+                               style="display:inline-flex; align-items:center; gap:4px; background:#1a73e8; color:#fff; text-decoration:none; padding:3px 10px; border-radius:4px; font-size:0.78rem; font-weight:bold; box-shadow:0 1px 2px rgba(0,0,0,0.1); white-space:nowrap;"
+                               title="この日程をご自身のGoogleカレンダーに追加">
+                                <span>📅</span> Googleカレンダー登録
+                            </a>
+                        <?php endif; ?>
                     </div>
                 <?php endforeach; ?>
             </div>
         <?php elseif ($event_date_str): ?>
-            <div class="event-box">
-                🗓 実施・対象日時: <?= $event_date_str ?>
+            <?php
+            $single_gcal_url = '#';
+            if (function_exists('build_google_calendar_add_url') && $start_dt) {
+                $host = $_SERVER['HTTP_HOST'] ?? '192.168.1.16';
+                $dtl = "【院内かわら版】" . $post['title'] . "\nhttp://" . $host . "/kawara/view_post.php?id=" . $post_id;
+                $single_gcal_url = build_google_calendar_add_url(
+                    $post['title'], 
+                    $start_dt->format('Y-m-d H:i:s'), 
+                    $end_dt ? $end_dt->format('Y-m-d H:i:s') : null, 
+                    false, 
+                    $dtl, 
+                    ''
+                );
+            }
+            ?>
+            <div class="event-box" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+                <div>
+                    🗓 実施・対象日時: <?= $event_date_str ?>
+                </div>
+                <?php if ($single_gcal_url !== '#'): ?>
+                    <a href="<?= htmlspecialchars($single_gcal_url) ?>" target="_blank" rel="noopener noreferrer" 
+                       style="display:inline-flex; align-items:center; gap:5px; background:#1a73e8; color:#fff; text-decoration:none; padding:5px 12px; border-radius:6px; font-size:0.82rem; font-weight:bold; box-shadow:0 1px 3px rgba(0,0,0,0.1); white-space:nowrap;"
+                       title="この予定をご自身のGoogleカレンダーに追加">
+                        <span>📅</span> 自分のGoogleカレンダーに登録
+                    </a>
+                <?php endif; ?>
             </div>
         <?php endif; ?>
+
 
         <div class="content"><?= $post['content'] ?></div>
 
