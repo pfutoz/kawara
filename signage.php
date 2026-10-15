@@ -44,6 +44,32 @@ function getSignageData(PDO $pdo): array {
     $doctor_summary = fetch_doctor_today_summary($today_str);
     $doctor_memo = fetch_doctor_memo();
 
+    // (2-B) 当月の医師予定一覧・イベント取得（yotei連携）
+    $month_start = date('Y-m-01', strtotime($today_str));
+    $month_end   = date('Y-m-t', strtotime($today_str));
+    $doctor_month_events_raw = fetch_doctor_events($month_start, $month_end, ['expand_period' => 1]);
+    $doctor_month_events = [];
+    foreach ($doctor_month_events_raw as $ev) {
+        $d = $ev['date'] ?? $ev['start_date'] ?? '';
+        $doc = $ev['doctor'] ?? [];
+        $is_abs = (($ev['event_type'] ?? '') === 'absence');
+        $time_text = !empty($ev['is_all_day']) ? '終日' : (($ev['start_time'] ?? '') . (!empty($ev['end_time']) ? '〜' . $ev['end_time'] : ''));
+        $doctor_month_events[] = [
+            'id'               => $ev['id'] ?? 0,
+            'date'             => $d,
+            'event_type'       => $ev['event_type'] ?? '',
+            'is_absence'       => $is_abs,
+            'is_all_day'       => !empty($ev['is_all_day']),
+            'time_text'        => $time_text,
+            'title'            => $ev['title'] ?? '',
+            'description'      => $ev['description'] ?? '',
+            'doctor_name'      => $doc['name'] ?? '',
+            'doctor_short'     => $doc['short_name'] ?? $doc['name'] ?? '医師',
+            'department_name'  => $doc['department_name'] ?? '',
+            'department_color' => $doc['department_color'] ?? ($is_abs ? '#dc2626' : '#0284c7')
+        ];
+    }
+
     // (3) 本日のGoogleカレンダー予定（キャッシュより取得）
     $gcal_events = get_cached_google_events_for_range($pdo, $today_str, $today_str);
 
@@ -134,8 +160,15 @@ function getSignageData(PDO $pdo): array {
         'rokuyo'        => $rokuyo['name'] ?? '',
         'solar_term'    => $solar_term ?: '',
         'doctor'        => [
-            'summary' => $doctor_summary,
-            'memo'    => $doctor_memo['content'] ?? ''
+            'summary'      => $doctor_summary,
+            'memo'         => $doctor_memo['text'] ?? $doctor_memo['content'] ?? ($doctor_summary['memo']['text'] ?? ''),
+            'month_year'   => date('Y年n月', strtotime($today_str)),
+            'year'         => (int)date('Y', strtotime($today_str)),
+            'month'        => (int)date('n', strtotime($today_str)),
+            'today_date'   => $today_str,
+            'month_start'  => $month_start,
+            'month_end'    => $month_end,
+            'month_events' => $doctor_month_events
         ],
         'gcal_events'   => array_map(function($ev) {
             return [
@@ -700,6 +733,245 @@ $initial_data = getSignageData($pdo);
             color: #ffffff;
         }
 
+        /* 🩺 医師予定表・当月一覧スライド用レイアウト */
+        .doc-month-container {
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+            gap: 1rem;
+        }
+        .doc-month-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 14px;
+            padding: 0.75rem 1.6rem;
+            backdrop-filter: blur(12px);
+            flex-shrink: 0;
+        }
+        .doc-month-title-wrap {
+            display: flex;
+            align-items: baseline;
+            gap: 12px;
+        }
+        .doc-month-title {
+            font-size: 1.45rem;
+            font-weight: 900;
+            color: #ffffff;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .doc-month-subtitle {
+            font-size: 0.92rem;
+            color: var(--accent-cyan);
+            font-weight: 700;
+        }
+        .doc-month-badges {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .badge-absence-count {
+            background: rgba(220, 38, 38, 0.25);
+            border: 1px solid #ef4444;
+            color: #fca5a5;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.9rem;
+            font-weight: 800;
+        }
+
+        .doc-month-grid-wrap {
+            display: grid;
+            grid-template-columns: 1.18fr 0.82fr;
+            gap: 1.3rem;
+            flex: 1;
+            min-height: 0;
+        }
+
+        /* 左カラム：月間カレンダー */
+        .doc-month-cal-card {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 18px;
+            padding: 1.1rem;
+            display: flex;
+            flex-direction: column;
+            backdrop-filter: blur(16px);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+            min-height: 0;
+        }
+        .cal-header-row {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            text-align: center;
+            font-weight: 800;
+            font-size: 0.92rem;
+            padding-bottom: 6px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            margin-bottom: 6px;
+            flex-shrink: 0;
+        }
+        .cal-grid {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            grid-auto-rows: 1fr;
+            gap: 4px;
+            flex: 1;
+            min-height: 0;
+        }
+        .cal-cell {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            border-radius: 7px;
+            padding: 3px 5px;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            font-size: 0.76rem;
+            min-height: 0;
+        }
+        .cal-cell.is-other-month {
+            opacity: 0.25;
+            background: transparent;
+        }
+        .cal-cell.is-today {
+            background: rgba(2, 132, 199, 0.18);
+            border: 1.5px solid var(--accent-cyan);
+            box-shadow: 0 0 12px rgba(56, 189, 248, 0.35);
+        }
+        .cal-cell-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 2px;
+            line-height: 1;
+        }
+        .cal-cell-day {
+            font-weight: 900;
+            font-size: 0.86rem;
+        }
+        .cal-cell-today-pill {
+            background: var(--accent-cyan);
+            color: #0f172a;
+            font-size: 0.62rem;
+            font-weight: 900;
+            padding: 1px 3px;
+            border-radius: 3px;
+            line-height: 1;
+        }
+        .cal-cell-events {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            overflow: hidden;
+        }
+        .cal-event-pill {
+            padding: 1px 4px;
+            border-radius: 3px;
+            font-size: 0.68rem;
+            font-weight: 800;
+            color: #ffffff;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            line-height: 1.25;
+        }
+        .cal-event-pill.is-absence {
+            background: #dc2626;
+        }
+        .cal-event-pill.is-clinic {
+            background: #0284c7;
+        }
+
+        /* 右カラム：直近・今後の休診＆外来一覧リスト */
+        .doc-month-list-card {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 18px;
+            padding: 1.2rem;
+            display: flex;
+            flex-direction: column;
+            backdrop-filter: blur(16px);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+            min-height: 0;
+        }
+        .doc-list-title {
+            font-size: 1.1rem;
+            font-weight: 800;
+            color: #ffffff;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding-bottom: 8px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            margin-bottom: 10px;
+            flex-shrink: 0;
+        }
+        .doc-list-scroll {
+            flex: 1;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            padding-right: 4px;
+        }
+        .doc-sched-card {
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-left: 4.5px solid #dc2626;
+            border-radius: 10px;
+            padding: 9px 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+        }
+        .doc-sched-card.is-clinic {
+            border-left-color: #0284c7;
+        }
+        .doc-sched-card.is-today-event {
+            background: rgba(2, 132, 199, 0.12);
+            border-color: rgba(56, 189, 248, 0.4);
+            border-left-color: var(--accent-cyan);
+        }
+        .sched-card-top {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+        }
+        .sched-date-badge {
+            font-family: 'Outfit', sans-serif;
+            font-size: 0.95rem;
+            font-weight: 800;
+            color: #ffffff;
+        }
+        .sched-doc-name {
+            font-size: 0.82rem;
+            font-weight: 800;
+            padding: 2px 7px;
+            border-radius: 4px;
+            color: #ffffff;
+        }
+        .sched-time-badge {
+            font-size: 0.78rem;
+            font-weight: 700;
+            color: #cbd5e1;
+        }
+        .sched-title {
+            font-size: 1rem;
+            font-weight: 800;
+            color: #f8fafc;
+        }
+        .sched-desc {
+            font-size: 0.8rem;
+            color: #94a3b8;
+            line-height: 1.35;
+        }
+
         /* 下部ナビゲーション・インジケーター（TVリモコン・タッチ・マウス操作用） */
         .signage-footer {
             height: 50px;
@@ -855,8 +1127,9 @@ let progressStartTime = 0;
 let progressDuration = 12000; // デフォルト12秒
 
 // スライド表示時間の定義
-const DURATION_DASHBOARD = 16000; // 本日ダッシュボード: 16秒
-const DURATION_POST = 13000;      // かわら版記事: 13秒
+const DURATION_DASHBOARD    = 16000; // 本日ダッシュボード: 16秒
+const DURATION_DOCTOR_MONTH = 16000; // 当月医師予定表・休診一覧: 16秒
+const DURATION_POST         = 13000; // かわら版記事: 13秒
 
 // 時計のリアルタイム更新
 function updateClock() {
@@ -869,6 +1142,178 @@ function updateClock() {
 }
 setInterval(updateClock, 1000);
 updateClock();
+
+// =========================================================================
+// スライド 2: 当月の医師予定表・休診一覧の構築
+// =========================================================================
+function renderDoctorMonthSlide() {
+    const docData = signageData.doctor || {};
+    const monthEvents = docData.month_events || [];
+    const year = docData.year || new Date().getFullYear();
+    const month = docData.month || (new Date().getMonth() + 1);
+    const todayStr = docData.today_date || new Date().toISOString().slice(0, 10);
+    const monthYearText = docData.month_year || `${year}年${month}月`;
+
+    // 休診件数カウント
+    const absenceCount = monthEvents.filter(e => e.is_absence).length;
+
+    // 日付別イベントマップ作成
+    const eventsByDate = {};
+    monthEvents.forEach(ev => {
+        if (!eventsByDate[ev.date]) eventsByDate[ev.date] = [];
+        eventsByDate[ev.date].push(ev);
+    });
+
+    // カレンダーの日付枠計算（月曜始まり）
+    const firstDay = new Date(year, month - 1, 1);
+    const lastDay = new Date(year, month, 0);
+    const daysInMonth = lastDay.getDate();
+
+    // 1日の曜日 (0:日, 1:月, ... 6:土) -> 月曜を0とする
+    let firstDow = firstDay.getDay() - 1;
+    if (firstDow < 0) firstDow = 6;
+
+    // カレンダー開始日（前月分含む）
+    const calStartDate = new Date(year, month - 1, 1 - firstDow);
+    const totalCells = (firstDow + daysInMonth > 35) ? 42 : 35;
+
+    // カレンダーセルHTML生成
+    let calCellsHtml = '';
+    const curDate = new Date(calStartDate);
+
+    for (let i = 0; i < totalCells; i++) {
+        const cYear = curDate.getFullYear();
+        const cMonth = curDate.getMonth() + 1;
+        const cDay = curDate.getDate();
+        const cDateStr = `${cYear}-${String(cMonth).padStart(2, '0')}-${String(cDay).padStart(2, '0')}`;
+        const isOtherMonth = (cMonth !== month);
+        const isToday = (cDateStr === todayStr);
+        const dow = curDate.getDay(); // 0:日, 6:土
+
+        let dayColor = '#cbd5e1';
+        if (dow === 0) dayColor = '#f87171'; // 日曜 赤
+        if (dow === 6) dayColor = '#38bdf8'; // 土曜 青
+
+        const dayEvents = eventsByDate[cDateStr] || [];
+        let eventPillsHtml = '';
+        dayEvents.slice(0, 2).forEach(ev => {
+            const pillCls = ev.is_absence ? 'is-absence' : 'is-clinic';
+            eventPillsHtml += `<span class="cal-event-pill ${pillCls}" title="${escapeHtml(ev.title)}">${escapeHtml(ev.doctor_short)}: ${escapeHtml(ev.title)}</span>`;
+        });
+        if (dayEvents.length > 2) {
+            eventPillsHtml += `<span style="font-size:0.6rem; color:#94a3b8; font-weight:bold;">+他${dayEvents.length - 2}件</span>`;
+        }
+
+        calCellsHtml += `
+            <div class="cal-cell ${isOtherMonth ? 'is-other-month' : ''} ${isToday ? 'is-today' : ''}">
+                <div class="cal-cell-top">
+                    <span class="cal-cell-day" style="color:${dayColor};">${cDay}</span>
+                    ${isToday ? '<span class="cal-cell-today-pill">本日</span>' : ''}
+                </div>
+                <div class="cal-cell-events">
+                    ${eventPillsHtml}
+                </div>
+            </div>
+        `;
+
+        curDate.setDate(curDate.getDate() + 1);
+    }
+
+    // 右側：今後の休診・不在一覧リスト（本日以降を優先）
+    let futureEvents = monthEvents.filter(ev => ev.date >= todayStr);
+    if (futureEvents.length === 0) futureEvents = monthEvents;
+
+    let listHtml = '';
+    if (futureEvents.length > 0) {
+        futureEvents.forEach(ev => {
+            const isTodayEv = (ev.date === todayStr);
+            const cardCls = ev.is_absence ? '' : 'is-clinic';
+            const todayCls = isTodayEv ? 'is-today-event' : '';
+
+            // 日付フォーマット M/D (曜)
+            const evDateObj = new Date(ev.date + 'T00:00:00');
+            const dayNames = ['日', '月', '火', '水', '木', '金', '土'];
+            const dowStr = dayNames[evDateObj.getDay()];
+            const dateDisplay = `${evDateObj.getMonth() + 1}/${evDateObj.getDate()} (${dowStr})`;
+
+            listHtml += `
+                <div class="doc-sched-card ${cardCls} ${todayCls}">
+                    <div class="sched-card-top">
+                        <div style="display:flex; align-items:center; gap:8px;">
+                            <span class="sched-date-badge">${dateDisplay}</span>
+                            ${isTodayEv ? '<span style="background:var(--accent-cyan); color:#0f172a; font-weight:900; font-size:0.68rem; padding:1px 5px; border-radius:3px;">本日</span>' : ''}
+                            <span class="sched-doc-name" style="background:${escapeHtml(ev.department_color)};">
+                                ${escapeHtml(ev.doctor_name || ev.doctor_short)}
+                            </span>
+                        </div>
+                        <span class="sched-time-badge">${escapeHtml(ev.time_text || '終日')}</span>
+                    </div>
+                    <div class="sched-title">${escapeHtml(ev.title)}</div>
+                    ${ev.description ? `<div class="sched-desc">${escapeHtml(ev.description)}</div>` : ''}
+                </div>
+            `;
+        });
+    } else {
+        listHtml = `<div style="text-align:center; padding:3rem 1rem; color:#94a3b8; font-size:1.1rem;">✓ 本日以降の休診・不在予定はありません</div>`;
+    }
+
+    // 医師申し送り特記事項バナー
+    const memoHtml = docData.memo ? `
+        <div style="background:rgba(245, 158, 11, 0.15); border:1px solid #f59e0b; border-radius:8px; padding:6px 12px; margin-bottom:8px; font-size:0.86rem; color:#fde68a;">
+            <b>📢 医師申し送り:</b> ${escapeHtml(docData.memo)}
+        </div>
+    ` : '';
+
+    const slide = document.createElement('div');
+    slide.className = 'slide-pane';
+    slide.id = 'slide-doc-month';
+    slide.dataset.duration = DURATION_DOCTOR_MONTH;
+
+    slide.innerHTML = `
+        <div class="doc-month-container">
+            <div class="doc-month-header">
+                <div class="doc-month-title-wrap">
+                    <div class="doc-month-title">
+                        <span>🩺</span>
+                        <span>${escapeHtml(monthYearText)} 医師予定表・休診一覧</span>
+                    </div>
+                    <span class="doc-month-subtitle">外来担当医・病棟スケジュール</span>
+                </div>
+                <div class="doc-month-badges">
+                    <span class="badge-absence-count">⚠️ 今月の休診・不在: ${absenceCount}件</span>
+                    <span style="font-size:0.82rem; color:#94a3b8;">🔄 自動同期</span>
+                </div>
+            </div>
+
+            <div class="doc-month-grid-wrap">
+                <!-- 左カラム：月間カレンダー -->
+                <div class="doc-month-cal-card">
+                    <div class="cal-header-row">
+                        <span>月</span><span>火</span><span>水</span><span>木</span><span>金</span>
+                        <span style="color:#38bdf8;">土</span><span style="color:#f87171;">日</span>
+                    </div>
+                    <div class="cal-grid">
+                        ${calCellsHtml}
+                    </div>
+                </div>
+
+                <!-- 右カラム：直近・今後の休診＆外来一覧リスト -->
+                <div class="doc-month-list-card">
+                    <div class="doc-list-title">
+                        <span>📋 今後の休診＆外来変更一覧</span>
+                        <span style="font-size:0.8rem; font-weight:normal; color:#cbd5e1;">(計 ${futureEvents.length} 件)</span>
+                    </div>
+                    ${memoHtml}
+                    <div class="doc-list-scroll">
+                        ${listHtml}
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+
+    return slide;
+}
 
 // スライドデータのDOM構築
 function buildSlides() {
@@ -1004,13 +1449,26 @@ function buildSlides() {
     slidesList.push(slideDash);
 
     // -------------------------------------------------------------
-    // スライド 2〜N: 最新かわら版記事
+    // スライド 2: 当月の医師予定表・休診一覧 (yotei連携)
+    // -------------------------------------------------------------
+    try {
+        const slideDocMonth = renderDoctorMonthSlide();
+        if (slideDocMonth) {
+            container.appendChild(slideDocMonth);
+            slidesList.push(slideDocMonth);
+        }
+    } catch (err) {
+        console.error('Failed to render doctor month slide:', err);
+    }
+
+    // -------------------------------------------------------------
+    // スライド 3〜N: 最新かわら版記事
     // -------------------------------------------------------------
     if (signageData.posts && signageData.posts.length > 0) {
         signageData.posts.forEach((p, idx) => {
             const slidePost = document.createElement('div');
             slidePost.className = 'slide-pane';
-            slidePost.id = `slide-${idx + 1}`;
+            slidePost.id = `slide-${slidesList.length}`;
             slidePost.dataset.duration = DURATION_POST;
 
             const hasImage = (p.images && p.images.length > 0);
