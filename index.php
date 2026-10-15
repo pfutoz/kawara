@@ -596,6 +596,9 @@ $msg = $_GET['msg'] ?? '';
                 <a href="line_guide.php" class="btn-line-header" style="background:#f0fdf4; color:#15803d; border:1px solid #bbf7d0;" title="LINE登録かんたん手順書を開く">
                     📖 手順書
                 </a>
+                <a href="signage.php" target="_blank" class="btn-line-header" style="background:#f0f9ff; color:#0369a1; border:1px solid #bae6fd;" title="ナースステーション常設サイネージ（全画面自動巡回）を別タブで起動">
+                    📺 サイネージ
+                </a>
                 <a href="/index.php" class="btn-portal">🏠 総合ポータル</a>
             </div>
         </div>
@@ -652,6 +655,7 @@ $msg = $_GET['msg'] ?? '';
             <div class="portal-quick-tags">
                 <span class="portal-tag-label">クイック:</span>
                 <a href="doctor_schedule.php" class="portal-tag-link" style="color:#1e3a8a; border-color:#bfdbfe; background:#eff6ff; font-weight:bold;">🩺 医師予定表</a>
+                <a href="signage.php" target="_blank" class="portal-tag-link" style="color:#0369a1; border-color:#bae6fd; background:#f0f9ff; font-weight:bold;">📺 病棟サイネージ</a>
                 <a href="kawara_list.php?date_filter=today" class="portal-tag-link">📅 今日の予定</a>
                 <a href="kawara_list.php?date_filter=plus7" class="portal-tag-link">⏰ 直近+7日</a>
                 <a href="kawara_list.php?date_filter=past" class="portal-tag-link">📁 過去ログ</a>
@@ -687,6 +691,18 @@ $msg = $_GET['msg'] ?? '';
                         <span class="menu-arrow">→</span>
                     </div>
                     <div class="menu-desc">外来担当医・週間予定・休診案内</div>
+                </div>
+            </a>
+
+            <!-- 3. 病棟・詰所サイネージ（全画面自動スライド巡回） -->
+            <a href="signage.php" target="_blank" class="menu-card" style="border-left: 3.5px solid #0284c7;">
+                <div class="menu-icon-box" style="background:#f0f9ff; color:#0284c7; border:1px solid #bae6fd;">📺</div>
+                <div class="menu-info">
+                    <div class="menu-title">
+                        <span>病棟常設サイネージ</span>
+                        <span class="menu-arrow">↗</span>
+                    </div>
+                    <div class="menu-desc">TV・大画面用 全画面自動スライドループ</div>
                 </div>
             </a>
 

@@ -2507,6 +2507,9 @@ if ($focus_post_id > 0) {
         <span style="font-size:0.84rem; color:#cbd5e1;">
             👤 <b><?= htmlspecialchars($current_user['staff_name']) ?></b>
         </span>
+        <a href="signage.php" target="_blank" class="btn-switch-timeline" style="padding:5px 12px; font-size:0.8rem; background:rgba(56, 189, 248, 0.2); border-color:#38bdf8; color:#38bdf8;" title="ナースステーション常設サイネージ（全画面自動巡回）を起動">
+            📺 病棟サイネージ
+        </a>
         <a href="master_mente.php" class="btn-switch-timeline" style="padding:5px 12px; font-size:0.8rem;" title="システムマスタ管理（スタッフ・Googleカレンダー連携設定）">
             ⚙️ マスタ管理
         </a>

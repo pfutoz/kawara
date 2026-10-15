@@ -712,6 +712,13 @@
                         公式LINE「おの肛門科」連携。4桁コード自動紐付け、安否確認一斉・個別LINE送信、トンネルリアルタイム監視、職員マスター（STF）自動同期を完備。
                     </div>
                 </div>
+                <div class="pd-card highlight">
+                    <span class="pd-card-tag">✅ 本番稼働中</span>
+                    <div class="pd-card-title">ナースステーション常設サイネージ（signage.php）</div>
+                    <div class="pd-card-desc">
+                        病棟詰所カウンターの大型TV・常設モニター用。完全ハンズフリー・13〜16秒自動スライドループ。本日医師勤務サマリー・Googleカレンダー院内行事・新着かわら版を高コントラスト大画面表示。災害時は全画面赤色パルス警報に強制ジャック。
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -1045,11 +1052,19 @@
                     <div class="timeline-dot"></div>
                     <div class="timeline-content">
                         <div class="timeline-title">
-                            <span>Phase 7: 医師予定表API連携（外部プロジェクト連携） ＆ ナースステーションサイネージ巡回モード</span>
-                            <span class="badge-phase phase-todo">⏳ 計画・準備中</span>
+                            <span>Phase 7: 医師予定表連携 ＆ ナースステーション常設サイネージ（signage.php）</span>
+                            <span class="badge-phase phase-done">✅ 完了・本番稼働（2026/10/15稼働開始）</span>
                         </div>
                         <div class="timeline-desc">
-                            独立した「医師予定表」プロジェクト側の機能追加およびAPI化（JSONエンドポイント）完了後、事務長ダッシュボードとのリアルタイム取得・統合表示を実施。あわせて詰所常設モニター用の自動スライド巡回表示（<code>signage.php</code>）を運用定着。
+                            <strong>【実績】</strong>
+                            病棟・詰所常設モニター・テレビ用システム（<code>signage.php</code>）を完全構築・本番投入。
+                            <ul style="margin: 0.4rem 0 0.4rem 1.2rem; font-size: 0.84rem; line-height: 1.5;">
+                                <li><strong>全画面スライドループ方式:</strong> 13〜16秒ごとに自動クロスフェード巡回する完全ハンズフリー設計。キーボードやマウス不要で、TVのSilkブラウザや小型PCで24時間安定稼働。</li>
+                                <li><strong>本日の総合サマリー（16秒）:</strong> 特大デジタル時計、日付・曜日・六曜・二十四節気、医師勤務体制（出勤医師・休診・外来担当・医師申し送りメモ）、Googleカレンダー院内行事、事務長重点目標・当日メモを集約表示。</li>
+                                <li><strong>新着かわら版スライド（各13秒）:</strong> 直近8件の新着お知らせを大画面ポスター＆サマリーで順次巡回。</li>
+                                <li><strong>🚨 災害・安否確認全画面ジャック:</strong> <code>safety_events</code> に発令がある場合、スライドを強制中断して赤色パルス警告画面に固定、現場スタッフへ即座に安否報告を指示。</li>
+                                <li><strong>運用安定性・ゼロリロード:</strong> 院内LAN（192.168.*）からのアクセス時は認証フリーパス自動起動。5分またはスライド1周ごとにバックグラウンドで <code>signage.php?action=data</code> から最新データをAjax差分取得し、画面のチラつきやメモリリークを完全防止。</li>
+                            </ul>
                         </div>
                     </div>
                 </div>
