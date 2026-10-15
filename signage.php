@@ -786,22 +786,22 @@ $initial_data = getSignageData($pdo);
 
         .doc-month-grid-wrap {
             display: grid;
-            grid-template-columns: 1.18fr 0.82fr;
-            gap: 1.3rem;
+            grid-template-columns: 1.28fr 0.72fr;
+            gap: 1.2rem;
             flex: 1;
             min-height: 0;
         }
 
-        /* 左カラム：月間カレンダー */
+        /* 左カラム：医師予定カレンダー (yotei そのまま表示) */
         .doc-month-cal-card {
-            background: var(--card-bg);
+            background: #ffffff;
             border: 1px solid var(--card-border);
             border-radius: 18px;
-            padding: 1.1rem;
+            padding: 0;
+            overflow: hidden;
             display: flex;
             flex-direction: column;
-            backdrop-filter: blur(16px);
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
             min-height: 0;
         }
         .cal-header-row {
@@ -1286,15 +1286,12 @@ function renderDoctorMonthSlide() {
             </div>
 
             <div class="doc-month-grid-wrap">
-                <!-- 左カラム：月間カレンダー -->
+                <!-- 左カラム：医師予定カレンダー (yotei そのまま完全表示) -->
                 <div class="doc-month-cal-card">
-                    <div class="cal-header-row">
-                        <span>月</span><span>火</span><span>水</span><span>木</span><span>金</span>
-                        <span style="color:#38bdf8;">土</span><span style="color:#f87171;">日</span>
-                    </div>
-                    <div class="cal-grid">
-                        ${calCellsHtml}
-                    </div>
+                    <iframe src="/yotei/calendar.php?embed=signage" 
+                            id="yoteiCalFrame"
+                            style="width:100%; height:100%; border:none; display:block; background:#ffffff;"
+                            title="医師予定カレンダー"></iframe>
                 </div>
 
                 <!-- 右カラム：直近・今後の休診＆外来一覧リスト -->
@@ -1643,6 +1640,14 @@ async function fetchLatestData() {
 
             // スライドの再構築（現在のスライド表示を邪魔しないよう次スライド以降で最新反映）
             buildSlides();
+
+            // 医師予定カレンダー iframe の最新化
+            try {
+                const frame = document.getElementById('yoteiCalFrame');
+                if (frame && frame.contentWindow) {
+                    frame.contentWindow.location.reload();
+                }
+            } catch (err) {}
         }
     } catch (e) {
         console.warn('Background sync failed, retaining existing slide cache:', e);
