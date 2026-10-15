@@ -59,14 +59,25 @@ function getSignageData(PDO $pdo): array {
     }
 
     // (5) 緊急災害・安否確認のアクティブ発令チェック
+    // ※ normal（日常運用・出勤チェック）は通常スライドを妨げないため除外。
+    // 　 災害緊急時（disaster）または訓練発令（drill）の場合のみ全画面ジャックとする。
     $emergency = null;
-    $stmt_emg = $pdo->query("SELECT * FROM safety_events WHERE is_active = TRUE ORDER BY created_at DESC LIMIT 1");
+    $stmt_emg = $pdo->query("
+        SELECT * FROM safety_events 
+        WHERE is_active = TRUE 
+          AND (safety_mode IN ('disaster', 'drill') OR (safety_mode IS NULL AND is_disaster_mode = TRUE))
+        ORDER BY event_id DESC 
+        LIMIT 1
+    ");
     $emg_raw = $stmt_emg->fetch(PDO::FETCH_ASSOC);
     if ($emg_raw) {
+        $is_drill = ($emg_raw['safety_mode'] === 'drill');
         $emergency = [
             'id'          => $emg_raw['event_id'],
             'title'       => $emg_raw['title'],
             'description' => $emg_raw['description'],
+            'mode'        => $emg_raw['safety_mode'] ?? ($emg_raw['is_disaster_mode'] ? 'disaster' : 'normal'),
+            'is_drill'    => $is_drill,
             'severity'    => $emg_raw['severity'] ?? 'warning',
             'created_at'  => date('m/d H:i', strtotime($emg_raw['created_at']))
         ];
@@ -644,6 +655,12 @@ $initial_data = getSignageData($pdo);
         .emergency-fullscreen-overlay.active {
             display: flex;
         }
+        .emergency-fullscreen-overlay.drill-mode {
+            background: radial-gradient(circle, #78350f 0%, #451a03 70%, #000000 100%);
+        }
+        .emergency-fullscreen-overlay.drill-mode .emg-header-badge {
+            color: #b45309;
+        }
         @keyframes pulseWarning {
             0% { box-shadow: inset 0 0 60px rgba(220, 38, 38, 0.6); }
             100% { box-shadow: inset 0 0 120px rgba(220, 38, 38, 1); }
@@ -812,7 +829,7 @@ $initial_data = getSignageData($pdo);
 
 <!-- 5. 🚨 緊急安否確認 全画面ジャックオーバーレイ -->
 <div class="emergency-fullscreen-overlay" id="emergencyOverlay">
-    <div class="emg-header-badge">🚨 緊急安否確認 発令中</div>
+    <div class="emg-header-badge" id="emgBadge">🚨 緊急安否確認 発令中</div>
     <div class="emg-title" id="emgTitle">大規模地震警戒アラート</div>
     <div class="emg-desc" id="emgDesc">
         全職員は安全を確保の上、スマートフォンより安否状況（無事／出勤可否）を至急報告してください。
@@ -1177,14 +1194,23 @@ async function fetchLatestData() {
 // 緊急安否確認の発令チェック
 function checkEmergencyStatus() {
     const overlay = document.getElementById('emergencyOverlay');
+    const badge = document.getElementById('emgBadge');
     if (signageData.emergency) {
-        document.getElementById('emgTitle').textContent = signageData.emergency.title || '緊急災害警報発令中';
+        if (signageData.emergency.is_drill) {
+            overlay.classList.add('drill-mode');
+            if (badge) badge.textContent = '🛡️ 安否確認訓練 実施中';
+        } else {
+            overlay.classList.remove('drill-mode');
+            if (badge) badge.textContent = '🚨 緊急安否確認 発令中';
+        }
+        document.getElementById('emgTitle').textContent = signageData.emergency.title || '安否確認アラート';
         document.getElementById('emgDesc').textContent = signageData.emergency.description || '安全を確保し安否を報告してください。';
         overlay.classList.add('active');
         isPaused = true;
         clearTimeout(slideTimer);
     } else {
         overlay.classList.remove('active');
+        overlay.classList.remove('drill-mode');
         if (isPaused && document.getElementById('pauseBadge').style.display === 'none') {
             isPaused = false;
             resetSlideTimer();
