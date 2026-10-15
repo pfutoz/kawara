@@ -1183,7 +1183,14 @@ foreach ($paged_raw_posts as $p) {
         .badge-pinned { background: #334155; color: #fff; }
         .badge-cat { padding: 2px 7px; border-radius: 4px; color: #fff; font-size: 0.72rem; font-weight: 700; }
 
-        .post-title-wrapper { margin-bottom: 4px; }
+        .post-title-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 10px;
+            margin-bottom: 4px;
+        }
+        .post-title-wrapper { flex: 1; }
         .post-title {
             font-size: 1.1rem;
             font-weight: 700;
@@ -1194,6 +1201,28 @@ foreach ($paged_raw_posts as $p) {
         .post-title:hover { color: var(--accent); }
         .post-title.text-urgent { color: #e11d48; }
         .post-author-tag { font-size: 0.78rem; color: #64748b; margin-left: 4px; font-weight: normal; }
+
+        .btn-card-edit {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            background: #ea580c;
+            color: #ffffff !important;
+            font-size: 0.76rem;
+            font-weight: 700;
+            padding: 3px 9px;
+            border-radius: 4px;
+            text-decoration: none;
+            box-shadow: 0 1px 2px rgba(234, 88, 12, 0.25);
+            transition: all 0.15s ease;
+            white-space: nowrap;
+            flex-shrink: 0;
+        }
+        .btn-card-edit:hover {
+            background: #c2410c;
+            transform: translateY(-1px);
+            box-shadow: 0 2px 5px rgba(234, 88, 12, 0.35);
+        }
 
         .post-meta {
             font-size: 0.78rem;
@@ -2109,6 +2138,10 @@ foreach ($paged_raw_posts as $p) {
             font-size: 0.86rem;
             margin-bottom: 1px;
         }
+        .density-ultra .btn-card-edit {
+            padding: 1px 6px;
+            font-size: 0.68rem;
+        }
         .density-ultra .post-meta {
             font-size: 0.70rem;
             gap: 6px;
@@ -2616,6 +2649,7 @@ foreach ($paged_raw_posts as $p) {
                         $read_cnt   = $p['read_count'];
                         $total_cnt  = $p['total_targets'];
                         $unread_cnt = max(0, $total_cnt - $read_cnt);
+                        $can_edit_post = ($is_admin || $is_jimucho || (int)($p['author_id'] ?? 0) === $current_staff_id);
                     ?>
                         <div class="post-card <?= $card_class ?>">
                             <!-- 未読パルス発光インジケーター -->
@@ -2654,13 +2688,22 @@ foreach ($paged_raw_posts as $p) {
                                 </div>
                             </div>
 
-                            <div class="post-title-wrapper">
-                                <a href="view_post.php?id=<?= $p['post_id'] ?>" 
-                                   class="post-title <?= $p_lvl === 'urgent' ? 'text-urgent' : '' ?>"
-                                   title="<?= htmlspecialchars($p['plain_summary']) ?>">
-                                    <?= htmlspecialchars($p['title']) ?>
-                                </a>
-                                <span class="post-author-tag">(<?= htmlspecialchars($p['author_dept'] ?? '事務部') ?>)</span>
+                            <div class="post-title-row">
+                                <div class="post-title-wrapper">
+                                    <a href="view_post.php?id=<?= $p['post_id'] ?>" 
+                                       class="post-title <?= $p_lvl === 'urgent' ? 'text-urgent' : '' ?>"
+                                       title="<?= htmlspecialchars($p['plain_summary']) ?>">
+                                        <?= htmlspecialchars($p['title']) ?>
+                                    </a>
+                                    <span class="post-author-tag">(<?= htmlspecialchars($p['author_dept'] ?? '事務部') ?>)</span>
+                                </div>
+                                <?php if ($can_edit_post): ?>
+                                    <a href="create_post.php?id=<?= $p['post_id'] ?>&return_to=list" 
+                                       class="btn-card-edit" 
+                                       title="この記事を編集・修正する">
+                                        ✏️ 編集
+                                    </a>
+                                <?php endif; ?>
                             </div>
 
                             <div class="post-meta">

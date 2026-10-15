@@ -14,6 +14,7 @@ if (file_exists(__DIR__ . '/includes/google_calendar_helper.php')) {
 $login_user = checkAuthOrAutoLogin($pdo, $_SERVER['REQUEST_URI'] ?? '');
 $current_staff_id = (int)$login_user['staff_id'];
 $is_admin = (bool)($login_user['is_admin'] ?? false);
+$is_jimucho = ($current_staff_id === 15 || mb_strpos($login_user['staff_name'] ?? '', '山本') !== false || mb_strpos($login_user['role'] ?? '', '事務') !== false);
 $has_line_id = !empty(trim($login_user['line_user_id'] ?? ''));
 
 
@@ -114,7 +115,7 @@ $post = $stmt->fetch();
 
 if (!$post) { exit('指定された記事が存在しません。'); }
 
-$can_edit = ($is_admin || $post['author_id'] == $current_staff_id);
+$can_edit = ($is_admin || $is_jimucho || (int)($post['author_id'] ?? 0) === $current_staff_id);
 
 // 添付画像の取得
 $img_stmt = $pdo->prepare("SELECT file_path FROM post_images WHERE post_id = :pid ORDER BY image_id ASC");
@@ -284,6 +285,9 @@ foreach ($target_members as $tm) {
             👤 <?= htmlspecialchars($login_user['staff_name']) ?>
         </span>
         <a href="login.php?switch_user=1" title="別のアカウントに切り替える" style="color:rgba(255,255,255,0.85); font-size:0.75rem; text-decoration:underline;">切替</a>
+        <?php if ($can_edit): ?>
+            <a href="create_post.php?id=<?= $post_id ?>&return_to=view" class="btn-back" style="background:#ea580c; color:#fff; font-weight:bold; box-shadow:0 1px 3px rgba(0,0,0,0.25);" title="この記事を修正・編集する">✏️ 記事編集</a>
+        <?php endif; ?>
         <a href="index.php" class="btn-back" style="background:rgba(255,255,255,0.25);">🏠 メニュー</a>
         <a href="kawara_list.php" class="btn-back">← 一覧</a>
     </div>
@@ -295,17 +299,25 @@ foreach ($target_members as $tm) {
             <div class="alert-notice"><?= htmlspecialchars($notice_msg) ?></div>
         <?php endif; ?>
 
-        <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
-            <span style="background:<?= $post['color_code'] ?? '#005a9c' ?>; color:#fff; padding:2px 8px; border-radius:4px; font-size:0.8rem; font-weight:bold;">
-                <?= htmlspecialchars($post['icon_emoji']) ?> <?= htmlspecialchars($post['category_name']) ?>
-            </span>
-            <?php if (!$post['is_my_read']): ?>
-                <span style="background:#f3e8ff; color:#6b21a8; border:1px solid #9333ea; padding:2px 8px; border-radius:4px; font-size:0.8rem; font-weight:bold;">🟣 未読</span>
-            <?php else: ?>
-                <span style="background:#e0f2fe; color:#0369a1; border:1px solid #0284c7; padding:2px 8px; border-radius:4px; font-size:0.8rem; font-weight:bold;">🩵 既読</span>
-            <?php endif; ?>
-            <?php if ($post['is_pinned']): ?>
-                <span style="background:#343a40; color:#fff; padding:2px 8px; border-radius:4px; font-size:0.75rem; font-weight:bold;">📌 固定</span>
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+            <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
+                <span style="background:<?= $post['color_code'] ?? '#005a9c' ?>; color:#fff; padding:2px 8px; border-radius:4px; font-size:0.8rem; font-weight:bold;">
+                    <?= htmlspecialchars($post['icon_emoji']) ?> <?= htmlspecialchars($post['category_name']) ?>
+                </span>
+                <?php if (!$post['is_my_read']): ?>
+                    <span style="background:#f3e8ff; color:#6b21a8; border:1px solid #9333ea; padding:2px 8px; border-radius:4px; font-size:0.8rem; font-weight:bold;">🟣 未読</span>
+                <?php else: ?>
+                    <span style="background:#e0f2fe; color:#0369a1; border:1px solid #0284c7; padding:2px 8px; border-radius:4px; font-size:0.8rem; font-weight:bold;">🩵 既読</span>
+                <?php endif; ?>
+                <?php if ($post['is_pinned']): ?>
+                    <span style="background:#343a40; color:#fff; padding:2px 8px; border-radius:4px; font-size:0.75rem; font-weight:bold;">📌 固定</span>
+                <?php endif; ?>
+            </div>
+
+            <?php if ($can_edit): ?>
+                <a href="create_post.php?id=<?= $post_id ?>&return_to=view" class="btn-top-edit" style="display:inline-flex; align-items:center; gap:5px; background:#ea580c; color:#ffffff; padding:6px 14px; border-radius:6px; font-size:0.86rem; font-weight:bold; text-decoration:none; box-shadow:0 2px 4px rgba(234,88,12,0.25); transition:all 0.15s ease;" title="この記事を修正・編集する">
+                    <span>✏️</span> <span>この記事を編集する</span>
+                </a>
             <?php endif; ?>
         </div>
 
