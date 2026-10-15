@@ -111,13 +111,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $active_tab = 'staff';
     }
 
+    if ($action === 'reset_device_auth') {
+        $st_id = (int)($_POST['staff_id'] ?? 0);
+        if ($st_id > 0) {
+            revokeStaffDeviceTokens($pdo, $st_id);
+            $msg = '対象スタッフのスマホ端末連携を即時リセット（失効）しました。落としたスマホからのアクセスはすべて遮断されます。';
+        }
+        $active_tab = 'staff';
+    }
+
     if ($action === 'delete_staff') {
         $st_id = (int)($_POST['staff_id'] ?? 0);
         if ($st_id > 0) {
-            // 論理削除 (is_deleted = TRUE)
-            $stmt_d = $pdo->prepare("UPDATE staff SET is_deleted = TRUE WHERE staff_id = :id");
+            // 論理削除 ＆ 端末トークン失効 ＆ LINE連携クリア
+            revokeStaffDeviceTokens($pdo, $st_id);
+            $stmt_d = $pdo->prepare("UPDATE staff SET is_deleted = TRUE, line_user_id = NULL, updated_at = NOW() WHERE staff_id = :id");
             $stmt_d->execute([':id' => $st_id]);
-            $msg = 'スタッフを削除（無効化）しました。';
+            $msg = 'スタッフを削除（無効化・端末アクセス即時遮断）しました。';
         }
         $active_tab = 'staff';
     }
@@ -451,9 +461,14 @@ $gcal_event_count = $pdo->query("SELECT COUNT(*) FROM google_calendar_events_cac
                             <?php endif; ?>
                         </td>
                         <td><?= $st['is_admin'] ? '🛡️ 管理者' : '一般' ?></td>
-                        <td>
+                        <td style="white-space:nowrap;">
                             <button type="button" class="btn-edit" onclick='editStaff(<?= json_encode($st, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP) ?>)'>✏️ 編集</button>
-                            <form method="POST" style="display:inline;" onsubmit="return confirm('<?= htmlspecialchars($st['staff_name']) ?> さんを削除（無効化）してもよろしいですか？');">
+                            <form method="POST" style="display:inline;" onsubmit="return confirm('<?= htmlspecialchars($st['staff_name']) ?> さんのスマホ端末連携を即時リセット（失効）しますか？\n\n落としたスマホからのアクセスが遮断されます。新しい端末から再度認証すれば再開できます。');">
+                                <input type="hidden" name="action" value="reset_device_auth">
+                                <input type="hidden" name="staff_id" value="<?= $st['staff_id'] ?>">
+                                <button type="submit" style="background:#fffbeb; color:#92400e; border:1px solid #fde68a; padding:4px 8px; border-radius:4px; font-size:0.78rem; font-weight:bold; cursor:pointer;" title="スマホ紛失時の即時アクセス遮断">📱 端末リセット</button>
+                            </form>
+                            <form method="POST" style="display:inline;" onsubmit="return confirm('<?= htmlspecialchars($st['staff_name']) ?> さんを削除（退職・無効化）してもよろしいですか？\n\n端末アクセスも即座に完全遮断されます。');">
                                 <input type="hidden" name="action" value="delete_staff">
                                 <input type="hidden" name="staff_id" value="<?= $st['staff_id'] ?>">
                                 <button type="submit" class="btn-del">🗑️ 削除</button>

@@ -7,6 +7,7 @@ uploads/tmp/*
 uploads/temp_print/*
 !uploads/temp_print/.gitkeep
 *.tmp
+*.bak
 *_backup.php
 *_draft.php
 

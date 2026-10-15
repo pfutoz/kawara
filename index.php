@@ -571,104 +571,6 @@ $msg = $_GET['msg'] ?? '';
             .portal-search-form { max-width: 100%; }
             .header-title span { display: none; }
         }
-
-        /* 📱 LINE連携モーダル */
-        .line-modal-overlay {
-            display: none;
-            position: fixed;
-            top: 0; left: 0; right: 0; bottom: 0;
-            background: rgba(15, 23, 42, 0.65);
-            backdrop-filter: blur(4px);
-            z-index: 10000;
-            align-items: center;
-            justify-content: center;
-            padding: 16px;
-        }
-        .line-modal-overlay.active { display: flex; animation: fade-in 0.2s; }
-        .line-modal-card {
-            background: #ffffff;
-            width: 100%;
-            max-width: 460px;
-            border-radius: 12px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.25);
-            overflow: hidden;
-            display: flex;
-            flex-direction: column;
-            max-height: 90vh;
-        }
-        .line-modal-header {
-            background: #06c755;
-            color: #ffffff;
-            padding: 10px 14px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        .line-modal-header h3 { font-size: 0.95rem; font-weight: bold; margin: 0; }
-        .line-modal-close {
-            background: none; border: none; color: #fff; font-size: 1.4rem; line-height: 1; cursor: pointer;
-        }
-        .line-modal-body { padding: 14px; overflow-y: auto; font-size: 0.85rem; }
-        .line-step-box {
-            background: #f8fafc;
-            border: 1px solid #e2e8f0;
-            border-radius: 6px;
-            padding: 10px;
-            margin-bottom: 10px;
-        }
-        .line-step-num {
-            background: #06c755;
-            color: #fff;
-            padding: 1px 6px;
-            border-radius: 8px;
-            font-size: 0.7rem;
-            font-weight: bold;
-            margin-right: 5px;
-        }
-        .line-step-title { font-weight: bold; color: #1e293b; font-size: 0.82rem; }
-        .link-code-digit {
-            font-size: 1.8rem;
-            font-weight: 900;
-            letter-spacing: 8px;
-            color: #065f46;
-            background: #ecfdf5;
-            border: 2px dashed #06c755;
-            border-radius: 6px;
-            padding: 6px 10px;
-            text-align: center;
-            margin: 8px 0;
-        }
-        .btn-copy-code {
-            background: #ffffff;
-            border: 1px solid #cbd5e1;
-            color: #475569;
-            padding: 3px 8px;
-            border-radius: 4px;
-            font-size: 0.72rem;
-            font-weight: bold;
-            cursor: pointer;
-        }
-        .line-waiting-box {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            font-size: 0.76rem;
-            color: #059669;
-            background: #f0fdf4;
-            padding: 6px 10px;
-            border-radius: 6px;
-            margin-top: 6px;
-            border: 1px solid #bbf7d0;
-        }
-        .line-spinner {
-            width: 14px;
-            height: 14px;
-            border: 2px solid #86efac;
-            border-top-color: #059669;
-            border-radius: 50%;
-            animation: spin 0.8s linear infinite;
-        }
-        @keyframes spin { to { transform: rotate(360deg); } }
     </style>
 </head>
 <body>
@@ -688,9 +590,12 @@ $msg = $_GET['msg'] ?? '';
                     <span class="user-tag"><?= htmlspecialchars($login_user['role'] ?? '職員') ?></span>
                     <span style="font-size:0.68rem; opacity:0.85;">切替</span>
                 </a>
-                <button type="button" class="btn-line-header <?= $has_line_id ? 'is-linked' : 'is-unlinked' ?>" onclick="openLineLinkModal()" title="LINE連携設定">
+                <a href="line_link.php?return_url=index.php" class="btn-line-header <?= $has_line_id ? 'is-linked' : 'is-unlinked' ?>" title="LINE連携設定">
                     <?= $has_line_id ? '🟢 LINE連携済' : '📱 LINE未登録' ?>
-                </button>
+                </a>
+                <a href="line_guide.php" class="btn-line-header" style="background:#f0fdf4; color:#15803d; border:1px solid #bbf7d0;" title="LINE登録かんたん手順書を開く">
+                    📖 手順書
+                </a>
                 <a href="/index.php" class="btn-portal">🏠 総合ポータル</a>
             </div>
         </div>
@@ -746,6 +651,7 @@ $msg = $_GET['msg'] ?? '';
             </form>
             <div class="portal-quick-tags">
                 <span class="portal-tag-label">クイック:</span>
+                <a href="doctor_schedule.php" class="portal-tag-link" style="color:#1e3a8a; border-color:#bfdbfe; background:#eff6ff; font-weight:bold;">🩺 医師予定表</a>
                 <a href="kawara_list.php?date_filter=today" class="portal-tag-link">📅 今日の予定</a>
                 <a href="kawara_list.php?date_filter=plus7" class="portal-tag-link">⏰ 直近+7日</a>
                 <a href="kawara_list.php?date_filter=past" class="portal-tag-link">📁 過去ログ</a>
@@ -772,7 +678,19 @@ $msg = $_GET['msg'] ?? '';
                 </div>
             </a>
 
-            <!-- 2. 新規投稿作成 -->
+            <!-- 2. 医師予定表・休診情報 -->
+            <a href="doctor_schedule.php" class="menu-card" style="border-left: 3.5px solid #1e3a8a;">
+                <div class="menu-icon-box" style="background:#eff6ff; color:#1e3a8a; border:1px solid #bfdbfe;">🩺</div>
+                <div class="menu-info">
+                    <div class="menu-title">
+                        <span>医師予定表・休診</span>
+                        <span class="menu-arrow">→</span>
+                    </div>
+                    <div class="menu-desc">外来担当医・週間予定・休診案内</div>
+                </div>
+            </a>
+
+            <!-- 3. 新規投稿作成 -->
             <a href="create_post.php" class="menu-card">
                 <div class="menu-icon-box icon-create">✏️</div>
                 <div class="menu-info">
@@ -836,7 +754,19 @@ $msg = $_GET['msg'] ?? '';
                 </a>
             <?php endif; ?>
 
-            <!-- 6. かんたん使い方ガイド -->
+            <!-- 6. 📱 職員向けLINE登録手順書 -->
+            <a href="line_guide.php" class="menu-card" style="border-left: 3.5px solid #06c755;">
+                <div class="menu-icon-box" style="background:#e8f9ee; color:#06c755; border:1px solid #bbf7d0;">📱</div>
+                <div class="menu-info">
+                    <div class="menu-title">
+                        <span>LINE登録手順書</span>
+                        <span class="menu-arrow">→</span>
+                    </div>
+                    <div class="menu-desc">スマホ閲覧・安否確認の初期登録（1分）</div>
+                </div>
+            </a>
+
+            <!-- 7. かんたん使い方ガイド -->
             <a href="help.php" class="menu-card">
                 <div class="menu-icon-box icon-help">❓</div>
                 <div class="menu-info">
@@ -892,194 +822,5 @@ $msg = $_GET['msg'] ?? '';
             </div>
         <?php endif; ?>
     </main>
-
-    <!-- 📱 LINE公式アカウント連携モーダル -->
-    <div id="lineLinkModal" class="line-modal-overlay" onclick="if(event.target===this) closeLineLinkModal()">
-        <div class="line-modal-card">
-            <div class="line-modal-header">
-                <h3>📱 公式LINE 連携設定</h3>
-                <button type="button" class="line-modal-close" onclick="closeLineLinkModal()">&times;</button>
-            </div>
-            <div class="line-modal-body">
-                <div style="display:flex; justify-content:space-between; align-items:center; background:#f1f5f9; padding:6px 10px; border-radius:6px; margin-bottom:10px;">
-                    <div style="font-size:0.82rem; font-weight:bold; color:#1e293b;">
-                        👤 <?= htmlspecialchars($login_user['staff_name']) ?> 様 (<?= htmlspecialchars($login_user['role']) ?>)
-                    </div>
-                    <div id="modalLineBadge" style="font-size:0.72rem; font-weight:bold; padding:2px 6px; border-radius:10px;">
-                        確認中...
-                    </div>
-                </div>
-
-                <div id="modalUnlinkedView">
-                    <div class="line-step-box">
-                        <div style="display:flex; align-items:center; margin-bottom:6px;">
-                            <span class="line-step-num">Step 1</span>
-                            <span class="line-step-title">公式LINEを友だち追加</span>
-                        </div>
-                        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
-                            <div style="text-align:center;">
-                                <img id="lineQrImg" src="https://api.qrserver.com/v1/create-qr-code/?size=90x90&data=https%3A%2F%2Fline.me%2FR%2Fti%2Fp%2F%40tmw3446q" alt="LINE友だち追加QR" style="width:85px; height:85px; border:1px solid #cbd5e1; border-radius:4px; padding:2px; background:#fff;">
-                                <div style="font-size:0.62rem; color:#64748b; margin-top:2px;">QRスキャン</div>
-                            </div>
-                            <div style="flex:1; min-width:160px;">
-                                <div style="font-size:0.76rem; color:#334155; margin-bottom:4px;">
-                                    スマホカメラでQR読取、または友だち追加を開く：
-                                </div>
-                                <a id="btnLineAddFriend" href="https://line.me/R/ti/p/@tmw3446q" target="_blank" style="display:inline-flex; align-items:center; gap:4px; background:#06c755; color:#fff; padding:4px 10px; border-radius:4px; font-size:0.74rem; font-weight:bold; text-decoration:none;">
-                                    💬 LINEで開く
-                                </a>
-                                <div style="font-size:0.68rem; color:#64748b; margin-top:3px;">
-                                    ID: <span id="modalBotId" style="font-weight:bold; color:#0f172a;">@tmw3446q</span>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="line-step-box">
-                        <div style="display:flex; align-items:center; margin-bottom:4px;">
-                            <span class="line-step-num">Step 2</span>
-                            <span class="line-step-title">トーク画面でこのコードを送信</span>
-                        </div>
-                        <div style="font-size:0.74rem; color:#475569;">
-                            公式LINEのトークに、下記の【数字4桁】をそのまま送信：
-                        </div>
-                        <div class="link-code-digit" id="lineLinkCode">----</div>
-                        <div style="display:flex; justify-content:space-between; align-items:center;">
-                            <button type="button" class="btn-copy-code" onclick="copyLinkCode()">📋 コードをコピー</button>
-                            <div style="font-size:0.72rem; color:#64748b;">
-                                有効期限: <span id="lineCodeCountdown" style="font-weight:bold; color:#d97706;">--:--</span>
-                                <button type="button" onclick="generateNewLinkCode()" style="background:none; border:none; color:#0284c7; cursor:pointer; font-size:0.7rem; text-decoration:underline; margin-left:3px;">再発行</button>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="line-waiting-box">
-                        <div class="line-spinner"></div>
-                        <div>LINEでコード送信待ち… (受信すると自動完了します)</div>
-                    </div>
-                </div>
-
-                <div id="modalLinkedView" style="display:none; text-align:center; padding:12px 6px;">
-                    <div style="font-size:2.4rem; margin-bottom:6px;">🟢</div>
-                    <h4 style="color:#059669; font-weight:800; font-size:1rem; margin-bottom:4px;">公式LINEと連携中です</h4>
-                    <p style="font-size:0.78rem; color:#475569; margin-bottom:12px;">
-                        有事のBCP生存点呼や、重要アナウンスがあなたのLINEへ届きます。
-                    </p>
-                    <button type="button" onclick="unlinkLine()" style="background:#fee2e2; color:#dc2626; border:1px solid #fca5a5; padding:5px 12px; border-radius:4px; font-size:0.76rem; font-weight:bold; cursor:pointer;">
-                        連携を解除する
-                    </button>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <script>
-        let pollTimer = null;
-        let expireTimer = null;
-        let expiresAtTs = 0;
-
-        function openLineLinkModal() {
-            document.getElementById('lineLinkModal').classList.add('active');
-            checkCurrentLineStatus();
-        }
-
-        function closeLineLinkModal() {
-            document.getElementById('lineLinkModal').classList.remove('active');
-            if (pollTimer) clearInterval(pollTimer);
-            if (expireTimer) clearInterval(expireTimer);
-        }
-
-        async function checkCurrentLineStatus() {
-            try {
-                const res = await fetch('api/line_link_api.php?action=status');
-                const data = await res.json();
-                const badge = document.getElementById('modalLineBadge');
-                
-                if (data.is_linked) {
-                    badge.textContent = '🟢 連携済み';
-                    badge.style.background = '#e8f9ee';
-                    badge.style.color = '#06c755';
-                    document.getElementById('modalUnlinkedView').style.display = 'none';
-                    document.getElementById('modalLinkedView').style.display = 'block';
-                } else {
-                    badge.textContent = '⚪ 未連携';
-                    badge.style.background = '#fef3c7';
-                    badge.style.color = '#b45309';
-                    document.getElementById('modalUnlinkedView').style.display = 'block';
-                    document.getElementById('modalLinkedView').style.display = 'none';
-                    generateNewLinkCode();
-                }
-            } catch (err) {
-                console.error(err);
-            }
-        }
-
-        async function generateNewLinkCode() {
-            try {
-                const res = await fetch('api/line_link_api.php?action=generate_code');
-                const data = await res.json();
-                if (data.success) {
-                    document.getElementById('lineLinkCode').textContent = data.code;
-                    expiresAtTs = Date.now() + (data.expires_in * 1000);
-                    startCountdown();
-                    startPolling();
-                }
-            } catch (err) {
-                console.error(err);
-            }
-        }
-
-        function startCountdown() {
-            if (expireTimer) clearInterval(expireTimer);
-            const cdEl = document.getElementById('lineCodeCountdown');
-            expireTimer = setInterval(() => {
-                const diff = Math.max(0, Math.floor((expiresAtTs - Date.now()) / 1000));
-                const m = Math.floor(diff / 60);
-                const s = diff % 60;
-                cdEl.textContent = `${m}:${s < 10 ? '0' : ''}${s}`;
-                if (diff <= 0) {
-                    clearInterval(expireTimer);
-                    document.getElementById('lineLinkCode').textContent = '期限切';
-                }
-            }, 1000);
-        }
-
-        function startPolling() {
-            if (pollTimer) clearInterval(pollTimer);
-            pollTimer = setInterval(async () => {
-                try {
-                    const res = await fetch('api/line_link_api.php?action=status');
-                    const data = await res.json();
-                    if (data.is_linked) {
-                        clearInterval(pollTimer);
-                        if (expireTimer) clearInterval(expireTimer);
-                        checkCurrentLineStatus();
-                        location.reload();
-                    }
-                } catch (e) {}
-            }, 3000);
-        }
-
-        function copyLinkCode() {
-            const code = document.getElementById('lineLinkCode').textContent.trim();
-            navigator.clipboard.writeText(code).then(() => {
-                alert('連携コード ' + code + ' をコピーしました！LINEトーク画面に貼り付けて送信してください。');
-            });
-        }
-
-        async function unlinkLine() {
-            if (!confirm('公式LINEとの連携を解除しますか？\n（解除すると緊急連絡や安否点呼がスマホLINEに届かなくなります）')) return;
-            try {
-                const res = await fetch('api/line_link_api.php?action=unlink', { method: 'POST' });
-                const data = await res.json();
-                if (data.success) {
-                    alert('連携を解除しました。');
-                    location.reload();
-                }
-            } catch (err) {
-                alert('解除に失敗しました');
-            }
-        }
-    </script>
 </body>
 </html>

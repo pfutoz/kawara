@@ -2176,9 +2176,9 @@ foreach ($paged_raw_posts as $p) {
                 </a>
 
                 <!-- 📱 LINE連携バッジ -->
-                <button type="button" class="btn-line-header <?= $has_line_id ? 'is-linked' : 'is-unlinked' ?>" onclick="openLineLinkModal()" title="LINE連携設定">
+                <a href="line_link.php?return_url=kawara_list.php" class="btn-line-header <?= $has_line_id ? 'is-linked' : 'is-unlinked' ?>" title="LINE連携設定">
                     <?= $has_line_id ? '🟢 LINE済' : '📱 LINE未' ?>
-                </button>
+                </a>
 
                 <!-- ☰ その他メニュー ドロップダウン -->
                 <div class="header-dropdown" id="headerDropdown">
@@ -2897,51 +2897,7 @@ foreach ($paged_raw_posts as $p) {
         </div>
     </div>
 
-    <!-- 3. 📱 LINE連携モーダル -->
-    <div class="modal-overlay" id="lineLinkModal" onclick="if(event.target===this) closeLineLinkModal()">
-        <div class="modal-card line-modal-card">
-            <div class="modal-header" style="background:#06c755; color:#fff;">
-                <h3 style="color:#fff;">📱 LINE公式アカウント連携</h3>
-                <button type="button" class="modal-close" style="color:#fff;" onclick="closeLineLinkModal()">×</button>
-            </div>
-            <div class="modal-body">
-                <div style="text-align:center; margin-bottom:14px;">
-                    <div id="modalLineBadge" style="display:inline-block; font-size:0.8rem; font-weight:800; padding:3px 10px; border-radius:12px;">
-                        確認中...
-                    </div>
-                </div>
 
-                <div id="modalUnlinkedView">
-                    <p style="font-size:0.86rem; color:#334155; margin-bottom:10px;">
-                        院内かわら版公式LINEと友だち追加し、下の連携コードを送信してください。
-                    </p>
-                    <div class="link-code-digit" id="lineLinkCode">----</div>
-                    <div style="text-align:center; margin-bottom:12px;">
-                        <button type="button" onclick="copyLinkCode()" style="background:#fff; border:1px solid #cbd5e1; padding:4px 12px; border-radius:4px; font-size:0.8rem; font-weight:bold; cursor:pointer;">
-                            📋 コードをコピー
-                        </button>
-                    </div>
-                    <div style="text-align:center;">
-                        <a id="btnLineAddFriend" href="#" target="_blank" style="background:#06c755; color:#fff; text-decoration:none; padding:8px 16px; border-radius:6px; font-weight:bold; font-size:0.88rem; display:inline-block;">
-                            👉 LINEで友だち追加する
-                        </a>
-                    </div>
-                </div>
-
-                <div id="modalLinkedView" style="display:none; text-align:center; padding:10px 0;">
-                    <div style="font-size:2.5rem; margin-bottom:6px;">✅</div>
-                    <h4 style="color:#15803d; margin-bottom:6px;">LINE連携完了済み</h4>
-                    <p style="font-size:0.84rem; color:#64748b; margin-bottom:14px;">
-                        緊急連絡やBCP安否確認があなたのLINEへ届きます。<br>
-                        登録ID: <span id="modalMaskedId" style="font-family:monospace; background:#e2e8f0; padding:2px 6px; border-radius:4px;"></span>
-                    </p>
-                    <button type="button" onclick="unlinkMyLine()" style="background:#fff; color:#dc2626; border:1px solid #fca5a5; padding:6px 12px; border-radius:6px; font-size:0.78rem; font-weight:bold; cursor:pointer;">
-                        連携を解除する
-                    </button>
-                </div>
-            </div>
-        </div>
-    </div>
 
     <!-- ==========================================
          JavaScript スクリプト
@@ -3337,97 +3293,10 @@ foreach ($paged_raw_posts as $p) {
                 });
         }
 
-        // ==========================================
-        // 📱 LINE連携モーダル制御
-        // ==========================================
-        let linePollingTimer = null;
-        async function openLineLinkModal() {
-            openModal('lineLinkModal');
-            await refreshLineStatus();
-        }
-        function closeLineLinkModal() {
-            closeModal('lineLinkModal');
-            if (linePollingTimer) clearInterval(linePollingTimer);
-        }
-        async function refreshLineStatus() {
-            try {
-                const res = await fetch('api/line_link_status.php?action=status', { cache: 'no-store' });
-                if (!res.ok) return;
-                const data = await res.json();
-                if (!data.success) return;
-
-                const badge = document.getElementById('modalLineBadge');
-                const unlinkedView = document.getElementById('modalUnlinkedView');
-                const linkedView = document.getElementById('modalLinkedView');
-                const maskedIdEl = document.getElementById('modalMaskedId');
-                const btnFriend = document.getElementById('btnLineAddFriend');
-
-                if (data.bot_add_url && btnFriend) {
-                    btnFriend.href = data.bot_add_url;
-                }
-
-                if (data.is_linked) {
-                    badge.textContent = '🟢 連携中';
-                    badge.style.background = '#dcfce7';
-                    badge.style.color = '#15803d';
-                    unlinkedView.style.display = 'none';
-                    linkedView.style.display = 'block';
-                    maskedIdEl.textContent = data.line_user_id_mask;
-                    if (linePollingTimer) clearInterval(linePollingTimer);
-                } else {
-                    badge.textContent = '⚠️ 未連携';
-                    badge.style.background = '#fef3c7';
-                    badge.style.color = '#b45309';
-                    unlinkedView.style.display = 'block';
-                    linkedView.style.display = 'none';
-
-                    if (data.active_code) {
-                        document.getElementById('lineLinkCode').textContent = data.active_code;
-                    } else {
-                        const codeRes = await fetch('api/line_link_status.php?action=generate_code', { method: 'POST' });
-                        const codeData = await codeRes.json();
-                        if (codeData.success) {
-                            document.getElementById('lineLinkCode').textContent = codeData.link_code;
-                        }
-                    }
-
-                    if (!linePollingTimer) {
-                        linePollingTimer = setInterval(refreshLineStatus, 4000);
-                    }
-                }
-            } catch (e) {
-                console.error(e);
-            }
-        }
-
-        function copyLinkCode() {
-            const code = document.getElementById('lineLinkCode').textContent.trim();
-            if (!code || code === '----') return;
-            navigator.clipboard.writeText(code).then(() => {
-                alert('連携コード【' + code + '】をコピーしました！LINEのトーク画面に貼り付けて送信してください。');
-            }).catch(() => {
-                alert('コード：' + code);
-            });
-        }
-
-        async function unlinkMyLine() {
-            if (!confirm('LINE連携を解除しますか？')) return;
-            try {
-                const res = await fetch('api/line_link_status.php?action=unlink', { method: 'POST' });
-                const data = await res.json();
-                if (data.success) {
-                    alert('LINE連携を解除しました。');
-                    refreshLineStatus();
-                }
-            } catch (e) {
-                alert('解除に失敗しました。');
-            }
-        }
-
         function checkLineIdStatus(e, hasLine) {
             if (e.target.checked && !hasLine) {
                 if (confirm("LINE IDがまだ登録されていません。\n今すぐLINE連携を設定しますか？")) {
-                    openLineLinkModal();
+                    window.location.href = 'line_link.php?return_url=kawara_list.php';
                 }
                 e.target.checked = false;
             }

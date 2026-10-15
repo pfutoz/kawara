@@ -583,7 +583,7 @@
             </div>
             <div class="header-meta">
                 <div><strong>作成者:</strong> 事務長（山本太）/ 開発担当</div>
-                <div><strong>改定日:</strong> 2026年10月9日（Googleカレンダー双方向書き込みAPI・個人カレンダー登録連携・外来休診表示・安定稼働版）</div>
+                <div><strong>改定日:</strong> 2026年10月12日（外部連携REST API基盤 v1.0.0策定・対話的API仕様書/テスター配備・Googleカレンダー双方向・本番同期）</div>
                 <div><strong>適用対象:</strong> 院内システム（本番サーバー 192.168.1.16 完全同期）</div>
                 <button type="button" class="btn-print" onclick="window.print()">🖨️ A4印刷する</button>
             </div>
@@ -591,6 +591,23 @@
     </header>
 
     <div class="container">
+
+        <!-- 外部連携REST API基盤 バナー -->
+        <div style="background: #f0f9ff; border: 2px solid #bae6fd; border-left: 6px solid #0284c7; border-radius: 12px; padding: 1.2rem 1.5rem; margin-bottom: 1.5rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem; box-shadow: 0 4px 12px rgba(2, 132, 199, 0.08);">
+            <div>
+                <div style="font-size: 0.8rem; font-weight: 800; color: #0284c7; letter-spacing: 0.05em; margin-bottom: 4px;">⚡ システム連携・開発者向け最新仕様</div>
+                <div style="font-weight: 800; font-size: 1.15rem; color: #0369a1; margin-bottom: 4px;">外部連携REST API基盤 (v1.0.0) ＆ 全API連携仕様書を策定しました</div>
+                <div style="font-size: 0.9rem; color: #0c4a6e;">記事一覧・詳細・イベント展開・サマリー統計・iframeウィジェット・embed.jsおよび、Googleカレンダー・LINE・印刷・災害BCPの全仕様書。</div>
+            </div>
+            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                <a href="API仕様書.html" style="background: #0284c7; color: #ffffff; padding: 10px 18px; border-radius: 8px; font-weight: bold; text-decoration: none; font-size: 0.92rem; white-space: nowrap; box-shadow: 0 2px 6px rgba(2, 132, 199, 0.3);">
+                    📑 全API仕様書を見る →
+                </a>
+                <a href="../api/index.php" target="_blank" style="background: #0f172a; color: #38bdf8; border: 1px solid #38bdf8; padding: 10px 16px; border-radius: 8px; font-weight: bold; text-decoration: none; font-size: 0.92rem; white-space: nowrap;">
+                    🚀 ライブテスター起動
+                </a>
+            </div>
+        </div>
 
         <!-- 運用懸念・引継ぎ対策バナー -->
         <div style="background: #fff1f2; border: 2px solid #fecdd3; border-left: 6px solid #dc2626; border-radius: 12px; padding: 1.2rem 1.5rem; margin-bottom: 2rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem; box-shadow: 0 4px 12px rgba(220, 38, 38, 0.08);">
@@ -615,9 +632,16 @@
                 </div>
             </div>
             <p style="font-size:0.88rem; color:#334155; margin-bottom:10px;">
-                LINE Messaging API 双方向連携、現場貼り出しポスター印刷、不在日カバーまとめ印刷、事務長統制ダッシュボード（1週・2週・月間ビュー・縦圧縮・重点メモ）、Googleカレンダー双方向書き込みAPI ＆ キャッシュ即時同期、📅 個人Googleカレンダー連携（本文自動流し込み）、外来休診バッジ表示、公的暦（二十四節気・六曜）、および院内ネットワークプリンタ自動排紙システムの全中核機能が実装完了し、本番サーバー（<code>192.168.1.16</code>）にて実機検証・安定稼働中です。
+                外部連携REST API基盤（v1.0.0）、LINE Messaging API 双方向連携、現場貼り出しポスター印刷、不在日カバーまとめ印刷、事務長統制ダッシュボード（1週・2週・月間ビュー・縦圧縮・重点メモ）、Googleカレンダー双方向書き込みAPI ＆ キャッシュ即時同期、📅 個人Googleカレンダー連携（本文自動流し込み）、外来休診バッジ表示、公的暦（二十四節気・六曜）、および院内ネットワークプリンタ自動排紙システムの全中核機能が実装完了し、本番サーバー（<code>192.168.1.16</code>）にて実機検証・安定稼働中です。
             </p>
             <div class="pd-grid">
+                <div class="pd-card highlight" style="background: #f0f9ff; border-color: #38bdf8;">
+                    <span class="pd-card-tag" style="color: #0284c7;">✅ 新規実装完了（10/12最新）</span>
+                    <div class="pd-card-title">外部連携REST API基盤 (v1.0.0) ＆ 対話的仕様書</div>
+                    <div class="pd-card-desc">
+                        記事一覧・詳細・行事展開・サマリー統計のJSON API（<code>api/posts.php</code>等）、UI埋め込みウィジェット（<code>widget.php</code>）、Vanilla JSライブラリ（<code>embed.js</code>）、およびSwaggerライクな対話的仕様書＆ライブテスター（<code>api/index.php</code>）を完全配備。
+                    </div>
+                </div>
                 <div class="pd-card highlight">
                     <span class="pd-card-tag">✅ 本番稼働中（10/9新機能）</span>
                     <div class="pd-card-title">Googleカレンダー双方向書き込みAPI ＆ DB即時同期</div>
@@ -700,6 +724,7 @@
                 <a href="#section3">3. 4大中核機能（1タップ返答）</a>
                 <a href="#section4">4. 開発ロードマップ（進捗状況）</a>
                 <a href="#section5">5. 後任引き継ぎ・保守ガイド</a>
+                <a href="API仕様書.html" style="background: #e0f2fe; color: #0284c7; font-weight: bold; border: 1px solid #bae6fd;">⚡ 全API連携仕様書</a>
             </div>
         </div>
 

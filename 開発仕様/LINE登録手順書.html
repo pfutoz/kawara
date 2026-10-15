@@ -1,0 +1,611 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>職員向けLINE登録かんたんガイド | 医療法人小野会 院内かわら版</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@500;700&family=Noto+Sans+JP:wght@400;500;700;900&family=Outfit:wght@600;700;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #005a9c;
+            --primary-dark: #003d6b;
+            --primary-light: #e0f2fe;
+            --line-green: #06c755;
+            --line-dark: #05a045;
+            --line-bg: #e8f9ee;
+            --bg: #f8fafc;
+            --card-bg: #ffffff;
+            --border: #e2e8f0;
+            --text-main: #1e293b;
+            --text-muted: #64748b;
+            --radius-md: 12px;
+            --radius-lg: 18px;
+            --shadow-sm: 0 1px 3px rgba(0,0,0,0.06);
+            --shadow-md: 0 4px 14px rgba(0,0,0,0.08);
+            --shadow-lg: 0 10px 25px rgba(0,0,0,0.12);
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: 'Noto Sans JP', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--text-main);
+            line-height: 1.8;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* ヘッダー */
+        header {
+            background: linear-gradient(135deg, #003d6b 0%, #005a9c 60%, #0284c7 100%);
+            color: #ffffff;
+            padding: 2.2rem 1.5rem 2rem;
+            box-shadow: 0 4px 20px rgba(0, 90, 156, 0.25);
+            border-bottom: 4px solid var(--line-green);
+        }
+
+        .header-inner {
+            max-width: 860px;
+            margin: 0 auto;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 1.2rem;
+        }
+
+        .header-tag {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: rgba(255, 255, 255, 0.2);
+            backdrop-filter: blur(8px);
+            padding: 4px 14px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            letter-spacing: 0.05em;
+            margin-bottom: 0.5rem;
+            font-weight: 700;
+        }
+
+        .header-title h1 {
+            font-size: 1.8rem;
+            font-weight: 900;
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+        }
+
+        .header-title p {
+            font-size: 0.95rem;
+            opacity: 0.92;
+            margin-top: 0.3rem;
+        }
+
+        .btn-header-back {
+            background: rgba(255, 255, 255, 0.18);
+            color: #fff;
+            text-decoration: none;
+            padding: 8px 16px;
+            border-radius: 8px;
+            font-size: 0.86rem;
+            font-weight: bold;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.2s;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+        }
+        .btn-header-back:hover {
+            background: rgba(255, 255, 255, 0.32);
+            transform: translateX(-2px);
+        }
+
+        .container {
+            max-width: 860px;
+            margin: 2rem auto 4rem;
+            padding: 0 1.25rem;
+        }
+
+        /* 導入カード（メリット） */
+        .intro-card {
+            background: linear-gradient(135deg, #ffffff 0%, #f0fdf4 100%);
+            border: 2px solid #bbf7d0;
+            border-radius: var(--radius-lg);
+            padding: 1.8rem;
+            margin-bottom: 2rem;
+            box-shadow: var(--shadow-md);
+        }
+
+        .intro-title {
+            font-size: 1.25rem;
+            font-weight: 900;
+            color: #166534;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 0.8rem;
+        }
+
+        .benefit-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            gap: 12px;
+            margin-top: 1rem;
+        }
+
+        .benefit-item {
+            background: #ffffff;
+            border: 1px solid #dcfce7;
+            border-radius: var(--radius-md);
+            padding: 14px;
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            box-shadow: var(--shadow-sm);
+        }
+        .benefit-icon {
+            font-size: 1.8rem;
+            line-height: 1;
+        }
+        .benefit-text strong {
+            display: block;
+            font-size: 0.92rem;
+            color: #0f172a;
+            margin-bottom: 2px;
+        }
+        .benefit-text span {
+            font-size: 0.8rem;
+            color: #475569;
+            line-height: 1.5;
+            display: block;
+        }
+
+        /* ステップカード */
+        .step-card {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-lg);
+            padding: 2rem;
+            margin-bottom: 2rem;
+            box-shadow: var(--shadow-md);
+        }
+
+        .step-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 1.5rem;
+            padding-bottom: 0.8rem;
+            border-bottom: 2px solid #f1f5f9;
+        }
+
+        .step-badge {
+            background: var(--line-green);
+            color: #ffffff;
+            font-size: 0.85rem;
+            font-weight: 900;
+            padding: 4px 14px;
+            border-radius: 20px;
+            letter-spacing: 0.05em;
+        }
+
+        .step-title {
+            font-size: 1.3rem;
+            font-weight: 900;
+            color: var(--text-main);
+        }
+
+        .step-body {
+            font-size: 0.92rem;
+            color: #334155;
+        }
+
+        .qr-box-row {
+            display: flex;
+            align-items: center;
+            gap: 24px;
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: var(--radius-md);
+            padding: 16px 20px;
+            margin: 1.2rem 0;
+            flex-wrap: wrap;
+        }
+
+        .qr-image-frame {
+            background: #fff;
+            border: 1px solid #cbd5e1;
+            border-radius: 10px;
+            padding: 8px;
+            text-align: center;
+            box-shadow: var(--shadow-sm);
+        }
+        .qr-image-frame img {
+            width: 140px;
+            height: 140px;
+            display: block;
+        }
+
+        .btn-add-line {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            background: var(--line-green);
+            color: #fff;
+            text-decoration: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-size: 0.92rem;
+            font-weight: 800;
+            box-shadow: 0 3px 10px rgba(6, 199, 85, 0.35);
+            transition: all 0.15s;
+        }
+        .btn-add-line:hover {
+            background: var(--line-dark);
+            transform: translateY(-1px);
+        }
+
+        /* 吹き出しコード例 */
+        .mock-line-screen {
+            background: #7ac0e2;
+            border-radius: 14px;
+            padding: 18px 16px;
+            max-width: 380px;
+            margin: 1.2rem auto;
+            box-shadow: var(--shadow-md);
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        .mock-balloon-bot {
+            background: #ffffff;
+            color: #1e293b;
+            padding: 10px 14px;
+            border-radius: 14px;
+            border-top-left-radius: 2px;
+            font-size: 0.84rem;
+            max-width: 85%;
+            align-self: flex-start;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+        }
+        .mock-balloon-user {
+            background: #85e249;
+            color: #1e293b;
+            padding: 10px 16px;
+            border-radius: 14px;
+            border-top-right-radius: 2px;
+            font-size: 1.15rem;
+            font-weight: 900;
+            letter-spacing: 4px;
+            align-self: flex-end;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+        }
+
+        /* CTAアクションボタン */
+        .cta-box {
+            background: linear-gradient(135deg, #003d6b 0%, #005a9c 100%);
+            color: #ffffff;
+            border-radius: var(--radius-lg);
+            padding: 2.2rem;
+            text-align: center;
+            margin: 2.5rem 0;
+            box-shadow: var(--shadow-lg);
+        }
+        .btn-cta-big {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            background: var(--line-green);
+            color: #ffffff;
+            text-decoration: none;
+            padding: 14px 34px;
+            border-radius: 10px;
+            font-size: 1.15rem;
+            font-weight: 900;
+            margin-top: 1.2rem;
+            box-shadow: 0 4px 16px rgba(6, 199, 85, 0.45);
+            transition: all 0.2s;
+        }
+        .btn-cta-big:hover {
+            background: var(--line-dark);
+            transform: scale(1.03);
+        }
+
+        /* FAQアコーディオン */
+        .faq-item {
+            background: #ffffff;
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            padding: 16px 20px;
+            margin-bottom: 12px;
+            box-shadow: var(--shadow-sm);
+        }
+        .faq-q {
+            font-weight: 900;
+            font-size: 0.98rem;
+            color: #0f172a;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 6px;
+        }
+        .faq-q span {
+            color: var(--primary);
+            font-size: 1.1rem;
+        }
+        .faq-a {
+            font-size: 0.88rem;
+            color: #475569;
+            padding-left: 1.6rem;
+            line-height: 1.7;
+        }
+
+        footer {
+            text-align: center;
+            color: var(--text-muted);
+            font-size: 0.82rem;
+            padding: 2rem 0;
+            border-top: 1px solid var(--border);
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <div class="header-inner">
+            <div>
+                <div class="header-tag">📱 院外スマホ利用・安否確認ガイド</div>
+                <div class="header-title">
+                    <h1>
+                        <span>💬</span> 職員向けLINE登録かんたん手順書
+                    </h1>
+                    <p>自宅やスマホから「院内かわら版」を安全に利用するための初期設定ガイド</p>
+                </div>
+            </div>
+            <div>
+                <a href="index.php" class="btn-header-back">← かわら版メニューに戻る</a>
+            </div>
+        </div>
+    </header>
+
+    <div class="container">
+
+        <!-- メリット紹介 -->
+        <div class="intro-card">
+            <div class="intro-title">
+                <span>🌟</span> LINE連携するとこんなに便利＆安心になります！
+            </div>
+            <p style="font-size:0.9rem; color:#334155;">
+                院内かわら版では、職員の皆様が自宅や外出先のスマートフォンから安全にアクセスできるようにするため、公式LINEを活用した簡単認証を採用しています。
+            </p>
+            <div class="benefit-grid">
+                <div class="benefit-item">
+                    <div class="benefit-icon">🏠</div>
+                    <div class="benefit-text">
+                        <strong>自宅のスマホからいつでも閲覧</strong>
+                        <span>院外からかわら版の連絡事項やシフト・予定表をいつでもチェックできます。</span>
+                    </div>
+                </div>
+                <div class="benefit-item">
+                    <div class="benefit-icon">🚨</div>
+                    <div class="benefit-text">
+                        <strong>災害時のBCP安否点呼</strong>
+                        <span>地震等の災害時に病院からの生存確認通知が届き、1秒で安否報告ができます。</span>
+                    </div>
+                </div>
+                <div class="benefit-item">
+                    <div class="benefit-icon">🍪</div>
+                    <div class="benefit-text">
+                        <strong>1回認証すれば30日間パス</strong>
+                        <span>毎回暗証番号を入れる必要がなく、日常利用中は自動で期限が延長されます。</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- かんたん3ステップ手順 -->
+        <h2 style="font-size:1.4rem; font-weight:900; margin-bottom:1.25rem; color:#0f172a; display:flex; align-items:center; gap:8px;">
+            <span>🚀</span> 初期登録はたったの3ステップ（所要時間: 1分）
+        </h2>
+
+        <!-- Step 1 -->
+        <div class="step-card">
+            <div class="step-header">
+                <span class="step-badge">Step 1</span>
+                <h3 class="step-title">公式LINE「おの肛門科」を友だち追加する</h3>
+            </div>
+            <div class="step-body">
+                <p>
+                    スマートフォンのカメラまたはLINEアプリで以下のQRコードを読み取り、<strong>医療法人小野会「おの肛門科」公式アカウント</strong>を友だち追加してください。
+                </p>
+
+                <div class="qr-box-row">
+                    <div class="qr-image-frame">
+                        <img src="https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=https%3A%2F%2Fline.me%2FR%2Fti%2Fp%2F%40tmw3446q" alt="公式LINE友だち追加QRコード">
+                        <div style="font-size:0.7rem; color:#64748b; margin-top:4px;">スマホでスキャン</div>
+                    </div>
+                    <div style="flex:1; min-width:240px;">
+                        <div style="font-size:0.9rem; font-weight:bold; margin-bottom:6px;">スマートフォンでこの画面を見ている場合：</div>
+                        <a href="https://line.me/R/ti/p/@tmw3446q" target="_blank" rel="noopener" class="btn-add-line">
+                            👉 LINEアプリを開いて友だち追加する
+                        </a>
+                        <div style="font-size:0.76rem; color:#64748b; margin-top:8px;">
+                            公式アカウントID検索: <b>@tmw3446q</b>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Step 2 -->
+        <div class="step-card">
+            <div class="step-header">
+                <span class="step-badge">Step 2</span>
+                <h3 class="step-title">かわら版で4桁コードを発行し、LINEに送信する</h3>
+            </div>
+            <div class="step-body">
+                <p>
+                    かわら版の「<a href="line_link.php" style="color:var(--primary); font-weight:bold;">LINE連携設定画面（line_link.php）</a>」を開きます。画面に大きく<strong>【数字4桁】</strong>が表示されます。
+                </p>
+
+                <div class="mock-line-screen">
+                    <div class="mock-balloon-bot">
+                        おの肛門科 公式アカウントです。<br>
+                        かわら版画面に表示された【数字4桁】をそのままメッセージで送信してください。
+                    </div>
+                    <div class="mock-balloon-user">
+                        6597
+                    </div>
+                </div>
+
+                <p style="font-size:0.86rem; color:#64748b; text-align:center;">
+                    ▲ 先ほど友だち追加した公式LINEのトーク画面を開き、数字4桁をそのまま送信します。
+                </p>
+            </div>
+        </div>
+
+        <!-- Step 3 -->
+        <div class="step-card">
+            <div class="step-header">
+                <span class="step-badge">Step 3</span>
+                <h3 class="step-title">画面が自動で切り替わり、連携完了！</h3>
+            </div>
+            <div class="step-body">
+                <p>
+                    LINEでコードを送信すると、画面が自動的に検知して<strong>「🎉 公式LINEとの連携が完了しました！」</strong>と表示されます。これですべての設定が完了です！
+                </p>
+                <div style="background:#f0fdf4; border:1px solid #bbf7d0; border-radius:10px; padding:14px; margin-top:12px; font-size:0.86rem; color:#166534; font-weight:bold; text-align:center;">
+                    ✓ これ以降、友だち追加やQRコード読み取りをやり直す必要はありません（永久有効）
+                </div>
+            </div>
+        </div>
+
+        <!-- 📱 スマホでの日常の使い方（3大機能） -->
+        <div class="step-card" style="border: 2px solid #0284c7; background: #ffffff; box-shadow: 0 4px 16px rgba(2, 132, 199, 0.12);">
+            <div class="step-header" style="background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%); border-bottom: 2px solid #bfdbfe;">
+                <span class="step-badge" style="background:#0284c7;">日常の使い方</span>
+                <h3 class="step-title" style="color:#0369a1;">LINEトーク下の「固定メニュー」から1タップ起動！</h3>
+            </div>
+            <div class="step-body">
+                <p>
+                    LINE連携が完了すると、「おの肛門科」のトーク画面下部に<strong>小野会イントラ専用の3つのメニューボタン</strong>が常時表示されます。<br>
+                    <strong>URLの手打ちやブックマーク登録は一切不要</strong>です。使いたい機能をタップするだけで、スマホの標準ブラウザ（SafariやChrome）が自動起動し、30日間ログインしたまま快適に利用できます。
+                </p>
+
+                <!-- メニュー画像イメージ -->
+                <div style="text-align:center; margin: 1.5rem 0;">
+                    <img src="../assets/richmenu/richmenu_small_3split_1200x405.png" alt="LINE固定メニュー（かわら版・医師予定表・安否確認）" style="width: 100%; max-width: 600px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); border: 2px solid #cbd5e1;">
+                    <div style="font-size:0.8rem; color:#64748b; margin-top: 6px;">▲ LINEトーク画面の下部にこの3つのボタンが常設されます</div>
+                </div>
+
+                <!-- 3大機能の紹介 -->
+                <div style="display:flex; flex-direction:column; gap:14px; margin-top:1.5rem;">
+                    <!-- 機能1: 院内かわら版 -->
+                    <div style="display:flex; gap:12px; background:#f0f9ff; border:1px solid #bae6fd; border-radius:10px; padding:12px 14px;">
+                        <div style="font-size:1.8rem; line-height:1;">📜</div>
+                        <div>
+                            <div style="font-weight:bold; color:#0369a1; font-size:0.95rem;">① 院内かわら版を開く（左ボタン）</div>
+                            <div style="font-size:0.84rem; color:#334155; margin-top:3px; line-height:1.5;">
+                                院内のお知らせ、回覧板、重要通知をいつでも閲覧できます。未読マークの確認や、記事へのコメント返信もスマホからスムーズに行えます。
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 機能2: 医師予定表 -->
+                    <div style="display:flex; gap:12px; background:#eff6ff; border:1px solid #bfdbfe; border-radius:10px; padding:12px 14px;">
+                        <div style="font-size:1.8rem; line-height:1;">🩺</div>
+                        <div>
+                            <div style="font-weight:bold; color:#1e3a8a; font-size:0.95rem;">② 医師予定表・休診情報（中央ボタン）</div>
+                            <div style="font-size:0.84rem; color:#334155; margin-top:3px; line-height:1.5;">
+                                <strong>本日の外来担当医・休診医師が一目でわかります。</strong><br>
+                                週間・月間のカレンダー切り替え、医師申し送りメモ（土曜診療日程や全体会連絡）、小野院長や矢野副院長など特定の先生の予定絞り込みにも完全対応しています。
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 機能3: 緊急安否確認 -->
+                    <div style="display:flex; gap:12px; background:#fef2f2; border:1px solid #fecdd3; border-radius:10px; padding:12px 14px;">
+                        <div style="font-size:1.8rem; line-height:1;">🚨</div>
+                        <div>
+                            <div style="font-weight:bold; color:#b91c1c; font-size:0.95rem;">③ 緊急安否確認・BCP連絡網（右ボタン）</div>
+                            <div style="font-size:0.84rem; color:#334155; margin-top:3px; line-height:1.5;">
+                                地震や台風などの災害発生時、または安否点呼訓練時に、<strong>1タップで自身の無事や出勤可否を報告</strong>できます。緊急連絡網や避難マニュアルもここから確認可能です。
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 30日認証の安心ポイント -->
+                <div style="background:#f8fafc; border-left:4px solid #005a9c; border-radius:6px; padding:12px 14px; margin-top:1.5rem; font-size:0.84rem; color:#475569;">
+                    <strong>💡 もし30日間使わず期限が切れていたら？</strong><br>
+                    画面に「LINEに認証コードを送信」ボタンが表示されます。タップして届いた6桁の数字を入力するだけで、QRコード読み取りなどの面倒な初期設定なしで、即座に次の30日間パスが自動更新されます！
+                </div>
+            </div>
+        </div>
+
+        <!-- CTAエリア -->
+        <div class="cta-box">
+            <h3 style="font-size:1.35rem; font-weight:900;">さっそくLINE連携を設定しましょう！</h3>
+            <p style="font-size:0.9rem; opacity:0.9; margin-top:4px;">
+                まだ登録がお済みでない方は、下のボタンを押して4桁コードを発行してください。
+            </p>
+            <a href="line_link.php" class="btn-cta-big">
+                📱 LINE連携設定画面を開く →
+            </a>
+        </div>
+
+        <!-- プライバシーと安心Q&A -->
+        <h2 style="font-size:1.35rem; font-weight:900; margin:2.5rem 0 1.2rem; color:#0f172a; display:flex; align-items:center; gap:8px;">
+            <span>🔒</span> 個人情報・プライバシーに関する安心Q&A
+        </h2>
+
+        <div class="faq-item">
+            <div class="faq-q">
+                <span>Q.</span> 私個人のLINEアカウント名やタイムライン、家族とのトークは病院に見られますか？
+            </div>
+            <div class="faq-a">
+                <strong>絶対に一切見られません。</strong><br>
+                システムが管理しているのは、LINE社が自動発行する暗号化された機械用ID（英数字の羅列）のみです。病院側にはあなたの個人の名前、アイコン画像、お友だちリスト、他のトーク履歴などは一切開示されませんのでご安心ください。
+            </div>
+        </div>
+
+        <div class="faq-item">
+            <div class="faq-q">
+                <span>Q.</span> 広告や関係のない宣伝メッセージが届くことはありますか？
+            </div>
+            <div class="faq-a">
+                <strong>広告メッセージは一切配信されません。</strong><br>
+                届くメッセージは「災害発生時の緊急安否確認・生存点呼」および「あなたがログイン時・既読時に自身で要求した確認コード・既読メモ」のみです。
+            </div>
+        </div>
+
+        <div class="faq-item">
+            <div class="faq-q">
+                <span>Q.</span> スマホを機種変更した場合はどうなりますか？
+            </div>
+            <div class="faq-a">
+                新しいスマホでかわら版のログイン画面を開き、「山本 太」等のお名前を選択して「LINEにコード送信」を押すだけです。LINEに届く6桁コードを入れれば、即座に新しいスマホが許可端末として登録されます。初期設定（QR読み取り等）をやり直す必要はありません。
+            </div>
+        </div>
+
+        <div class="faq-item">
+            <div class="faq-q">
+                <span>Q.</span> スマートフォンを落としたり紛失した場合はどうすればいいですか？
+            </div>
+            <div class="faq-a">
+                <strong>速やかに事務長またはシステム管理者へご連絡ください。</strong><br>
+                管理画面からボタン1つで紛失端末のアクセス権を即座に遠隔遮断（失効）できます。拾得者にかわら版（患者情報や連絡事項）を見られる心配はありません。端末が見つかった後や代替機入手後は、再度LINEでコード認証するだけで安全に再開できます。
+            </div>
+        </div>
+
+    </div>
+
+    <footer>
+        <p>医療法人小野会 院内かわら版 職員サポートマニュアル</p>
+    </footer>
+
+</body>
+</html>

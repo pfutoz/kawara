@@ -2495,11 +2495,23 @@ if ($focus_post_id > 0) {
         <span class="brand-title" style="font-size:1.05rem; font-weight:900;">👔 事務長モード</span>
     </div>
     <div class="nav-actions">
+        <!-- 🌐 Cloudflare外部公開キルスイッチ -->
+        <div id="cfTunnelWidget" style="display:inline-flex; align-items:center; gap:6px; background:rgba(0,0,0,0.25); padding:3px 10px; border-radius:6px; border:1px solid rgba(255,255,255,0.2); margin-right:4px;">
+            <span style="font-size:0.75rem; color:#cbd5e1; font-weight:bold;">🌐 外部公開:</span>
+            <button type="button" id="btnToggleTunnel" onclick="openTunnelConfirmModal()" style="display:inline-flex; align-items:center; gap:5px; padding:3px 10px; border-radius:14px; border:none; font-size:0.78rem; font-weight:800; cursor:pointer; color:#ffffff; background:#64748b; transition:all 0.2s;" title="クリックしてCloudflare外部トンネルのON/OFFを切り替えます">
+                <span id="tunnelStatusDot" style="width:8px; height:8px; border-radius:50%; background:#ffffff; display:inline-block;"></span>
+                <span id="tunnelStatusText">確認中...</span>
+            </button>
+        </div>
+
         <span style="font-size:0.84rem; color:#cbd5e1;">
             👤 <b><?= htmlspecialchars($current_user['staff_name']) ?></b>
         </span>
         <a href="master_mente.php" class="btn-switch-timeline" style="padding:5px 12px; font-size:0.8rem;" title="システムマスタ管理（スタッフ・Googleカレンダー連携設定）">
             ⚙️ マスタ管理
+        </a>
+        <a href="開発仕様/index.html" class="btn-switch-timeline" style="padding:5px 12px; font-size:0.8rem;" title="開発指針書・全API仕様書・管理者知見マニュアル">
+            ⚙️ システム仕様書
         </a>
         <a href="index.php" class="btn-switch-timeline" style="padding:5px 12px; font-size:0.8rem;">
             🏠 メニュー
@@ -3879,6 +3891,39 @@ if ($today_status['is_pre_off_day']) {
 <!-- LINE通知プレビュー ＆ テスト送信モーダル（共通コンポーネント） -->
 <?php require_once __DIR__ . '/includes/line_notify_modal.php'; ?>
 
+<!-- モーダル: Cloudflare外部公開 ON/OFF 切り替え確認モーダル -->
+<div id="modal-tunnel-control" class="modal-overlay">
+    <div class="modal-box" style="max-width:540px;">
+        <div class="modal-header" id="tunnel-modal-header" style="border-bottom: 2px solid #ef4444;">
+            <div class="modal-title" style="display:flex; align-items:center; gap:8px;">
+                <span id="tunnel-modal-icon" style="font-size:1.3rem;">🛡️</span>
+                <span id="tunnel-modal-title" style="font-weight:900;">外部公開トンネルの停止（緊急遮断）</span>
+            </div>
+            <button type="button" onclick="closeModal('modal-tunnel-control')" style="border:none; background:none; font-size:1.4rem; cursor:pointer;">&times;</button>
+        </div>
+        <div class="modal-body" style="display:flex; flex-direction:column; gap:14px; padding:16px 20px;">
+            <div id="tunnel-modal-status-badge" style="display:inline-flex; align-items:center; gap:8px; padding:8px 12px; border-radius:8px; background:#f1f5f9; font-size:0.9rem; font-weight:bold;">
+                現在の状態: <span id="tunnel-modal-current-status">確認中...</span>
+            </div>
+
+            <div id="tunnel-modal-warning" style="background:#fef2f2; border-left:4px solid #ef4444; padding:12px; border-radius:4px; font-size:0.88rem; color:#991b1b; line-height:1.6;">
+                <!-- 動的に切り替え -->
+            </div>
+
+            <div style="font-size:0.8rem; color:#64748b; line-height:1.5;">
+                ※ 院内LAN（電子カルテPC・院内Wi-Fi）での利用には一切影響ありません。<br>
+                ※ 実行履歴はセキュリティ監査ログ（<code>security_audit.log</code>）に自動記録されます。
+            </div>
+        </div>
+        <div class="modal-footer" style="display:flex; justify-content:flex-end; align-items:center; gap:10px;">
+            <button type="button" class="tool-btn" onclick="closeModal('modal-tunnel-control')">キャンセル</button>
+            <button type="button" class="tool-btn" id="btn-confirm-tunnel-action" onclick="executeTunnelAction()" style="min-width:140px; font-weight:800; color:#fff;">
+                実行する
+            </button>
+        </div>
+    </div>
+</div>
+
 <!-- トースト通知コンテナ -->
 <div id="toast-container"></div>
 
@@ -4938,8 +4983,117 @@ function toggleCalendarExpand() {
     }
 }
 
-// ユーザーの前回選択を反映
+// 🌐 Cloudflare外部公開（トンネル）制御スクリプト
+let currentTunnelOnline = null;
+let currentTunnelBusy = false;
+
+async function fetchTunnelStatus() {
+    try {
+        const res = await fetch('api/tunnel_control.php?action=status');
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data && data.success) {
+            updateTunnelUI(data.is_online, data.label, data.color);
+        }
+    } catch (e) {
+        console.error('Failed to fetch tunnel status:', e);
+    }
+}
+
+function updateTunnelUI(isOnline, label, color) {
+    currentTunnelOnline = isOnline;
+    const btn = document.getElementById('btnToggleTunnel');
+    const dot = document.getElementById('tunnelStatusDot');
+    const txt = document.getElementById('tunnelStatusText');
+    if (!btn || !dot || !txt) return;
+
+    dot.style.background = isOnline ? '#22c55e' : '#ef4444';
+    txt.textContent = label;
+    btn.style.background = isOnline ? '#15803d' : '#b91c1c';
+    btn.title = isOnline 
+        ? '現在【外部公開中 (ON)】です。クリックして緊急遮断（OFF）できます'
+        : '現在【外部遮断中 (OFF)】です。クリックして公開再開（ON）できます';
+}
+
+function openTunnelConfirmModal() {
+    if (currentTunnelBusy) return;
+    const modalHeader = document.getElementById('tunnel-modal-header');
+    const modalIcon = document.getElementById('tunnel-modal-icon');
+    const modalTitle = document.getElementById('tunnel-modal-title');
+    const currentStatusEl = document.getElementById('tunnel-modal-current-status');
+    const warningEl = document.getElementById('tunnel-modal-warning');
+    const confirmBtn = document.getElementById('btn-confirm-tunnel-action');
+
+    if (currentTunnelOnline === true) {
+        // 現在ON → OFF（停止）への確認
+        modalHeader.style.borderBottom = '2px solid #ef4444';
+        modalIcon.textContent = '🛑';
+        modalTitle.textContent = '外部公開の【緊急遮断（OFF）】';
+        currentStatusEl.innerHTML = '<span style="color:#16a34a;">🟢 公開中 (ON)</span>';
+        warningEl.style.background = '#fef2f2';
+        warningEl.style.borderLeftColor = '#ef4444';
+        warningEl.style.color = '#991b1b';
+        warningEl.innerHTML = '<b>【緊急遮断の警告】</b><br>' +
+            '外部トンネルサービスを停止します。<br>' +
+            '実行すると、職員の私用スマートフォン等からの院外アクセス（<code>kawara.ono.or.jp</code>）が<b>即座に完全遮断</b>されます。<br>' +
+            '不正侵入の疑いや警戒時にご利用ください。';
+        confirmBtn.style.background = '#dc2626';
+        confirmBtn.textContent = '⚠️ 外部を遮断する (OFF)';
+    } else {
+        // 現在OFF → ON（再開）への確認
+        modalHeader.style.borderBottom = '2px solid #16a34a';
+        modalIcon.textContent = '🌐';
+        modalTitle.textContent = '外部公開の【再開（ON）】';
+        currentStatusEl.innerHTML = '<span style="color:#dc2626;">🔴 遮断中 (OFF)</span>';
+        warningEl.style.background = '#f0fdf4';
+        warningEl.style.borderLeftColor = '#16a34a';
+        warningEl.style.color = '#166534';
+        warningEl.innerHTML = '<b>【外部公開の再開】</b><br>' +
+            '外部トンネルサービスを開始します。<br>' +
+            '院外のスマートフォンからのかわら版・安否確認・医師予定表の閲覧が可能になります。';
+        confirmBtn.style.background = '#16a34a';
+        confirmBtn.textContent = '✓ 公開を開始する (ON)';
+    }
+
+    openModal('modal-tunnel-control');
+}
+
+async function executeTunnelAction() {
+    if (currentTunnelBusy) return;
+    const targetAction = (currentTunnelOnline === true) ? 'stop' : 'start';
+    const confirmBtn = document.getElementById('btn-confirm-tunnel-action');
+    const origText = confirmBtn.textContent;
+    
+    currentTunnelBusy = true;
+    confirmBtn.disabled = true;
+    confirmBtn.textContent = '切り替え処理中...';
+
+    try {
+        const res = await fetch(`api/tunnel_control.php?action=${targetAction}`, {
+            method: 'POST'
+        });
+        const data = await res.json();
+        
+        if (data.success) {
+            updateTunnelUI(data.is_online, data.label, data.color);
+            closeModal('modal-tunnel-control');
+            showToast(data.message, 'success');
+        } else {
+            alert('操作に失敗しました: ' + (data.error || '不明なエラー'));
+        }
+    } catch (e) {
+        alert('通信エラーが発生しました: ' + e.message);
+    } finally {
+        currentTunnelBusy = false;
+        confirmBtn.disabled = false;
+        confirmBtn.textContent = origText;
+    }
+}
+
+// ユーザーの前回選択を反映 & トンネル状態初期取得・定期ポーリング
 document.addEventListener('DOMContentLoaded', () => {
+    fetchTunnelStatus();
+    setInterval(fetchTunnelStatus, 30000);
     if (localStorage.getItem('kawara_cal_expand') === '1') {
         const rCol = document.querySelector('.right-col');
         const lCol = document.querySelector('.left-col');

@@ -1,0 +1,1030 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>管理者知見マニュアル | クラウドインフラ・LINE・端末認証多層防御</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Noto+Sans+JP:wght@400;500;700;900&family=Outfit:wght@600;700;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #005a9c;
+            --primary-dark: #003d6b;
+            --primary-light: #e0f2fe;
+            --accent-cloudflare: #f38020;
+            --accent-line: #06c755;
+            --accent-auth: #7c3aed;
+            --accent-warn: #eab308;
+            --accent-danger: #ef4444;
+            --accent-success: #10b981;
+            --bg: #f8fafc;
+            --card-bg: #ffffff;
+            --border: #e2e8f0;
+            --text-main: #1e293b;
+            --text-muted: #64748b;
+            --code-bg: #0f172a;
+            --shadow-sm: 0 1px 3px rgba(0,0,0,0.06);
+            --shadow-md: 0 4px 14px rgba(0,0,0,0.08);
+            --shadow-lg: 0 10px 25px rgba(0,0,0,0.12);
+            --radius-md: 10px;
+            --radius-lg: 16px;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: 'Noto Sans JP', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--text-main);
+            line-height: 1.75;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        header {
+            background: linear-gradient(135deg, #0f172a 0%, #003d6b 50%, #005a9c 100%);
+            color: #ffffff;
+            padding: 2.5rem 2rem 2rem;
+            box-shadow: 0 4px 20px rgba(0, 61, 107, 0.25);
+            border-bottom: 4px solid var(--accent-cloudflare);
+        }
+
+        .header-inner {
+            max-width: 1140px;
+            margin: 0 auto;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 1.5rem;
+        }
+
+        .header-tag {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: rgba(255, 255, 255, 0.15);
+            backdrop-filter: blur(8px);
+            padding: 4px 14px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            letter-spacing: 0.05em;
+            margin-bottom: 0.6rem;
+            font-weight: 700;
+        }
+
+        .header-title h1 {
+            font-size: 1.85rem;
+            font-weight: 900;
+            display: flex;
+            align-items: center;
+            gap: 0.7rem;
+        }
+
+        .header-title p {
+            font-size: 0.95rem;
+            opacity: 0.92;
+            margin-top: 0.4rem;
+        }
+
+        .header-badges {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-top: 0.8rem;
+        }
+
+        .badge-pill {
+            background: rgba(255, 255, 255, 0.2);
+            color: #fff;
+            padding: 2px 10px;
+            border-radius: 12px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+
+        .header-actions {
+            display: flex;
+            gap: 10px;
+        }
+
+        .btn-header-back {
+            background: rgba(255, 255, 255, 0.2);
+            color: #fff;
+            text-decoration: none;
+            padding: 8px 16px;
+            border-radius: 8px;
+            font-size: 0.85rem;
+            font-weight: bold;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.2s;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+        }
+        .btn-header-back:hover {
+            background: rgba(255, 255, 255, 0.35);
+            transform: translateX(-2px);
+        }
+
+        .container {
+            max-width: 1140px;
+            margin: 2rem auto 4rem;
+            padding: 0 1.5rem;
+        }
+
+        /* クイックナビゲーション */
+        .toc-bar {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            padding: 1rem 1.4rem;
+            margin-bottom: 2rem;
+            box-shadow: var(--shadow-sm);
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            flex-wrap: wrap;
+        }
+        .toc-title {
+            font-weight: 900;
+            color: var(--primary);
+            font-size: 0.88rem;
+            white-space: nowrap;
+        }
+        .toc-links {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.6rem;
+        }
+        .toc-link {
+            background: #f1f5f9;
+            color: #334155;
+            text-decoration: none;
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            transition: all 0.15s;
+        }
+        .toc-link:hover {
+            background: var(--primary-light);
+            color: var(--primary);
+        }
+
+        /* セクションカード */
+        .spec-section {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-lg);
+            padding: 2rem;
+            margin-bottom: 2.2rem;
+            box-shadow: var(--shadow-md);
+        }
+
+        .section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 2px solid #f1f5f9;
+            padding-bottom: 1rem;
+            margin-bottom: 1.5rem;
+            flex-wrap: wrap;
+            gap: 12px;
+        }
+
+        .section-title {
+            font-size: 1.35rem;
+            font-weight: 900;
+            color: var(--text-main);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .section-tag {
+            font-size: 0.78rem;
+            font-weight: 800;
+            padding: 3px 10px;
+            border-radius: 12px;
+            letter-spacing: 0.05em;
+        }
+        .tag-cf { background: #fff7ed; color: #c2410c; border: 1px solid #fed7aa; }
+        .tag-line { background: #f0fdf4; color: #15803d; border: 1px solid #bbf7d0; }
+        .tag-auth { background: #faf5ff; color: #7e22ce; border: 1px solid #e9d5ff; }
+        .tag-arch { background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; }
+
+        /* グリッドレイアウト */
+        .info-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            gap: 1.25rem;
+            margin: 1.25rem 0;
+        }
+
+        .info-box {
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: var(--radius-md);
+            padding: 1.2rem;
+        }
+        .info-box h4 {
+            font-size: 0.98rem;
+            font-weight: 800;
+            color: #0f172a;
+            margin-bottom: 0.5rem;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .info-box p {
+            font-size: 0.85rem;
+            color: #475569;
+            margin-bottom: 0.6rem;
+        }
+
+        /* 警告・注記ボックス */
+        .callout {
+            border-radius: var(--radius-md);
+            padding: 1rem 1.25rem;
+            margin: 1.25rem 0;
+            font-size: 0.88rem;
+            display: flex;
+            gap: 12px;
+            align-items: flex-start;
+        }
+        .callout-icon { font-size: 1.3rem; line-height: 1; flex-shrink: 0; }
+        .callout-content { flex: 1; }
+        .callout-content strong { display: block; font-size: 0.92rem; margin-bottom: 2px; }
+
+        .callout-warn {
+            background: #fffbeb;
+            border: 1px solid #fef08a;
+            color: #854d0e;
+        }
+        .callout-danger {
+            background: #fef2f2;
+            border: 1px solid #fca5a5;
+            color: #991b1b;
+        }
+        .callout-info {
+            background: #eff6ff;
+            border: 1px solid #bfdbfe;
+            color: #1e40af;
+        }
+        .callout-success {
+            background: #f0fdf4;
+            border: 1px solid #bbf7d0;
+            color: #166534;
+        }
+
+        /* テーブル */
+        .spec-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.86rem;
+            margin: 1.2rem 0;
+            background: #fff;
+        }
+        .spec-table th, .spec-table td {
+            padding: 10px 14px;
+            border: 1px solid var(--border);
+            text-align: left;
+        }
+        .spec-table th {
+            background: #f8fafc;
+            font-weight: 700;
+            color: #334155;
+            width: 25%;
+        }
+        .spec-table tr:hover td {
+            background: #fdfdfd;
+        }
+
+        /* コード表示 */
+        pre {
+            background: var(--code-bg);
+            color: #e2e8f0;
+            padding: 1rem 1.25rem;
+            border-radius: var(--radius-md);
+            font-family: 'Fira Code', monospace;
+            font-size: 0.82rem;
+            overflow-x: auto;
+            margin: 1rem 0;
+            line-height: 1.6;
+        }
+        code {
+            font-family: 'Fira Code', monospace;
+            background: #f1f5f9;
+            color: #0f172a;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 0.82rem;
+        }
+        pre code {
+            background: transparent;
+            color: inherit;
+            padding: 0;
+        }
+
+        /* タイムライン・ステップ */
+        .step-timeline {
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+            margin: 1.2rem 0;
+        }
+        .timeline-item {
+            display: flex;
+            gap: 14px;
+            align-items: flex-start;
+        }
+        .timeline-num {
+            background: var(--primary);
+            color: #fff;
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.8rem;
+            font-weight: bold;
+            flex-shrink: 0;
+            margin-top: 2px;
+        }
+        .timeline-content {
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 10px 14px;
+            flex: 1;
+            font-size: 0.85rem;
+        }
+        .timeline-content strong {
+            display: block;
+            color: #0f172a;
+            font-size: 0.9rem;
+            margin-bottom: 2px;
+        }
+
+        footer {
+            text-align: center;
+            color: var(--text-muted);
+            font-size: 0.82rem;
+            padding: 2rem 0;
+            border-top: 1px solid var(--border);
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <div class="header-inner">
+            <div>
+                <div class="header-tag">🛡️ システム管理者必読ドキュメント</div>
+                <div class="header-title">
+                    <h1>
+                        <span>⚙️</span> 管理者知見マニュアル
+                    </h1>
+                    <p>Cloudflareトンネル・LINE Messaging API・端末認証Cookie多層防御の全容と運用ガイド</p>
+                </div>
+                <div class="header-badges">
+                    <span class="badge-pill">医療法人小野会 院内かわら版</span>
+                    <span class="badge-pill">本番環境: 192.168.1.16</span>
+                    <span class="badge-pill">公開ドメイン: kawara.ono.or.jp</span>
+                    <span class="badge-pill">改定: 2026年10月</span>
+                </div>
+            </div>
+            <div class="header-actions">
+                <a href="index.html" class="btn-header-back">← 開発指針書へ戻る</a>
+                <a href="../index.php" class="btn-header-back" style="background:#06c755; border-color:#05a045;">📰 かわら版へ</a>
+            </div>
+        </div>
+    </header>
+
+    <div class="container">
+
+        <!-- 目次ナビゲーション -->
+        <nav class="toc-bar">
+            <span class="toc-title">📌 目次</span>
+            <div class="toc-links">
+                <a href="#arch" class="toc-link">1. 全体アーキテクチャ</a>
+                <a href="#cloudflare" class="toc-link">2. Cloudflare設定・費用・DNS</a>
+                <a href="#line" class="toc-link">3. LINE公式・クラウド設定</a>
+                <a href="#line-id" class="toc-link">4. LINE ID連携の仕組み</a>
+                <a href="#cookie-auth" class="toc-link">5. スマホCookie認証（30日制限）</a>
+                <a href="#handover" class="toc-link">6. 管理者引き継ぎ・注意事項</a>
+                <a href="#lifecycle" class="toc-link" style="background:#fef2f2; color:#dc2626; font-weight:bold; border:1px solid #fecaca;">7. 入職・退職・紛失・機種変マニュアル</a>
+            </div>
+        </nav>
+
+        <!-- 1. 全体アーキテクチャ -->
+        <section id="arch" class="spec-section">
+            <div class="section-header">
+                <div class="section-title">
+                    <span>🌐</span> 1. 全体アーキテクチャ（多層防御の構造）
+                </div>
+                <span class="section-tag tag-arch">全体構成図</span>
+            </div>
+
+            <p style="font-size:0.9rem; color:#334155; margin-bottom:1rem;">
+                院内かわら版は、<strong>「院内PCの完全フリーパス」</strong>と<strong>「院外スマホの30日Cookie認証」</strong>、そして<strong>「Cloudflareエッジでの不正遮断（WAF）」</strong>を組み合わせた多層防御モデルを採用しています。
+            </p>
+
+            <table class="spec-table">
+                <tr>
+                    <th>クライアント</th>
+                    <th>アクセス経路</th>
+                    <th>認証フロー</th>
+                    <th>セキュリティ強度</th>
+                </tr>
+                <tr>
+                    <td><strong>院内PC / 院内Wi-Fi</strong><br>(192.168.x.x)</td>
+                    <td>院内LAN直結<br><code>http://192.168.1.16/kawara/</code></td>
+                    <td><strong>完全フリーパス</strong><br>ユーザー選択＋パスワードのみ。<br>証明書や追加アプリ不要。</td>
+                    <td><span style="color:#15803d; font-weight:bold;">🟢 院内専用</span><br>物理LAN・院内Wi-Fiで保護</td>
+                </tr>
+                <tr>
+                    <td><strong>院外スマホ (4G/5G)</strong><br>未認証端末</td>
+                    <td>インターネット<br><code>https://kawara.ono.or.jp</code></td>
+                    <td><strong>LINE 6桁ワンタイム認証</strong><br><code>login.php</code> にて公式LINEへコード送信。<br>成功で 30日間Cookie を発行。</td>
+                    <td><span style="color:#2563eb; font-weight:bold;">🔵 多要素認証</span><br>本人LINEでの承認必須</td>
+                </tr>
+                <tr>
+                    <td><strong>院外スマホ (4G/5G)</strong><br>30日Cookie保持</td>
+                    <td>インターネット<br><code>https://kawara.ono.or.jp</code></td>
+                    <td><strong>Cookie即時パス</strong><br>Cloudflare WAFを通過。<br>アクセス毎に期限が30日自動延長。</td>
+                    <td><span style="color:#15803d; font-weight:bold;">🟢 高利便性</span><br>日常利用時の再認証ゼロ</td>
+                </tr>
+                <tr>
+                    <td><strong>部外者・直リンク攻撃</strong><br>(Cookieなしの外部)</td>
+                    <td>インターネット直接アクセス</td>
+                    <td><strong>Cloudflare WAF 403遮断</strong><br>院内サーバーに到達する前に<br>エッジサーバーで即座にブロック。</td>
+                    <td><span style="color:#dc2626; font-weight:bold;">🔴 即時撃退</span><br>サーバー負荷・情報漏洩防止</td>
+                </tr>
+            </table>
+        </section>
+
+        <!-- 2. Cloudflare設定・費用・DNS -->
+        <section id="cloudflare" class="spec-section">
+            <div class="section-header">
+                <div class="section-title">
+                    <span>☁️</span> 2. Cloudflare周りの設定・費用・DNS
+                </div>
+                <span class="section-tag tag-cf">Cloudflare Zero Trust</span>
+            </div>
+
+            <div class="callout callout-warn">
+                <div class="callout-icon">⚠️</div>
+                <div class="callout-content">
+                    <strong>現在の管理者アカウント情報（重要）</strong>
+                    現在、Cloudflareの管理アカウントは<strong>「山本（事務長）個人のGoogleアカウント（Gmail）」</strong>に紐付いて登録されています。<br>
+                    将来的な管理者交代・引き継ぎの際は、Cloudflareダッシュボードの「Members」から新しい管理者（または代表アカウント）を招待して権限を移譲してください。
+                </div>
+            </div>
+
+            <div class="info-grid">
+                <div class="info-box">
+                    <h4>💰 コスト・月額費用</h4>
+                    <p><strong>完全 0 円（無料枠内で恒久運用）</strong></p>
+                    <ul style="font-size:0.82rem; color:#475569; padding-left:1.2rem; margin-top:4px;">
+                        <li><strong>Cloudflare Zero Trust</strong>: 50ユーザーまで完全無料（現在1トンネルのみ使用）。</li>
+                        <li><strong>DNS / SSL証明書</strong>: 無料（自動更新）。</li>
+                        <li><strong>WAFルール</strong>: 無料プランで最大5ルールまで利用可能（現在1ルール使用）。</li>
+                    </ul>
+                </div>
+                <div class="info-box">
+                    <h4>🌐 DNS・ドメイン情報</h4>
+                    <p><strong>独自ドメイン: ono.or.jp</strong></p>
+                    <ul style="font-size:0.82rem; color:#475569; padding-left:1.2rem; margin-top:4px;">
+                        <li><strong>ネームサーバー</strong>: Cloudflare管理（ns.cloudflare.com）。</li>
+                        <li><strong>公開ホスト名</strong>: <code>kawara.ono.or.jp</code></li>
+                        <li><strong>レコード種別</strong>: CNAME（トンネルUUIDに紐付け済み）。</li>
+                        <li><strong>プロキシ状態</strong>: Proxied（オレンジ雲マーク必須）。</li>
+                    </ul>
+                </div>
+            </div>
+
+            <h4 style="font-size:1.05rem; font-weight:800; margin:1.4rem 0 0.6rem; color:#0f172a;">🛠️ トンネル常駐サービス（本番サーバー側）</h4>
+            <p style="font-size:0.85rem; color:#475569;">
+                本番サーバー（<code>192.168.1.16</code>）の Windows サービスとして <strong><code>Cloudflared</code></strong> が常時稼働しています。サーバー起動時に自動でトンネルを確立するため、ルーターのポート開放（80番/443番開放）は一切不要です。
+            </p>
+            <pre><code># サービス状態の確認コマンド（本番サーバー PowerShell）
+Get-Service Cloudflared
+
+# サービスの再起動（設定変更時など）
+Restart-Service Cloudflared</code></pre>
+
+            <h4 style="font-size:1.05rem; font-weight:800; margin:1.4rem 0 0.6rem; color:#0f172a;">🛡️ Cloudflare セキュリティ ルール（WAF Custom Rules）設定詳細</h4>
+            <p style="font-size:0.85rem; color:#475569; margin-bottom:1rem;">
+                Cloudflareダッシュボード（<strong>セキュリティ ➔ セキュリティ ルール</strong>）に以下の2つのカスタムルールがデプロイされ、病院公式サイトおよび院内かわら版をエッジサーバーで多層防衛しています：
+            </p>
+
+            <!-- ルール 1: かわら版アクセス制限 -->
+            <div class="info-box" style="background:#fff; border-left:5px solid var(--accent-cloudflare); margin-bottom:1.2rem;">
+                <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px;">
+                    <div style="font-weight:bold; font-size:0.92rem; color:#c2410c;">【ルール1】かわら版アクセス制限（院外未認証ブロック）</div>
+                    <span style="background:#fee2e2; color:#991b1b; padding:2px 8px; border-radius:4px; font-size:0.75rem; font-weight:bold;">アクション: ブロック (403)</span>
+                </div>
+                <div style="font-size:0.82rem; color:#334155; margin-top:8px; line-height:1.6;">
+                    <strong>目的:</strong> 30日Cookie未保持の外部スマホから、管理画面や内部API、非公開データへの不正アクセスを院内サーバー到達前にエッジで遮断。<br>
+                    <strong>完全な式プレビュー（コピー用）:</strong>
+                    <pre style="background:#0f172a; color:#e2e8f0; padding:10px 12px; border-radius:6px; font-size:0.78rem; overflow-x:auto; margin:6px 0; border:1px solid #334155; line-height:1.5;"><code>(http.host eq "kawara.ono.or.jp" and not http.cookie contains "kawara_device_token" and not http.request.uri.path in {"/kawara/login.php" "/kawara/api/device_auth.php" "/kawara/api/line_webhook.php"} and not starts_with(http.request.uri.path, "/kawara/assets/") and not starts_with(http.request.uri.path, "/kawara/uploads/"))</code></pre>
+                    <div style="background:#fef2f2; border:1px solid #fecaca; border-radius:4px; padding:8px 10px; margin-top:6px; color:#991b1b; font-size:0.78rem;">
+                        <strong>⚠️ 事故防止の絶対厳守事項:</strong><br>
+                        必ず先頭に <code>http.host eq "kawara.ono.or.jp"</code> を含めてください。これが抜けると、病院公式ホームページ（<code>www.ono.or.jp</code>）を訪れた一般患者様全員が「Cookie未保持」として巻き添えブロックされてしまいます。
+                    </div>
+                </div>
+            </div>
+
+            <!-- ルール 2: 海外アクセス完全遮断 -->
+            <div class="info-box" style="background:#fff; border-left:5px solid #dc2626; margin-bottom:1.5rem;">
+                <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px;">
+                    <div style="font-weight:bold; font-size:0.92rem; color:#991b1b;">【ルール2】海外アクセス完全遮断（Geo-blocking）</div>
+                    <span style="background:#fee2e2; color:#991b1b; padding:2px 8px; border-radius:4px; font-size:0.75rem; font-weight:bold;">アクション: ブロック (403)</span>
+                </div>
+                <div style="font-size:0.82rem; color:#334155; margin-top:8px; line-height:1.6;">
+                    <strong>目的:</strong> 中国・ロシア・米国など世界中の不正脆弱性スキャナーや自動攻撃ボットを、院内サーバー（<code>login.php</code> 等を含む）に触れさせることなくCloudflareエッジで100%撃退。<br>
+                    <strong>完全な式プレビュー（コピー用）:</strong>
+                    <pre style="background:#0f172a; color:#e2e8f0; padding:10px 12px; border-radius:6px; font-size:0.78rem; overflow-x:auto; margin:6px 0; border:1px solid #334155; line-height:1.5;"><code>(http.host in {"www.ono.or.jp" "ono.or.jp" "kawara.ono.or.jp"} and ip.geoip.country ne "JP")</code></pre>
+                    <div style="background:#f0fdf4; border:1px solid #bbf7d0; border-radius:4px; padding:8px 10px; margin-top:6px; color:#166534; font-size:0.78rem;">
+                        <strong>💡 防衛効果:</strong><br>
+                        公式HP（<code>www.ono.or.jp</code>）およびかわら版（<code>kawara.ono.or.jp</code>）の両方が日本国内限定アクセスとなります。海外からはURLを知っていても一切接続できず、院内サーバーはピクリとも反応しません。
+                    </div>
+                </div>
+            </div>
+
+            <!-- 事務長キルスイッチの運用 -->
+            <h4 style="font-size:1.05rem; font-weight:800; margin:1.6rem 0 0.6rem; color:#0f172a;">🛑 事務長管理画面からの物理キルスイッチ（トンネル緊急遮断・再開）</h4>
+            <p style="font-size:0.85rem; color:#475569; margin-bottom:1rem;">
+                事務長ダッシュボード（<code>jimucho_dashboard.php</code>）最上部に設置された、外部接続を1タップで物理遮断・再開できる緊急制御機構です。
+            </p>
+            <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:14px; margin-bottom:1.5rem; font-size:0.84rem; color:#334155; line-height:1.7;">
+                <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
+                    <span style="background:#15803d; color:#fff; padding:3px 10px; border-radius:12px; font-weight:bold; font-size:0.78rem;">🟢 公開中 (ON)</span>
+                    <span>⟷</span>
+                    <span style="background:#b91c1c; color:#fff; padding:3px 10px; border-radius:12px; font-weight:bold; font-size:0.78rem;">🔴 遮断中 (OFF)</span>
+                </div>
+                <ul style="padding-left:1.3rem; margin-bottom:10px;">
+                    <li><strong>動作原理:</strong> 事務長（山本太 / <code>staff_id = 15</code>）または管理者のみ実行可能。本番サーバーのWindowsサービス <code>Cloudflared</code> を <code>sc.exe stop / start</code> で即座に停止・再開します。</li>
+                    <li><strong>遮断時の挙動:</strong> 外部からの通信（<code>kawara.ono.or.jp</code>）はCloudflare側で即座に Error 1033（トンネル切断）となり、外部からの侵入経路が完全に物理消滅します。</li>
+                    <li><strong>院内影響ゼロ:</strong> 院内LAN（電子カルテ端末・院内Wi-Fi）での利用には一切影響ありません。</li>
+                    <li><strong>推奨運用プロトコル:</strong> 通常（平時・夜間・休日）は「🔴 遮断中 (OFF)」を維持し、災害発災時や全体周知時のみ事務長判断で「🟢 公開中 (ON)」にする運用（ホワイトリスト型運用）を徹底することで、外部露出時間を年間の0.1%以下に抑え込みます。</li>
+                    <li><strong>監査ログ:</strong> 停止・再開操作はすべて <code>logs/security_audit.log</code> に実行者氏名・日時とともに自動記録されます。</li>
+                </ul>
+            </div>
+        </section>
+
+        <!-- 3. LINE公式・クラウド設定 -->
+        <section id="line" class="spec-section">
+            <div class="section-header">
+                <div class="section-title">
+                    <span>💬</span> 3. LINE公式アカウント・クラウド設定
+                </div>
+                <span class="section-tag tag-line">LINE Developers</span>
+            </div>
+
+            <div class="info-grid">
+                <div class="info-box">
+                    <h4>📱 LINE公式アカウント</h4>
+                    <p><strong>アカウント名: おの肛門科</strong></p>
+                    <ul style="font-size:0.82rem; color:#475569; padding-left:1.2rem; margin-top:4px;">
+                        <li><strong>ベーシックID</strong>: <code>@tmw3446q</code></li>
+                        <li><strong>友だち追加URL</strong>: <code>https://line.me/R/ti/p/@tmw3446q</code></li>
+                        <li><strong>プラン</strong>: コミュニケーションプラン（無料枠: 毎月200通まで）</li>
+                    </ul>
+                </div>
+                <div class="info-box">
+                    <h4>🔑 Messaging API チャネル</h4>
+                    <p><strong>LINE Developers コンソール</strong></p>
+                    <ul style="font-size:0.82rem; color:#475569; padding-left:1.2rem; margin-top:4px;">
+                        <li><strong>チャネル種類</strong>: Messaging API</li>
+                        <li><strong>Webhook URL</strong>: <code>https://kawara.ono.or.jp/kawara/api/line_webhook.php</code></li>
+                        <li><strong>Webhookの利用</strong>: 有効（ON）</li>
+                        <li><strong>応答メッセージ</strong>: 無効（OFF推奨：ボット自動返答と競合防止）</li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="callout callout-info">
+                <div class="callout-icon">💡</div>
+                <div class="callout-content">
+                    <strong>月間無料メッセージ通数（200通）の運用アドバイス</strong>
+                    LINEのプッシュ通知（安否確認一斉送信など）は無料枠が200通/月です。<br>
+                    ・<strong>平時</strong>: 端末認証コード（6桁）の送信、および本人の既読メモ送信のみ使用。<br>
+                    ・<strong>有事（災害・緊急時）</strong>: 全職員への安否確認一斉ブロードキャストを実施。<br>
+                    万が一職員数増加や訓練頻度増加で200通を超える月が出る場合は、LINE Official Account Manager よりライトプラン（月額5,000円/5,000通）へのアップグレードをご検討ください。
+                </div>
+            </div>
+
+            <h4 style="font-size:1.05rem; font-weight:800; margin:1.4rem 0 0.6rem; color:#0f172a;">🔐 認証シークレットキーの保管場所</h4>
+            <p style="font-size:0.85rem; color:#475569;">
+                LINE APIと通信するためのトークンは、サーバー内の設定ファイルに安全に定義されています：<br>
+                ファイルパス: <code>c:\Apache24\htdocs\kawara\includes\line_helper.php</code>
+            </p>
+            <table class="spec-table">
+                <tr>
+                    <th>定数名</th>
+                    <th>概要</th>
+                    <th>管理上の注意</th>
+                </tr>
+                <tr>
+                    <td><code>LINE_CHANNEL_SECRET</code></td>
+                    <td>Webhook署名検証用シークレット</td>
+                    <td>LINE社からの本物WebhookリクエストであるかをHMAC-SHA256で検証します。絶対に外部へ漏洩させないでください。</td>
+                </tr>
+                <tr>
+                    <td><code>LINE_CHANNEL_ACCESS_TOKEN</code></td>
+                    <td>長期チャネルアクセストークン</td>
+                    <td>メッセージ送信（Push API / Reply API）に使用。LINE Developers画面で再発行した場合はこのファイルを更新してください。</td>
+                </tr>
+            </table>
+
+            <h4 style="font-size:1.05rem; font-weight:800; margin:1.6rem 0 0.6rem; color:#0f172a;">📱 3.4 LINEリッチメニュー（トーク下部固定メニュー）の仕様と運用</h4>
+            <p style="font-size:0.85rem; color:#475569;">
+                職員がスマホからかわら版を日常的に利用する際、<strong>「URLの直接手打ちやブックマーク探しが非常に面倒」「LINEトーク内のURLを踏むとLINE内蔵ブラウザで開いてしまい、Safari/ChromeとCookieが分離して認証が崩れる」</strong>という課題がありました。<br>
+                これを完全解消するため、公式アカウントのトーク下部に<strong>常設のリッチメニュー（小枠・3分割）</strong>を配備し、外部ブラウザ（Safari/Chrome）強制起動パラメータ（<code>?openExternalBrowser=1</code>）を組み込んでいます。
+            </p>
+
+            <div class="info-grid" style="margin-top:10px;">
+                <div class="info-box">
+                    <h4>📐 リッチメニュー規格・画像アセット</h4>
+                    <ul style="font-size:0.82rem; color:#475569; padding-left:1.2rem; margin-top:4px;">
+                        <li><strong>テンプレート</strong>: 小枠（横3分割: A・B・C）</li>
+                        <li><strong>推奨画像サイズ</strong>: 2500 × 843 px（PNG、110KB）</li>
+                        <li><strong>画像保管場所</strong>: <code>assets/richmenu/richmenu_small_3split.png</code></li>
+                        <li><strong>予備サイズ</strong>: 1200 × 405 px（<code>richmenu_small_3split_1200x405.png</code>）</li>
+                    </ul>
+                </div>
+                <div class="info-box">
+                    <h4>🚀 3大機能のURL・ルーティング設定</h4>
+                    <ul style="font-size:0.82rem; color:#475569; padding-left:1.2rem; margin-top:4px;">
+                        <li><strong>A（左: かわら版）</strong>:<br><code>https://kawara.ono.or.jp/kawara/login.php?openExternalBrowser=1</code></li>
+                        <li><strong>B（中央: 予定表）</strong>:<br><code>https://kawara.ono.or.jp/kawara/login.php?redirect=doctor_schedule.php&openExternalBrowser=1</code></li>
+                        <li><strong>C（右: 安否確認）</strong>:<br><code>https://kawara.ono.or.jp/kawara/login.php?redirect=safety_contacts.php&openExternalBrowser=1</code></li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="callout callout-info" style="margin-top:14px;">
+                <div class="callout-icon">💡</div>
+                <div class="callout-content">
+                    <strong>「openExternalBrowser=1」と「login.php?redirect=...」による深層セキュリティ設計</strong><br>
+                    <strong>① LINE内蔵ブラウザのCookie隔離問題を解消</strong>: LINEの仕様として、URL末尾に <code>openExternalBrowser=1</code> を付与すると、LINE内WebViewをスキップしてOS標準ブラウザ（iOS: Safari / Android: Chrome）を直接起動します。これにより、スマホ標準ブラウザに30日端末Cookieが確実に保持されます。<br>
+                    <strong>② Cloudflare WAF設定変更ゼロで安全稼働</strong>: Cloudflare WAFはCookie未保持の外部アクセスに対して <code>login.php</code> 以外の全パスを403遮断します。全メニューを <code>login.php?redirect=...</code> 経由にすることで、Cloudflare側の複雑な条件式を書き換えることなく、未認証端末には6桁コード認証を促し、認証済み端末には0.01秒で即座に目的画面へ透過リダイレクトさせます。
+                </div>
+            </div>
+
+            <h4 style="font-size:1.05rem; font-weight:800; margin:1.4rem 0 0.6rem; color:#0f172a;">🩺 3.5 医師予定表ビューア（doctor_schedule.php）と内部API連携</h4>
+            <p style="font-size:0.85rem; color:#475569;">
+                中央ボタンから起動する「医師予定表（<code>doctor_schedule.php</code>）」は、同一Apacheサーバー内の医師予定表システム（<code>/yotei/api/</code>）とリアルタイム連携し、スマホに最適化したレスポンシブ画面を描画します。職員・医師は別のID/パスワードを入れることなく、かわら版の30日Cookieだけで即座に閲覧可能です。
+            </p>
+            <table class="spec-table">
+                <tr>
+                    <th>呼出API（内部localhost通信）</th>
+                    <th>取得データ</th>
+                    <th>画面での反映箇所</th>
+                </tr>
+                <tr>
+                    <td><code>yotei/api/today.php</code></td>
+                    <td>本日の休診・診療医師、休診日フラグ、申し送りメモ</td>
+                    <td>【本日】ビューの休診赤枠カード、上部申し送りバナー</td>
+                </tr>
+                <tr>
+                    <td><code>yotei/api/events.php</code></td>
+                    <td>指定期間（1週間〜1ヶ月）の全医師スケジュール・休診</td>
+                    <td>【週間】ビューの曜日別カード、【月間】カレンダーグリッド</td>
+                </tr>
+                <tr>
+                    <td><code>yotei/api/doctors.php</code></td>
+                    <td>登録医師一覧（小野院長、矢野副院長など）、診療科、テーマ色</td>
+                    <td>画面上部の「医師別絞り込みフィルターピル」</td>
+                </tr>
+            </table>
+        </section>
+
+        <!-- 4. LINE ID連携の仕組み -->
+        <section id="line-id" class="spec-section">
+            <div class="section-header">
+                <div class="section-title">
+                    <span>🔗</span> 4. 職員とLINE IDの紐付け（連携）の仕組み
+                </div>
+                <span class="section-tag tag-line">DB & Webhook</span>
+            </div>
+
+            <p style="font-size:0.9rem; color:#334155; margin-bottom:1rem;">
+                職員個人のプライベートLINEアカウントと病院の職員情報を結びつけるキーは、LINE社がユーザーごとに発行する暗号化ID（<strong><code>line_user_id</code>: Uから始まる33桁の文字列</strong>）です。電話番号や個人のLINE名は一切保持しません。
+            </p>
+
+            <div class="step-timeline">
+                <div class="timeline-item">
+                    <div class="timeline-num">1</div>
+                    <div class="timeline-content">
+                        <strong>連携コード発行（有効期限20分）</strong>
+                        職員がかわら版の「LINE連携設定（<code>line_link.php</code>）」を開くと、DBの <code>line_link_codes</code> テーブルにランダムな4桁の数字（例: <code>6597</code>）が発行されます。
+                    </div>
+                </div>
+                <div class="timeline-item">
+                    <div class="timeline-num">2</div>
+                    <div class="timeline-content">
+                        <strong>トーク画面でコード送信</strong>
+                        職員が公式LINE「おの肛門科」にその4桁数字を送信します。
+                    </div>
+                </div>
+                <div class="timeline-item">
+                    <div class="timeline-num">3</div>
+                    <div class="timeline-content">
+                        <strong>Webhookによる自動逆引き＆DB登録</strong>
+                        LINE社から <code>api/line_webhook.php</code> にメッセージイベントが届きます。<br>
+                        「4桁コード」と「送信者のLINE User ID」が照合され、<code>staff</code> テーブルの <code>line_user_id</code> カラムに自動書き込みされます。
+                    </div>
+                </div>
+                <div class="timeline-item">
+                    <div class="timeline-num">4</div>
+                    <div class="timeline-content">
+                        <strong>ブラウザ側ポーリングで即座に連携完了</strong>
+                        <code>line_link.php</code> が3秒おきにDBをチェックしており、書き込みを検知した瞬間に「連携完了！」と画面が切り替わります。
+                    </div>
+                </div>
+            </div>
+
+            <div class="callout callout-success">
+                <div class="callout-icon">✅</div>
+                <div class="callout-content">
+                    <strong>連携は「無期限・半永久」です</strong>
+                    LINE連携情報（`line_user_id`）は病院のDBに恒久保存されます。<br>
+                    30日経っても、1年経っても、本人が解除しない限り勝手に切れることは絶対にありません。
+                </div>
+            </div>
+        </section>
+
+        <!-- 5. スマホCookie認証（30日制限） -->
+        <section id="cookie-auth" class="spec-section">
+            <div class="section-header">
+                <div class="section-title">
+                    <span>🍪</span> 5. スマホへのCookie登録（端末30日アクセス制限）
+                </div>
+                <span class="section-tag tag-auth">セキュリティ基盤</span>
+            </div>
+
+            <p style="font-size:0.9rem; color:#334155; margin-bottom:1rem;">
+                院外からかわら版を閲覧する際、毎回毎回パスワードや認証コードを入力させるのは職員にとって大きな負担です。そこで、<strong>「初回のみLINE認証を行い、成功した端末に30日間有効な暗号署名付きCookieを発行する」</strong>仕組みを採用しています。
+            </p>
+
+            <table class="spec-table">
+                <tr>
+                    <th>Cookie名</th>
+                    <td><code>kawara_device_token</code></td>
+                </tr>
+                <tr>
+                    <th>Cookie属性</th>
+                    <td><code>HttpOnly</code>（JS改ざん防止）、<code>SameSite=Lax</code>、<code>Max-Age=2592000</code>（30日間）</td>
+                </tr>
+                <tr>
+                    <th>署名内容</th>
+                    <td><code>スタッフID.有効期限タイムスタンプ.トークンバージョン.HMAC-SHA256署名</code></td>
+                </tr>
+                <tr>
+                    <th>ローリング自動延長</th>
+                    <td>
+                        <strong>利用するたびに期限が「今日から30日後」へ自動更新されます。</strong><br>
+                        日常的にかわら版を開いている職員は、30日経っても再認証を求められず快適に利用し続けられます。
+                    </td>
+                </tr>
+            </table>
+
+            <h4 style="font-size:1.05rem; font-weight:800; margin:1.4rem 0 0.6rem; color:#0f172a;">🚨 端末紛失・退職時の即時遮断（Revoke）メカニズム</h4>
+            <p style="font-size:0.85rem; color:#475569;">
+                「Cookieの有効期限が30日残っている状態でスマホを紛失した」「退職した」という場合でも、管理者が即座に外部アクセスを遮断できます。
+            </p>
+            <div class="info-grid">
+                <div class="info-box">
+                    <h4>📱 スマホ紛失時（端末リセット）</h4>
+                    <p>[マスタメンテナンス] で該当職員の「<strong>📱 端末リセット</strong>」ボタンを押すだけです。</p>
+                    <div style="font-size:0.8rem; color:#64748b; line-height:1.5;">
+                        DBの <code>staff.device_token_version</code> がインクリメント（+1）され、旧端末が持っているCookie署名が無効化されます。旧端末は即座にログアウトされ、LINEコード認証が再要求されます。
+                    </div>
+                </div>
+                <div class="info-box">
+                    <h4>👋 職員退職時（職員削除）</h4>
+                    <p>[マスタメンテナンス] で職員を「<strong>削除</strong>」するだけです。</p>
+                    <div style="font-size:0.8rem; color:#64748b; line-height:1.5;">
+                        ・在籍フラグOFF（ログイン不可）<br>
+                        ・端末Cookie即時失効<br>
+                        ・LINE ID連携自動消去<br>
+                        がワンクリックで同時に実行され、院外からの侵入を完全にシャットアウトします。
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 6. 管理者引き継ぎ・注意事項 -->
+        <section id="handover" class="spec-section">
+            <div class="section-header">
+                <div class="section-title">
+                    <span>📋</span> 6. 管理者引き継ぎ・チェックリスト
+                </div>
+                <span class="section-tag tag-arch">引き継ぎ事項</span>
+            </div>
+
+            <table class="spec-table">
+                <tr>
+                    <th>対象項目</th>
+                    <th>管理上の重要チェックポイント</th>
+                </tr>
+                <tr>
+                    <td><strong>Cloudflareアカウント</strong></td>
+                    <td>
+                        現在: 山本（事務長）の個人Googleアカウント。<br>
+                        <strong>引き継ぎ手順:</strong> Cloudflareダッシュボード → Manage Account → Members にて後任のメールアドレスを「Administrator」として招待し、オーナー権限を移行してください。
+                    </td>
+                </tr>
+                <tr>
+                    <td><strong>LINE公式アカウント</strong></td>
+                    <td>
+                        現在: LINE Official Account Manager（おの肛門科）。<br>
+                        <strong>引き継ぎ手順:</strong> 設定 → 権限管理 から、後任者のLINEアカウントに「管理者」権限を付与してください。
+                    </td>
+                </tr>
+                <tr>
+                    <td><strong>サーバー再起動時</strong></td>
+                    <td>
+                        本番サーバー（<code>192.168.1.16</code>）がWindows Update等で再起動した場合、ApacheとPostgreSQL、そして <strong><code>Cloudflared</code>（Windowsサービス）</strong> が自動起動します。<br>
+                        再起動後はスマホから <code>https://kawara.ono.or.jp</code> にアクセスできるか1回確認してください。
+                    </td>
+                </tr>
+                <tr>
+                    <td><strong>ルーター設定</strong></td>
+                    <td>
+                        Cloudflare Tunnel を使用しているため、<strong>病院ルーターのポート開放（ポートフォワーディング）は一切行っていません。</strong><br>
+                        ルーターを交換・買い替えた場合でも、LAN内から外向きのHTTPS（443番）通信が通れば設定変更なしでそのまま動作します。
+                    </td>
+                </tr>
+            </table>
+        </section>
+
+        <!-- 7. 職員の入職・退職・機種変更・紛失時の実務運用マニュアル -->
+        <section id="lifecycle" class="spec-section" style="border: 2px solid #fca5a5;">
+            <div class="section-header" style="border-bottom-color:#fee2e2;">
+                <div class="section-title" style="color:#991b1b;">
+                    <span>🚨</span> 7. 職員の入職・退職・機種変更・紛失時の実務運用マニュアル
+                </div>
+                <span class="section-tag" style="background:#fee2e2; color:#dc2626; border:1px solid #fca5a5;">管理者実務必携</span>
+            </div>
+
+            <p style="font-size:0.9rem; color:#334155; margin-bottom:1.5rem;">
+                日常の病院運営における人事異動や端末トラブルに対応するための、管理者の具体的オペレーション手順です。
+            </p>
+
+            <!-- 7-1. 入職時 -->
+            <div class="info-box" style="background:#fff; border-left:4px solid #10b981; margin-bottom:1.5rem;">
+                <h4 style="color:#065f46; font-size:1.05rem;">
+                    <span>🌱</span> 7-1. 職員の新規採用・入職時の処理
+                </h4>
+                <div class="step-timeline" style="margin-top:10px;">
+                    <div class="timeline-item">
+                        <div class="timeline-num" style="background:#10b981;">1</div>
+                        <div class="timeline-content">
+                            <strong>職員マスタへ追加登録</strong>
+                            [マスタ管理（<code>master_mente.php</code>）] を開き、「新規職員追加」から氏名・役職・ログインパスワードを設定して登録します（在籍フラグ: ON）。
+                        </div>
+                    </div>
+                    <div class="timeline-item">
+                        <div class="timeline-num" style="background:#10b981;">2</div>
+                        <div class="timeline-content">
+                            <strong>院内PCでの初回ログイン案内</strong>
+                            新入職員に院内PCからかわら版を開かせ、ユーザー選択＋パスワードでログインできることを確認してもらいます（院内LANアクセスは証明書やアプリ不要の完全フリーパスです）。
+                        </div>
+                    </div>
+                    <div class="timeline-item">
+                        <div class="timeline-num" style="background:#10b981;">3</div>
+                        <div class="timeline-content">
+                            <strong>公式LINEの登録案内（手順書の配布）</strong>
+                            「<a href="LINE登録手順書.html" target="_blank" style="color:#06c755; font-weight:bold;">LINE登録手順書</a>」を案内するか、かわら版画面上部の「📱 LINE未登録」ボタンを押して、画面のQRコードをスマホカメラで読み取ってもらい、4桁コードをLINEトークに送信させます。
+                        </div>
+                    </div>
+                    <div class="timeline-item">
+                        <div class="timeline-num" style="background:#10b981;">4</div>
+                        <div class="timeline-content">
+                            <strong>スマホからの院外アクセス確認</strong>
+                            新入職員のスマホを「院外からのアクセス」としてテストします（※病院の<strong>院内Wi-Fi（192.168.*）</strong>に接続したままだと「院内アクセス」と判定され外部認証がスキップされるため、テスト時のみ一時的に院内Wi-Fiをオフにして4G/5Gまたは外部回線に切り替えます）。<br>
+                            <code>https://kawara.ono.or.jp/kawara/login.php</code> を開き、LINEに届く6桁コードを入力して30日間端末Cookieが正常に発行されることを確認します。<br>
+                            <span style="font-size:0.78rem; color:#15803d; font-weight:bold;">※もちろん、自宅Wi-Fi、避難所Wi-Fi、災害用「00000JAPAN」Wi-Fiなど、あらゆるWi-Fi環境から100%問題なく利用可能です。</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 7-2. 退職時 -->
+            <div class="info-box" style="background:#fff; border-left:4px solid #dc2626; margin-bottom:1.5rem;">
+                <h4 style="color:#991b1b; font-size:1.05rem;">
+                    <span>👋</span> 7-2. 職員の退職・離職時の処理（ワンアクション全自動連動）
+                </h4>
+                <p style="font-size:0.86rem; color:#475569; margin:6px 0 10px;">
+                    退職者が所持している個人のスマートフォンから、院内かわら版や過去の連絡事項が不正に閲覧され続けるのを防止するための最重要処理です。
+                </p>
+                <div class="callout callout-danger" style="margin:8px 0 12px;">
+                    <div class="callout-icon">⚡</div>
+                    <div class="callout-content">
+                        <strong>管理者が行う作業は「マスタメンテで削除を押す」だけ！</strong>
+                        [職員マスタメンテ（<code>master_mente.php</code>）] で該当職員の「<strong>削除</strong>」ボタンを押すだけで、以下の<strong>3重の防御措置が全自動で即時実行</strong>されます。
+                    </div>
+                </div>
+                <table class="spec-table" style="margin:10px 0;">
+                    <tr>
+                        <th style="width:30%;">1. 在籍フラグOFF</th>
+                        <td><code>is_deleted = TRUE</code> に更新され、通常ログインが即時遮断されます。</td>
+                    </tr>
+                    <tr>
+                        <th>2. 端末30日Cookie即時失効</th>
+                        <td><code>device_token_version</code> がインクリメントされ、退職者の私物スマホに残っている30日Cookieの暗号署名が無効化されます。次回アクセス時に即座にログアウトされ、二度と閲覧できなくなります。</td>
+                    </tr>
+                    <tr>
+                        <th>3. LINE連携の自動消去</th>
+                        <td><code>line_user_id = NULL</code> に初期化され、病院からのBCP安否点呼や緊急通知、既読メモが退職者のLINEへ送信される事故を完全防止します。</td>
+                    </tr>
+                </table>
+            </div>
+
+            <!-- 7-3. 機種変更時 -->
+            <div class="info-box" style="background:#fff; border-left:4px solid #0284c7; margin-bottom:1.5rem;">
+                <h4 style="color:#0369a1; font-size:1.05rem;">
+                    <span>🔄</span> 7-3. スマートフォンの機種変更時の処理
+                </h4>
+                <p style="font-size:0.86rem; color:#475569; margin:6px 0 10px;">
+                    職員が新しいスマートフォンに買い替えた場合の対応です。ほとんどの場合、管理者の作業は一切発生しません。
+                </p>
+                
+                <h5 style="font-size:0.92rem; font-weight:bold; color:#0f172a; margin:10px 0 4px;">パターンA: LINEアカウントを引き継いで機種変更した場合（通常の機種変更・99%のケース）</h5>
+                <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:10px 14px; font-size:0.84rem; color:#334155; margin-bottom:12px;">
+                    <strong style="color:#0284c7;">👉 管理者の作業は「不要（ゼロ）」です！職員本人の操作のみで完了します。</strong><br>
+                    1. 新しいスマホでかわら版ログインURL（<code>https://kawara.ono.or.jp/kawara/login.php</code>）を開きます。<br>
+                    2. 自分の名前を選択し、「📲 LINEに認証コードを送信」をタップします。<br>
+                    3. 新しいスマホのLINE（おの肛門科）に届いた6桁コードを入力してログインします。<br>
+                    4. <strong>完了！</strong> 新しいスマホに新しい「30日間端末Cookie」が発行され、これまで通り利用できます（古いスマホは使用不能になります）。
+                </div>
+
+                <h5 style="font-size:0.92rem; font-weight:bold; color:#0f172a; margin:10px 0 4px;">パターンB: 電話番号やLINEアカウント自体を新規に作り直した場合</h5>
+                <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:10px 14px; font-size:0.84rem; color:#334155;">
+                    LINEのアカウントが変わった場合は、新しいLINEアカウントと職員情報の再紐付けが必要です。<br>
+                    1. 院内PC（または管理者の画面）からかわら版を開き、ヘッダーの「🟢 LINE連携済」または「<a href="../line_link.php" target="_blank" style="color:var(--primary); font-weight:bold;">LINE連携設定（line_link.php）</a>」を開きます。<br>
+                    2. 「<strong>🔄 別のLINEで再連携（コード発行）</strong>」ボタンを押します。<br>
+                    3. 画面に表示される新しい4桁コードを、新しいスマホのLINEから送信します。<br>
+                    4. 画面が自動で切り替わり、新しいLINEアカウントへの上書き登録が完了します。
+                </div>
+            </div>
+
+            <!-- 7-4. 紛失時 -->
+            <div class="info-box" style="background:#fff; border-left:4px solid #f59e0b;">
+                <h4 style="color:#b45309; font-size:1.05rem;">
+                    <span>🚨</span> 7-4. スマートフォンの紛失・盗難時の緊急遮断対応
+                </h4>
+                <p style="font-size:0.86rem; color:#475569; margin:6px 0 10px;">
+                    職員が院外でスマホを落としたり紛失した場合、拾得者によるかわら版（患者情報や連絡事項等）の不正閲覧を防ぐため、管理者が**30秒以内に外部アクセス権を無効化**できます。
+                </p>
+
+                <div class="step-timeline" style="margin-top:10px;">
+                    <div class="timeline-item">
+                        <div class="timeline-num" style="background:#f59e0b;">1</div>
+                        <div class="timeline-content">
+                            <strong>管理画面の職員マスタを開く</strong>
+                            管理権限を持つPCで、[マスタ管理（<code>master_mente.php</code>）] の職員一覧を開きます。
+                        </div>
+                    </div>
+                    <div class="timeline-item">
+                        <div class="timeline-num" style="background:#f59e0b;">2</div>
+                        <div class="timeline-content">
+                            <strong>「📱 端末リセット」ボタンをクリック</strong>
+                            紛失した職員の行にある「<strong>📱 端末リセット</strong>」ボタンを押します（確認ダイアログで「OK」を選択）。
+                        </div>
+                    </div>
+                    <div class="timeline-item">
+                        <div class="timeline-num" style="background:#f59e0b;">3</div>
+                        <div class="timeline-content">
+                            <strong>即時遮断完了（拾得者による閲覧を完全防止）</strong>
+                            サーバー側のトークンバージョンがインクリメントされ、紛失したスマホが保持しているCookie署名が無効化されます。仮に紛失スマホのブラウザで記事を開こうとしても、即座にログアウトされてログイン画面に弾き飛ばされ、閲覧できません。
+                        </div>
+                    </div>
+                </div>
+
+                <div class="callout callout-info" style="margin-top:12px;">
+                    <div class="callout-icon">💡</div>
+                    <div class="callout-content">
+                        <strong>端末が見つかった場合、または新端末を入手したときの復旧方法</strong>
+                        「端末リセット」を行っても、職員のLINE連携自体は解除されず維持されています。<br>
+                        端末が見つかった後、または新しいスマホを入手した後は、ログイン画面で「LINEにコード送信」を押し、LINEに届く6桁コードを入力するだけで安全に再開できます。
+                    </div>
+                </div>
+            </div>
+
+        </section>
+
+    </div>
+
+    <footer>
+        <p>医療法人小野会 院内かわら版 システム管理資料 | 2026年10月策定</p>
+    </footer>
+
+</body>
+</html>

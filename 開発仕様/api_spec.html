@@ -1,0 +1,1742 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>全API連携仕様書 | 医療法人小野会 院内かわら版</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Noto+Sans+JP:wght@400;500;700;900&family=Outfit:wght@500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #005a9c;
+            --primary-dark: #003d6b;
+            --primary-light: #e0f2fe;
+            --primary-ultralight: #f0f8ff;
+            --accent: #0ea5e9;
+            --accent-purple: #7c3aed;
+            --accent-green: #10b981;
+            --accent-line: #06c755;
+            --accent-warn: #f59e0b;
+            --accent-danger: #ef4444;
+            --bg: #f8fafc;
+            --card-bg: #ffffff;
+            --sidebar-bg: #0f172a;
+            --border: #e2e8f0;
+            --text-main: #1e293b;
+            --text-muted: #64748b;
+            --code-bg: #0b1120;
+            --shadow-sm: 0 1px 3px rgba(0,0,0,0.06);
+            --shadow-md: 0 4px 14px rgba(0,0,0,0.08);
+            --shadow-lg: 0 10px 25px rgba(0,0,0,0.12);
+            --radius-sm: 6px;
+            --radius-md: 10px;
+            --radius-lg: 16px;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: 'Noto Sans JP', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--text-main);
+            line-height: 1.7;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* ヘッダー */
+        header {
+            background: linear-gradient(135deg, #003d6b 0%, #005a9c 50%, #0284c7 100%);
+            color: #ffffff;
+            padding: 2.2rem 2rem 2rem;
+            box-shadow: 0 4px 20px rgba(0, 90, 156, 0.25);
+            position: relative;
+            border-bottom: 4px solid var(--accent);
+        }
+
+        .header-inner {
+            max-width: 1200px;
+            margin: 0 auto;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 1.5rem;
+        }
+
+        .header-tag {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: rgba(255, 255, 255, 0.2);
+            backdrop-filter: blur(8px);
+            padding: 4px 14px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            letter-spacing: 0.05em;
+            margin-bottom: 0.6rem;
+            font-weight: 700;
+        }
+
+        .header-title h1 {
+            font-size: 1.85rem;
+            font-weight: 900;
+            letter-spacing: -0.02em;
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+        }
+
+        .header-title p {
+            font-size: 0.95rem;
+            opacity: 0.92;
+            margin-top: 0.4rem;
+        }
+
+        .header-badges {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-top: 0.8rem;
+        }
+
+        .badge-pill {
+            background: rgba(255, 255, 255, 0.15);
+            border: 1px solid rgba(255, 255, 255, 0.25);
+            padding: 3px 10px;
+            border-radius: 6px;
+            font-size: 0.78rem;
+            font-family: 'Outfit', sans-serif;
+            font-weight: 600;
+        }
+
+        .header-nav-btns {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .btn-header {
+            background: #ffffff;
+            color: var(--primary-dark);
+            text-decoration: none;
+            padding: 8px 16px;
+            border-radius: 8px;
+            font-weight: bold;
+            font-size: 0.86rem;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.2s;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+        }
+        .btn-header:hover {
+            background: #f0f7ff;
+            transform: translateY(-2px);
+        }
+
+        .btn-header.accent {
+            background: #0284c7;
+            color: #ffffff;
+            border: 1px solid rgba(255,255,255,0.4);
+        }
+        .btn-header.accent:hover {
+            background: #0369a1;
+        }
+
+        /* コンテナ */
+        .layout-container {
+            max-width: 1200px;
+            margin: 2rem auto;
+            padding: 0 1.5rem;
+            display: grid;
+            grid-template-columns: 260px 1fr;
+            gap: 2rem;
+            align-items: start;
+        }
+
+        @media (max-width: 960px) {
+            .layout-container {
+                grid-template-columns: 1fr;
+            }
+            .sidebar {
+                display: none;
+            }
+        }
+
+        /* サイドバー目次 */
+        .sidebar {
+            position: sticky;
+            top: 1.5rem;
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-lg);
+            padding: 1.4rem;
+            box-shadow: var(--shadow-sm);
+        }
+
+        .sidebar-title {
+            font-size: 0.82rem;
+            font-weight: 900;
+            color: var(--primary);
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            margin-bottom: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .sidebar-menu {
+            list-style: none;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .sidebar-menu a {
+            display: block;
+            padding: 7px 10px;
+            color: var(--text-main);
+            text-decoration: none;
+            font-size: 0.86rem;
+            border-radius: 6px;
+            font-weight: 500;
+            transition: all 0.15s;
+        }
+        .sidebar-menu a:hover {
+            background: var(--primary-ultralight);
+            color: var(--primary);
+            font-weight: 700;
+            padding-left: 14px;
+        }
+        .sidebar-menu a.sub {
+            padding-left: 20px;
+            font-size: 0.8rem;
+            color: var(--text-muted);
+        }
+        .sidebar-menu a.sub:hover {
+            padding-left: 24px;
+            color: var(--primary);
+        }
+
+        /* メインコンテンツエリア */
+        .main-content {
+            display: flex;
+            flex-direction: column;
+            gap: 2.2rem;
+        }
+
+        /* セクションカード */
+        .section-card {
+            background: var(--card-bg);
+            border-radius: var(--radius-lg);
+            border: 1px solid var(--border);
+            padding: 2.2rem;
+            box-shadow: var(--shadow-sm);
+            position: relative;
+        }
+
+        .sec-header {
+            display: flex;
+            align-items: center;
+            gap: 0.8rem;
+            border-bottom: 2px solid var(--border);
+            padding-bottom: 0.8rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .sec-num {
+            background: var(--primary);
+            color: #ffffff;
+            width: 34px;
+            height: 34px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 900;
+            font-family: 'Outfit', sans-serif;
+            font-size: 1.1rem;
+            flex-shrink: 0;
+        }
+
+        .sec-title h2 {
+            font-size: 1.45rem;
+            font-weight: 900;
+            color: var(--primary-dark);
+            letter-spacing: -0.01em;
+        }
+        .sec-title p {
+            font-size: 0.88rem;
+            color: var(--text-muted);
+            margin-top: 2px;
+        }
+
+        /* 概要カード・アーキテクチャ図 */
+        .arch-diagram-card {
+            background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+            border-radius: var(--radius-lg);
+            padding: 1.8rem;
+            color: #ffffff;
+            box-shadow: var(--shadow-md);
+            margin-bottom: 1rem;
+        }
+
+        .arch-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+            gap: 1rem;
+            margin-top: 1.2rem;
+        }
+
+        .arch-node {
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: var(--radius-md);
+            padding: 1rem;
+            backdrop-filter: blur(6px);
+            transition: all 0.2s;
+        }
+        .arch-node:hover {
+            background: rgba(255, 255, 255, 0.1);
+            border-color: var(--accent);
+            transform: translateY(-2px);
+        }
+
+        .arch-node-badge {
+            font-size: 0.72rem;
+            font-weight: 800;
+            padding: 2px 8px;
+            border-radius: 4px;
+            text-transform: uppercase;
+            display: inline-block;
+            margin-bottom: 6px;
+        }
+        .badge-core { background: #38bdf8; color: #082f49; }
+        .badge-google { background: #ea4335; color: #ffffff; }
+        .badge-line { background: #06c755; color: #ffffff; }
+        .badge-print { background: #f59e0b; color: #451a03; }
+        .badge-bcp { background: #ef4444; color: #ffffff; }
+        .badge-auth { background: #a855f7; color: #ffffff; }
+
+        .arch-node-title {
+            font-weight: 800;
+            font-size: 0.95rem;
+            margin-bottom: 4px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .arch-node-desc {
+            font-size: 0.8rem;
+            color: #cbd5e1;
+            line-height: 1.5;
+        }
+
+        /* エンドポイント詳細ブロック */
+        .endpoint-card {
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            margin-bottom: 1.8rem;
+            overflow: hidden;
+            background: #ffffff;
+            box-shadow: var(--shadow-sm);
+        }
+
+        .endpoint-header {
+            background: #f8fafc;
+            border-bottom: 1px solid var(--border);
+            padding: 0.9rem 1.2rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .endpoint-left {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-family: 'Fira Code', monospace;
+            font-size: 0.95rem;
+        }
+
+        .method-badge {
+            font-family: 'Outfit', sans-serif;
+            font-weight: 900;
+            font-size: 0.75rem;
+            padding: 3px 10px;
+            border-radius: 5px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        .method-get { background: #e0f2fe; color: #0369a1; border: 1px solid #7dd3fc; }
+        .method-post { background: #dcfce7; color: #15803d; border: 1px solid #86efac; }
+        .method-patch { background: #fef3c7; color: #b45309; border: 1px solid #fcd34d; }
+        .method-delete { background: #fee2e2; color: #b91c1c; border: 1px solid #fca5a5; }
+        .method-ui { background: #f3e8ff; color: #7e22ce; border: 1px solid #d8b4fe; }
+        .method-js { background: #fef08a; color: #854d0e; border: 1px solid #fde047; }
+
+        .endpoint-path {
+            font-weight: 700;
+            color: #0f172a;
+        }
+
+        .endpoint-desc-badge {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            background: #e2e8f0;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-weight: 500;
+        }
+
+        .endpoint-body {
+            padding: 1.4rem;
+        }
+
+        .endpoint-summary {
+            font-size: 0.92rem;
+            margin-bottom: 1.2rem;
+            color: #334155;
+            font-weight: 500;
+        }
+
+        /* テーブル */
+        .param-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.85rem;
+            margin-bottom: 1.2rem;
+        }
+
+        .param-table th, .param-table td {
+            padding: 9px 12px;
+            text-align: left;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .param-table th {
+            background: #f1f5f9;
+            color: #475569;
+            font-weight: 700;
+            font-size: 0.78rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .param-table tr:hover {
+            background: #f8fafc;
+        }
+
+        .param-name {
+            font-family: 'Fira Code', monospace;
+            font-weight: 600;
+            color: #0284c7;
+        }
+
+        .param-type {
+            font-family: 'Fira Code', monospace;
+            font-size: 0.78rem;
+            color: #64748b;
+        }
+
+        .badge-req {
+            font-size: 0.7rem;
+            background: #fee2e2;
+            color: #dc2626;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-weight: bold;
+        }
+        .badge-opt {
+            font-size: 0.7rem;
+            background: #f1f5f9;
+            color: #64748b;
+            padding: 2px 6px;
+            border-radius: 4px;
+        }
+
+        /* コードブロック */
+        .code-container {
+            background: var(--code-bg);
+            border-radius: var(--radius-md);
+            padding: 1rem 1.2rem;
+            position: relative;
+            margin-top: 0.8rem;
+            border: 1px solid #1e293b;
+        }
+
+        .code-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.6rem;
+            border-bottom: 1px solid #1e293b;
+            padding-bottom: 0.4rem;
+        }
+
+        .code-label {
+            font-family: 'Outfit', sans-serif;
+            font-size: 0.75rem;
+            font-weight: 700;
+            color: #94a3b8;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .btn-copy {
+            background: #1e293b;
+            border: 1px solid #334155;
+            color: #cbd5e1;
+            padding: 3px 9px;
+            border-radius: 4px;
+            font-size: 0.72rem;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .btn-copy:hover {
+            background: #334155;
+            color: #ffffff;
+        }
+
+        pre.code-block {
+            font-family: 'Fira Code', monospace;
+            font-size: 0.82rem;
+            line-height: 1.55;
+            color: #38bdf8;
+            overflow-x: auto;
+            white-space: pre;
+            margin: 0;
+        }
+
+        pre.code-block.json {
+            color: #e2e8f0;
+        }
+
+        /* コールアウト */
+        .callout {
+            border-left: 4px solid var(--primary);
+            background: var(--primary-ultralight);
+            padding: 1rem 1.2rem;
+            border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+            font-size: 0.88rem;
+            margin: 1rem 0;
+        }
+        .callout.warn {
+            border-left-color: var(--accent-warn);
+            background: #fffbeb;
+        }
+        .callout.success {
+            border-left-color: var(--accent-green);
+            background: #f0fdf4;
+        }
+        .callout.danger {
+            border-left-color: var(--accent-danger);
+            background: #fef2f2;
+        }
+
+        .callout-title {
+            font-weight: 800;
+            margin-bottom: 4px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        /* トースト通知 */
+        .toast {
+            position: fixed;
+            bottom: 2rem;
+            right: 2rem;
+            background: #0f172a;
+            color: #38bdf8;
+            border: 1px solid #38bdf8;
+            padding: 10px 18px;
+            border-radius: 8px;
+            font-size: 0.88rem;
+            font-weight: 700;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+            opacity: 0;
+            transform: translateY(10px);
+            transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+            pointer-events: none;
+            z-index: 9999;
+        }
+        .toast.show {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        /* フッター */
+        footer {
+            background: #0f172a;
+            color: #94a3b8;
+            padding: 2.5rem 1.5rem;
+            text-align: center;
+            font-size: 0.85rem;
+            border-top: 1px solid #1e293b;
+            margin-top: 4rem;
+        }
+
+        /* 印刷スタイル */
+        @media print {
+            header { background: #003d6b !important; color: #fff !important; }
+            .sidebar, .btn-header, .btn-copy, .toast { display: none !important; }
+            .layout-container { display: block !important; padding: 0 !important; margin: 0 !important; }
+            .section-card { box-shadow: none !important; border: 1px solid #ccc !important; page-break-inside: avoid; }
+        }
+    </style>
+</head>
+<body>
+
+<header>
+    <div class="header-inner">
+        <div>
+            <div class="header-tag">
+                <span>🏥 医療法人小野会</span>
+                <span>•</span>
+                <span>院内情報伝達自動化プラットフォーム</span>
+            </div>
+            <div class="header-title">
+                <h1>⚡ 院内かわら版 全API連携仕様書</h1>
+                <p>外部連携REST API基盤 (v1.0.0) ＆ Googleカレンダー / LINE / 院内印刷 / 災害BCP 総合インターフェース定義</p>
+            </div>
+            <div class="header-badges">
+                <span class="badge-pill">Base URL: /kawara/api</span>
+                <span class="badge-pill">Protocol: HTTP/1.1 & HTTPS</span>
+                <span class="badge-pill">Format: JSON (UTF-8)</span>
+                <span class="badge-pill">CORS: Enabled (*)</span>
+                <span class="badge-pill">Status: Online</span>
+            </div>
+        </div>
+        <div class="header-nav-btns">
+            <a href="index.html" class="btn-header">📖 開発指針書・進捗</a>
+            <a href="../api/index.php" target="_blank" class="btn-header accent">🚀 ライブテスター起動</a>
+        </div>
+    </div>
+</header>
+
+<div class="layout-container">
+    <!-- サイドバー -->
+    <nav class="sidebar">
+        <div class="sidebar-title">📑 目次 (Index)</div>
+        <ul class="sidebar-menu">
+            <li><a href="#sec-overview">0. 全体連携アーキテクチャ</a></li>
+            <li><a href="#sec-common">1. 外部連携共通プロトコル</a></li>
+            <li><a href="#sec-posts">2. 記事一覧・検索API</a></li>
+            <li><a href="#sec-detail">3. 記事詳細・既読API</a></li>
+            <li><a href="#sec-categories">4. カテゴリー一覧API</a></li>
+            <li><a href="#sec-events">5. 行事・カレンダー展開API</a></li>
+            <li><a href="#sec-stats">6. サマリー統計API</a></li>
+            <li><a href="#sec-widget">7. 埋め込みウィジェット (UI)</a></li>
+            <li><a href="#sec-embed-js">8. JS埋め込みライブラリ</a></li>
+            <li><a href="#sec-gcal">9. Googleカレンダー双方向API</a></li>
+            <li><a href="#sec-line">10. LINE Messaging API</a></li>
+            <li><a href="#sec-print">11. 院内印刷・排紙API</a></li>
+            <li><a href="#sec-disaster">12. 緊急災害・安否確認API</a></li>
+            <li><a href="#sec-staff-auth">13. 職員マスタ＆統合認証</a></li>
+            <li><a href="#sec-device-auth">14. 端末認証＆多層防御API</a></li>
+            <li><a href="#sec-doctor">15. 医師予定表連携API</a></li>
+            <li><a href="#sec-tunnel-control">16. トンネル緊急制御API (キルスイッチ)</a></li>
+        </ul>
+    </nav>
+
+    <!-- メインコンテンツ -->
+    <main class="main-content">
+
+        <!-- 0. 全体連携アーキテクチャ -->
+        <section id="sec-overview" class="section-card">
+            <div class="sec-header">
+                <div class="sec-num">0</div>
+                <div class="sec-title">
+                    <h2>全API連携アーキテクチャ概要</h2>
+                    <p>院内かわら版を中心とするデータハブ構想と各種インターフェースの位置づけ</p>
+                </div>
+            </div>
+
+            <p style="font-size: 0.92rem; color: #475569; margin-bottom: 1rem;">
+                院内かわら版は、単なる掲示板ではなく、電子カルテ端末、医事システム、院内サイネージ、Googleカレンダー、LINE、院内ネットワーク複合機、および災害BCP安否確認システムをつなぐ<strong>「院内情報伝達のハブ」</strong>として機能します。
+            </p>
+
+            <div class="arch-diagram-card">
+                <div style="font-size: 0.85rem; font-weight: 800; color: #38bdf8; letter-spacing: 0.05em; text-transform: uppercase;">
+                    System Topology &amp; Interface Map
+                </div>
+                <div class="arch-grid">
+                    <div class="arch-node">
+                        <span class="arch-node-badge badge-core">Core REST API</span>
+                        <div class="arch-node-title">📡 外部連携 REST API</div>
+                        <div class="arch-node-desc">
+                            記事取得、検索、カレンダーイベント展開、サマリー統計、UI埋め込みウィジェットを院内の他Webシステムに提供。
+                        </div>
+                    </div>
+                    <div class="arch-node">
+                        <span class="arch-node-badge badge-google">Google Cloud</span>
+                        <div class="arch-node-title">📅 Google カレンダー API</div>
+                        <div class="arch-node-desc">
+                            OAuth2 JWTサービスアカウントによる予定の作成・更新・削除とローカルDBキャッシュ自動同期、個人Web Intent登録。
+                        </div>
+                    </div>
+                    <div class="arch-node">
+                        <span class="arch-node-badge badge-line">LINE Bot</span>
+                        <div class="arch-node-title">💬 LINE Messaging API</div>
+                        <div class="arch-node-desc">
+                            数字4桁コードによるスタッフ紐付け、記事の対象部署別一斉プッシュ、1タップ了解・欠席・質問ポストバック処理。
+                        </div>
+                    </div>
+                    <div class="arch-node">
+                        <span class="arch-node-badge badge-print">Network Print</span>
+                        <div class="arch-node-title">🖨️ 自動印刷・排紙 API</div>
+                        <div class="arch-node-desc">
+                            Windowsスプーラ連携により、重要ポスターや不在者まとめ日報を各ステーション・医局の指定給紙トレイへ即時排紙。
+                        </div>
+                    </div>
+                    <div class="arch-node">
+                        <span class="arch-node-badge badge-bcp">Disaster BCP</span>
+                        <div class="arch-node-title">🚨 災害BCP・安否確認 API</div>
+                        <div class="arch-node-desc">
+                            緊急災害モードの発令判定、全職員点呼の回答状況（無事/注意/危険/未回答）集計データのリアルタイム配信。
+                        </div>
+                    </div>
+                    <div class="arch-node">
+                        <span class="arch-node-badge badge-auth">SSO &amp; Master</span>
+                        <div class="arch-node-title">🔐 統合認証 ＆ 職員マスタ</div>
+                        <div class="arch-node-desc">
+                            <code>auth_db</code> によるJWT認証トークン検証と、<code>stf_api</code> による最新職員プロファイル（部署・役職・電話）同期。
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 1. 外部連携共通プロトコル -->
+        <section id="sec-common" class="section-card">
+            <div class="sec-header">
+                <div class="sec-num">1</div>
+                <div class="sec-title">
+                    <h2>外部連携共通プロトコル仕様</h2>
+                    <p>共通ヘルパー (includes/api_helper.php) による統一仕様</p>
+                </div>
+            </div>
+
+            <table class="param-table">
+                <thead>
+                    <tr>
+                        <th style="width: 180px;">項目</th>
+                        <th>仕様・設定値</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>ベースURL</strong></td>
+                        <td><code>http://[サーバーIP]/kawara/api</code> (本番: <code>http://192.168.1.16/kawara/api</code>)</td>
+                    </tr>
+                    <tr>
+                        <td><strong>通信暗号化</strong></td>
+                        <td>HTTP / HTTPS (院内セキュアイントラネット通信)</td>
+                    </tr>
+                    <tr>
+                        <td><strong>文字コード</strong></td>
+                        <td>UTF-8 (日本語文字列はエスケープなしの生UTF-8で返却: <code>JSON_UNESCAPED_UNICODE</code>)</td>
+                    </tr>
+                    <tr>
+                        <td><strong>CORS設定</strong></td>
+                        <td><code>Access-Control-Allow-Origin: *</code> (他WebシステムやローカルJSからの呼び出し許可)</td>
+                    </tr>
+                    <tr>
+                        <td><strong>プリフライト</strong></td>
+                        <td><code>OPTIONS</code> リクエスト時に自動的に 200 OK を返却して即時終了</td>
+                    </tr>
+                    <tr>
+                        <td><strong>キャッシュ制御</strong></td>
+                        <td><code>Cache-Control: no-cache, no-store, must-revalidate</code> (リアルタイム性担保)</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <div class="callout success">
+                <div class="callout-title">標準レスポンスフォーマット</div>
+                APIはすべて一貫したJSON構造を持ちます。成功時は <code>"success": true</code>、失敗時は <code>"success": false</code> と <code>"error_code"</code> を返却します。
+            </div>
+
+            <div class="code-container">
+                <div class="code-header">
+                    <span class="code-label">JSON 共通レスポンス構造例</span>
+                    <button class="btn-copy" onclick="copySnippet('resp-common')">コピー</button>
+                </div>
+                <pre id="resp-common" class="code-block json">{
+  "success": true,
+  "action": "アクション名",
+  "timestamp": "2026-10-12T20:30:00+09:00",
+  ... (個別データ) ...
+}</pre>
+            </div>
+        </section>
+
+        <!-- 2. 記事一覧・検索API -->
+        <section id="sec-posts" class="section-card">
+            <div class="sec-header">
+                <div class="sec-num">2</div>
+                <div class="sec-title">
+                    <h2>記事一覧・検索API</h2>
+                    <p>外部システムへの最新お知らせ配信、ポータル連携、キーワード検索</p>
+                </div>
+            </div>
+
+            <div class="endpoint-card">
+                <div class="endpoint-header">
+                    <div class="endpoint-left">
+                        <span class="method-badge method-get">GET</span>
+                        <span class="endpoint-path">/posts.php</span>
+                    </div>
+                    <span class="endpoint-desc-badge">一覧取得・検索・フィルタリング</span>
+                </div>
+                <div class="endpoint-body">
+                    <div class="endpoint-summary">
+                        掲載中のかわら版記事を一覧取得します。掲載期間、緊急度、カテゴリ、全文キーワードによる検索、およびページネーションに対応しています。
+                    </div>
+
+                    <table class="param-table">
+                        <thead>
+                            <tr>
+                                <th>パラメータ</th>
+                                <th>型</th>
+                                <th>必須</th>
+                                <th>初期値</th>
+                                <th>説明</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td><span class="param-name">limit</span></td>
+                                <td><span class="param-type">int</span></td>
+                                <td><span class="badge-opt">任意</span></td>
+                                <td>10</td>
+                                <td>取得件数（最大50件）</td>
+                            </tr>
+                            <tr>
+                                <td><span class="param-name">page</span></td>
+                                <td><span class="param-type">int</span></td>
+                                <td><span class="badge-opt">任意</span></td>
+                                <td>1</td>
+                                <td>ページ番号（1始まり）</td>
+                            </tr>
+                            <tr>
+                                <td><span class="param-name">filter</span></td>
+                                <td><span class="param-type">string</span></td>
+                                <td><span class="badge-opt">任意</span></td>
+                                <td>active</td>
+                                <td>
+                                    <code>active</code>: 掲載中のみ<br>
+                                    <code>today</code>: 本日関連する記事<br>
+                                    <code>urgent</code>: 超緊急・重要記事<br>
+                                    <code>pinned</code>: ピン留め記事<br>
+                                    <code>all</code>: 期限切れ含む全件
+                                </td>
+                            </tr>
+                            <tr>
+                                <td><span class="param-name">category</span></td>
+                                <td><span class="param-type">string|int</span></td>
+                                <td><span class="badge-opt">任意</span></td>
+                                <td>なし</td>
+                                <td>カテゴリーID (例: <code>2</code>) または カテゴリーコード (例: <code>facility</code>)</td>
+                            </tr>
+                            <tr>
+                                <td><span class="param-name">q</span></td>
+                                <td><span class="param-type">string</span></td>
+                                <td><span class="badge-opt">任意</span></td>
+                                <td>なし</td>
+                                <td>タイトルおよび本文を対象とした全文キーワード検索（スペース区切り対応）</td>
+                            </tr>
+                            <tr>
+                                <td><span class="param-name">sort</span></td>
+                                <td><span class="param-type">string</span></td>
+                                <td><span class="badge-opt">任意</span></td>
+                                <td>created_desc</td>
+                                <td><code>created_desc</code>, <code>created_asc</code>, <code>event_asc</code> (開催日順)</td>
+                            </tr>
+                        </tbody>
+                    </table>
+
+                    <div class="code-container">
+                        <div class="code-header">
+                            <span class="code-label">cURL 呼び出し例</span>
+                            <button class="btn-copy" onclick="copySnippet('curl-posts')">コピー</button>
+                        </div>
+                        <pre id="curl-posts" class="code-block">curl -X GET "http://192.168.1.16/kawara/api/posts.php?limit=5&filter=active"</pre>
+                    </div>
+
+                    <div class="code-container">
+                        <div class="code-header">
+                            <span class="code-label">レスポンス例 (200 OK)</span>
+                            <button class="btn-copy" onclick="copySnippet('resp-posts')">コピー</button>
+                        </div>
+                        <pre id="resp-posts" class="code-block json">{
+  "success": true,
+  "action": "posts_list",
+  "total_count": 8,
+  "page": 1,
+  "limit": 5,
+  "has_next": true,
+  "posts": [
+    {
+      "post_id": 20,
+      "title": "スプリンクラー点検　SS防災設備　全館",
+      "summary": "午前は外来診療に関係のない場所を中心に行います...",
+      "category": {
+        "id": 2,
+        "code": "facility",
+        "name": "工事・点検・設備",
+        "icon_emoji": "🔧",
+        "color_code": "#005a9c"
+      },
+      "is_pinned": false,
+      "target_datetime": "2026-10-22 09:00:00",
+      "target_period_formatted": "2026/10/22(木) 09:00〜16:00",
+      "display_until": "2026-10-28 23:59:00",
+      "is_expired": false,
+      "author": { "staff_id": 15, "name": "山本 太", "dept": "事務" },
+      "image_count": 0,
+      "view_url": "http://192.168.1.16/kawara/view_post.php?id=20",
+      "created_at": "2026-10-02 12:18:15"
+    }
+  ]
+}</pre>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 3. 記事詳細・既読API -->
+        <section id="sec-detail" class="section-card">
+            <div class="sec-header">
+                <div class="sec-num">3</div>
+                <div class="sec-title">
+                    <h2>記事詳細API</h2>
+                    <p>指定した記事の完全な本文・画像URL配列・対象部署・既読リアクション集計の取得</p>
+                </div>
+            </div>
+
+            <div class="endpoint-card">
+                <div class="endpoint-header">
+                    <div class="endpoint-left">
+                        <span class="method-badge method-get">GET</span>
+                        <span class="endpoint-path">/posts.php?id={post_id}</span>
+                    </div>
+                    <span class="endpoint-desc-badge">単一記事詳細取得</span>
+                </div>
+                <div class="endpoint-body">
+                    <table class="param-table">
+                        <thead>
+                            <tr>
+                                <th>パラメータ</th>
+                                <th>型</th>
+                                <th>必須</th>
+                                <th>説明</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td><span class="param-name">id</span></td>
+                                <td><span class="param-type">int</span></td>
+                                <td><span class="badge-req">必須</span></td>
+                                <td>取得する記事の <code>post_id</code></td>
+                            </tr>
+                            <tr>
+                                <td><span class="param-name">include_comments</span></td>
+                                <td><span class="param-type">int</span></td>
+                                <td><span class="badge-opt">任意</span></td>
+                                <td><code>1</code> を指定すると職員コメントリストを含めて返却（デフォルト: 1）</td>
+                            </tr>
+                        </tbody>
+                    </table>
+
+                    <div class="code-container">
+                        <div class="code-header">
+                            <span class="code-label">レスポンス例 (主要プロパティ抜粋)</span>
+                            <button class="btn-copy" onclick="copySnippet('resp-detail')">コピー</button>
+                        </div>
+                        <pre id="resp-detail" class="code-block json">{
+  "success": true,
+  "action": "post_detail",
+  "post": {
+    "post_id": 21,
+    "title": "胃腸科　給湯器不具合",
+    "content": "（胃腸科お風呂用の給湯器不調の件）\n2台あるうちの１台が不調ということで交換修理がひつようとなります...",
+    "category": { "id": 4, "name": "重要・伝達事項", "icon_emoji": "📌", "color_code": "#e67e22" },
+    "target_departments": [ { "dept_id": 1, "dept_name": "全職員（共通）" } ],
+    "images": [
+      { "image_id": 12, "url": "http://192.168.1.16/kawara/uploads/sample.jpg", "file_name": "sample.jpg" }
+    ],
+    "reactions_summary": {
+      "read_count": 28,
+      "ok_count": 22,
+      "question_count": 1,
+      "absence_count": 0
+    }
+  }
+}</pre>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 4. カテゴリー一覧API -->
+        <section id="sec-categories" class="section-card">
+            <div class="sec-header">
+                <div class="sec-num">4</div>
+                <div class="sec-title">
+                    <h2>カテゴリー一覧API</h2>
+                    <p>院内カテゴリマスタ、表示順、アイコン、テーマ色、掲載中件数の取得</p>
+                </div>
+            </div>
+
+            <div class="endpoint-card">
+                <div class="endpoint-header">
+                    <div class="endpoint-left">
+                        <span class="method-badge method-get">GET</span>
+                        <span class="endpoint-path">/categories.php</span>
+                        <span style="font-size: 0.8rem; color: #94a3b8;">(または /posts.php?action=categories)</span>
+                    </div>
+                    <span class="endpoint-desc-badge">カテゴリマスタ取得</span>
+                </div>
+                <div class="endpoint-body">
+                    <div class="endpoint-summary">
+                        現在アクティブな記事カテゴリーを返却します。外部ポータルでカテゴリ別タブやフィルターセレクトボックスを生成する際に利用します。
+                    </div>
+
+                    <div class="code-container">
+                        <div class="code-header">
+                            <span class="code-label">レスポンス例</span>
+                            <button class="btn-copy" onclick="copySnippet('resp-cat')">コピー</button>
+                        </div>
+                        <pre id="resp-cat" class="code-block json">{
+  "success": true,
+  "action": "categories",
+  "count": 8,
+  "categories": [
+    { "category_id": 1, "category_code": "general", "category_name": "一般連絡・アナウンス", "icon_emoji": "💬", "color_code": "#28a745", "active_post_count": 1 },
+    { "category_id": 2, "category_code": "facility", "category_name": "工事・点検・設備", "icon_emoji": "🔧", "color_code": "#005a9c", "active_post_count": 6 },
+    { "category_id": 3, "category_code": "urgent", "category_name": "超緊急・災害・障害", "icon_emoji": "🚨", "color_code": "#dc3545", "active_post_count": 0 },
+    { "category_id": 4, "category_code": "important", "category_name": "重要・伝達事項", "icon_emoji": "📌", "color_code": "#e67e22", "active_post_count": 1 }
+  ]
+}</pre>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 5. 行事・カレンダー展開API -->
+        <section id="sec-events" class="section-card">
+            <div class="sec-header">
+                <div class="sec-num">5</div>
+                <div class="sec-title">
+                    <h2>行事・カレンダー展開API</h2>
+                    <p>院内デジタルサイネージ、カレンダーウィジェット、Googleカレンダー同期用</p>
+                </div>
+            </div>
+
+            <div class="endpoint-card">
+                <div class="endpoint-header">
+                    <div class="endpoint-left">
+                        <span class="method-badge method-get">GET</span>
+                        <span class="endpoint-path">/events.php</span>
+                        <span style="font-size: 0.8rem; color: #94a3b8;">(または /posts.php?action=events)</span>
+                    </div>
+                    <span class="endpoint-desc-badge">予定・スケジュール展開リスト</span>
+                </div>
+                <div class="endpoint-body">
+                    <div class="endpoint-summary">
+                        複数日にまたがる行事や、複数スロット（午前・午後など）を持つ記事のスケジュールを、カレンダー表示用の個別イベントレコードに分解・平坦化して返却します。FullCalendarなどのJSカレンダーライブラリにも直接バインド可能です。
+                    </div>
+
+                    <table class="param-table">
+                        <thead>
+                            <tr>
+                                <th>パラメータ</th>
+                                <th>型</th>
+                                <th>初期値</th>
+                                <th>説明</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td><span class="param-name">start</span></td>
+                                <td><span class="param-type">string</span></td>
+                                <td>今月1日</td>
+                                <td>抽出開始日 (YYYY-MM-DD)</td>
+                            </tr>
+                            <tr>
+                                <td><span class="param-name">end</span></td>
+                                <td><span class="param-type">string</span></td>
+                                <td>来月末日</td>
+                                <td>抽出終了日 (YYYY-MM-DD)</td>
+                            </tr>
+                            <tr>
+                                <td><span class="param-name">category</span></td>
+                                <td><span class="param-type">string|int</span></td>
+                                <td>なし</td>
+                                <td>特定カテゴリーのみ抽出する場合に指定</td>
+                            </tr>
+                        </tbody>
+                    </table>
+
+                    <div class="code-container">
+                        <div class="code-header">
+                            <span class="code-label">レスポンス例</span>
+                            <button class="btn-copy" onclick="copySnippet('resp-events')">コピー</button>
+                        </div>
+                        <pre id="resp-events" class="code-block json">{
+  "success": true,
+  "action": "events",
+  "start_date": "2026-10-01",
+  "end_date": "2026-10-31",
+  "count": 6,
+  "events": [
+    {
+      "id": "post_20",
+      "post_id": 20,
+      "title": "スプリンクラー点検　SS防災設備　全館",
+      "date": "2026-10-22",
+      "start": "2026-10-22 09:00:00",
+      "end": "2026-10-22 16:00:00",
+      "all_day": false,
+      "category_code": "facility",
+      "color": "#005a9c",
+      "icon": "🔧",
+      "view_url": "http://192.168.1.16/kawara/view_post.php?id=20"
+    }
+  ]
+}</pre>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 6. サマリー統計API -->
+        <section id="sec-stats" class="section-card">
+            <div class="sec-header">
+                <div class="sec-num">6</div>
+                <div class="sec-title">
+                    <h2>サマリー統計API</h2>
+                    <p>外部ポータルのヘッダー・バッジ、サイネージティッカー用サマリー数値</p>
+                </div>
+            </div>
+
+            <div class="endpoint-card">
+                <div class="endpoint-header">
+                    <div class="endpoint-left">
+                        <span class="method-badge method-get">GET</span>
+                        <span class="endpoint-path">/posts.php?action=stats</span>
+                    </div>
+                    <span class="endpoint-desc-badge">統計メトリクス</span>
+                </div>
+                <div class="endpoint-body">
+                    <div class="endpoint-summary">
+                        現在の有効な記事数、緊急記事数、本日の行事件数、災害モードの稼働状況を瞬時に返却します。外部ポータルの通知バッジ（赤丸数字）やヘッダー表示に最適です。
+                    </div>
+
+                    <div class="code-container">
+                        <div class="code-header">
+                            <span class="code-label">レスポンス例</span>
+                            <button class="btn-copy" onclick="copySnippet('resp-stats')">コピー</button>
+                        </div>
+                        <pre id="resp-stats" class="code-block json">{
+  "success": true,
+  "action": "stats",
+  "date": "2026-10-12",
+  "is_disaster_mode": false,
+  "total_active_posts": 8,
+  "urgent_posts_count": 1,
+  "today_events_count": 0,
+  "unread_count": null
+}</pre>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 7. 埋め込みウィジェット (UI) -->
+        <section id="sec-widget" class="section-card">
+            <div class="sec-header">
+                <div class="sec-num">7</div>
+                <div class="sec-title">
+                    <h2>埋め込みウィジェット (iframe対応UI)</h2>
+                    <p>外部Webポータル、電子カルテ端末Web画面に1行で埋め込める高品位UI</p>
+                </div>
+            </div>
+
+            <div class="endpoint-card">
+                <div class="endpoint-header">
+                    <div class="endpoint-left">
+                        <span class="method-badge method-ui">UI</span>
+                        <span class="endpoint-path">/widget.php</span>
+                    </div>
+                    <span class="endpoint-desc-badge">レスポンシブ埋め込みコンポーネント</span>
+                </div>
+                <div class="endpoint-body">
+                    <div class="endpoint-summary">
+                        HTMLの <code>&lt;iframe&gt;</code> タグを貼り付けるだけで、かわら版の最新記事一覧を美しく表示できます。テーマとレイアウトをURLパラメータで自由に変更できます。
+                    </div>
+
+                    <table class="param-table">
+                        <thead>
+                            <tr>
+                                <th>パラメータ</th>
+                                <th>選択肢</th>
+                                <th>説明</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td><span class="param-name">theme</span></td>
+                                <td><code>light</code> (標準), <code>dark</code>, <code>hospital</code> (医療ブルー), <code>compact</code></td>
+                                <td>埋め込み先のWebサイトのデザインに合わせたカラーテーマ</td>
+                            </tr>
+                            <tr>
+                                <td><span class="param-name">layout</span></td>
+                                <td><code>list</code> (リスト形式), <code>cards</code> (カード形式), <code>ticker</code> (1行電光掲示)</td>
+                                <td>表示レイアウト形式</td>
+                            </tr>
+                            <tr>
+                                <td><span class="param-name">limit</span></td>
+                                <td><code>1</code> 〜 <code>20</code> (初期値: 5)</td>
+                                <td>表示する記事の件数</td>
+                            </tr>
+                            <tr>
+                                <td><span class="param-name">header</span></td>
+                                <td><code>1</code> (表示), <code>0</code> (非表示)</td>
+                                <td>ウィジェット上部の見出しヘッダーの表示切り替え</td>
+                            </tr>
+                        </tbody>
+                    </table>
+
+                    <div class="code-container">
+                        <div class="code-header">
+                            <span class="code-label">外部サイトへの貼り付けHTMLコード例</span>
+                            <button class="btn-copy" onclick="copySnippet('code-widget-iframe')">コピー</button>
+                        </div>
+                        <pre id="code-widget-iframe" class="code-block">&lt;iframe src="http://192.168.1.16/kawara/api/widget.php?theme=hospital&amp;limit=5" 
+        width="100%" 
+        height="360" 
+        frameborder="0" 
+        style="border: 1px solid #cbd5e1; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.05);"&gt;
+&lt;/iframe&gt;</pre>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 8. JS埋め込みライブラリ -->
+        <section id="sec-embed-js" class="section-card">
+            <div class="sec-header">
+                <div class="sec-num">8</div>
+                <div class="sec-title">
+                    <h2>JavaScript埋め込みライブラリ (embed.js)</h2>
+                    <p>外部Webページ内の任意の &lt;div&gt; にインライン描画するVanilla JSスクリプト</p>
+                </div>
+            </div>
+
+            <div class="endpoint-card">
+                <div class="endpoint-header">
+                    <div class="endpoint-left">
+                        <span class="method-badge method-js">JS</span>
+                        <span class="endpoint-path">/embed.js</span>
+                    </div>
+                    <span class="endpoint-desc-badge">ゼロ設定埋め込みスクリプト</span>
+                </div>
+                <div class="endpoint-body">
+                    <div class="endpoint-summary">
+                        iframe特有のスクロールバーや枠線を出さず、外部ページのDOMに自然に溶け込むインライン描画用ライブラリです。<code>data-*</code> 属性を書くだけで自動描画されます。また、プログラマブルに操作可能な <code>window.KawaraAPI</code> も提供されます。
+                    </div>
+
+                    <div class="code-container">
+                        <div class="code-header">
+                            <span class="code-label">HTML埋め込みコード (自動描画)</span>
+                            <button class="btn-copy" onclick="copySnippet('code-embed-auto')">コピー</button>
+                        </div>
+                        <pre id="code-embed-auto" class="code-block">&lt;!-- 1. お知らせを表示したい場所に配置 --&gt;
+&lt;div id="kawara-news-box"&gt;&lt;/div&gt;
+
+&lt;!-- 2. スクリプトの読み込み --&gt;
+&lt;script src="http://192.168.1.16/kawara/api/embed.js"
+        data-container="#kawara-news-box"
+        data-limit="5"
+        data-filter="active"
+        data-theme="light"&gt;&lt;/script&gt;</pre>
+                    </div>
+
+                    <div class="callout">
+                        <div class="callout-title">JavaScript API (KawaraAPI オブジェクト)</div>
+                        独自のSPAやカスタムUIでデータを直接取得したい場合、グローバルオブジェクト <code>window.KawaraAPI.fetchPosts()</code> を利用できます。
+                    </div>
+
+                    <div class="code-container">
+                        <div class="code-header">
+                            <span class="code-label">JavaScript fetch 呼び出し例</span>
+                            <button class="btn-copy" onclick="copySnippet('code-embed-api')">コピー</button>
+                        </div>
+                        <pre id="code-embed-api" class="code-block">&lt;script&gt;
+window.KawaraAPI.fetchPosts({ limit: 3, filter: 'urgent' })
+  .then(data => {
+    console.log('緊急お知らせ件数:', data.posts.length);
+    data.posts.forEach(p => console.log(p.title));
+  })
+  .catch(err => console.error('取得エラー:', err));
+&lt;/script&gt;</pre>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 9. Googleカレンダー双方向API -->
+        <section id="sec-gcal" class="section-card">
+            <div class="sec-header">
+                <div class="sec-num">9</div>
+                <div class="sec-title">
+                    <h2>Googleカレンダー 双方向API ＆ 個人登録連携</h2>
+                    <p>OAuth2 JWTサービスアカウントによる双方向同期 (includes/google_calendar_helper.php)</p>
+                </div>
+            </div>
+
+            <div class="callout success">
+                <div class="callout-title">外部依存ライブラリ不要の高速実装</div>
+                Google API Client PHP SDKなどの肥大化した外部パッケージを使用せず、純粋なPHP OpenSSL署名（RS256 JWTアサーション方式）でアクセストークンを自動取得・キャッシュします。
+            </div>
+
+            <table class="param-table">
+                <thead>
+                    <tr>
+                        <th>PHP関数名</th>
+                        <th>HTTP操作</th>
+                        <th>説明</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><code>get_google_calendar_events($cid, $start, $end)</code></td>
+                        <td><span class="method-badge method-get">GET</span></td>
+                        <td>Google Calendar API v3 から指定期間の予定一覧を取得し、ローカルDBキャッシュ (<code>google_calendar_events_cache</code>) へ保存</td>
+                    </tr>
+                    <tr>
+                        <td><code>create_google_calendar_event($cid, $data)</code></td>
+                        <td><span class="method-badge method-post">POST</span></td>
+                        <td>Googleカレンダーに新しい予定を作成。作成直後にローカルキャッシュテーブルにも即時反映</td>
+                    </tr>
+                    <tr>
+                        <td><code>update_google_calendar_event($cid, $eid, $data)</code></td>
+                        <td><span class="method-badge method-patch">PATCH</span></td>
+                        <td>指定したイベントIDのタイトル、日時、場所、説明文を更新し、キャッシュ同期</td>
+                    </tr>
+                    <tr>
+                        <td><code>delete_google_calendar_event($cid, $eid)</code></td>
+                        <td><span class="method-badge method-delete">DELETE</span></td>
+                        <td>Googleカレンダー上の予定を削除し、ローカルキャッシュからも即時削除</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <div class="callout">
+                <div class="callout-title">個人Googleカレンダー追加用 Web Intent リンク仕様</div>
+                職員個人が自身のプライベートGoogleカレンダーにお知らせ予定を取り込めるよう、以下のURLスキーマによるWeb Intentリンクを自動生成しています。
+                <br><code>https://calendar.google.com/calendar/render?action=TEMPLATE&amp;text=[タイトル]&amp;dates=[開始日時]/[終了日時]&amp;details=[本文]&amp;location=[場所]</code>
+            </div>
+        </section>
+
+        <!-- 10. LINE Messaging API -->
+        <section id="sec-line" class="section-card">
+            <div class="sec-header">
+                <div class="sec-num">10</div>
+                <div class="sec-title">
+                    <h2>LINE Messaging API 双方向連携</h2>
+                    <p>安否確認、重要伝達の一斉プッシュ配信、Flex Messageボタン回答</p>
+                </div>
+            </div>
+
+            <table class="param-table">
+                <thead>
+                    <tr>
+                        <th>エンドポイント</th>
+                        <th>Method</th>
+                        <th>説明</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><code>/kawara/api/line_webhook.php</code></td>
+                        <td><span class="method-badge method-post">POST</span></td>
+                        <td>
+                            LINEプラットフォームからのWebhook受信。<br>
+                            ① <strong>4桁コード認証</strong>: かわら版画面に表示された4桁数字をLINEトークに送信すると、職員DB (<code>staff.line_user_id</code>) に自動紐付け。<br>
+                            ② <strong>Flex Message ポストバック (action=ack)</strong>: 「了解」「欠席」「質問」ボタン押下時に <code>post_reads</code> に既読ステータスを即時登録。
+                        </td>
+                    </tr>
+                    <tr>
+                        <td><code>/kawara/api/line_post_notify_api.php</code></td>
+                        <td><span class="method-badge method-post">POST</span></td>
+                        <td>
+                            指定した記事の対象部署所属スタッフに対して、見栄えの良いFlex Messageを一斉プッシュ配信（管理画面および記事詳細から実行）。
+                        </td>
+                    </tr>
+                    <tr>
+                        <td><code>/kawara/api/line_link_status.php</code></td>
+                        <td><span class="method-badge method-get">GET</span></td>
+                        <td>
+                            職員のLINE連携完了ステータスの確認および、連携用4桁ワンタイム認証コード（有効期限10分）の発行。
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </section>
+
+        <!-- 11. 院内印刷・排紙API -->
+        <section id="sec-print" class="section-card">
+            <div class="sec-header">
+                <div class="sec-num">11</div>
+                <div class="sec-title">
+                    <h2>院内ネットワークプリンター・自動印刷API</h2>
+                    <p>Windowsスプーラ連携による部署別ポスター・日報の物理排紙</p>
+                </div>
+            </div>
+
+            <table class="param-table">
+                <thead>
+                    <tr>
+                        <th>エンドポイント</th>
+                        <th>Method</th>
+                        <th>説明</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><code>/kawara/api/print_api.php</code></td>
+                        <td><span class="method-badge method-post">POST</span></td>
+                        <td>
+                            パラメータ: <code>action=dispatch_print</code>, <code>post_id</code>, <code>dept_ids</code>, <code>print_type</code><br>
+                            選択された各病棟・外来・医局のネットワーク複合機に対して、印刷ジョブをWindowsスプーラ経由で一斉キューイング排紙。
+                        </td>
+                    </tr>
+                    <tr>
+                        <td><code>/kawara/api/printers_api.php</code></td>
+                        <td><span class="method-badge method-get">GET</span> / <span class="method-badge method-post">POST</span></td>
+                        <td>
+                            ① <code>action=get_installed_printers</code>: PowerShell連携でサーバー上にインストールされている実機プリンター一覧を取得。<br>
+                            ② <code>action=save_settings</code>: 部署ごとに「どのプリンタ」「どの給紙トレイ（A4カラー/モノクロ）」から出力するかの設定をDB保存。
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </section>
+
+        <!-- 12. 緊急災害・安否確認API -->
+        <section id="sec-disaster" class="section-card">
+            <div class="sec-header">
+                <div class="sec-num">12</div>
+                <div class="sec-title">
+                    <h2>緊急災害モード・安否確認API</h2>
+                    <p>BCP発動時の一斉点呼ステータスおよび職員無事回答集計配信</p>
+                </div>
+            </div>
+
+            <div class="endpoint-card">
+                <div class="endpoint-header">
+                    <div class="endpoint-left">
+                        <span class="method-badge method-get">GET</span>
+                        <span class="endpoint-path">/disaster_status.php</span>
+                    </div>
+                    <span class="endpoint-desc-badge">リアルタイム安否集計</span>
+                </div>
+                <div class="endpoint-body">
+                    <div class="endpoint-summary">
+                        医療機関におけるBCP（事業継続計画）発動時の災害モードステータスと、全職員の最新点呼状況（無事/要支援/危険/未回答および回答率％）をJSONで返却します。外部の災害対策本部モニターや電子カルテ端末トップに常時監視表示可能です。
+                    </div>
+
+                    <div class="code-container">
+                        <div class="code-header">
+                            <span class="code-label">レスポンス例</span>
+                            <button class="btn-copy" onclick="copySnippet('resp-disaster')">コピー</button>
+                        </div>
+                        <pre id="resp-disaster" class="code-block json">{
+  "success": true,
+  "is_disaster_mode": false,
+  "mode_code": "normal",
+  "mode_label": "【平時・訓練モード】",
+  "safety_summary": {
+    "total_staff": 142,
+    "reported_count": 98,
+    "unreported_count": 44,
+    "safe_count": 95,
+    "caution_count": 3,
+    "danger_count": 0,
+    "report_rate": 69
+  }
+}</pre>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 13. 職員マスタ＆統合認証 -->
+        <section id="sec-staff-auth" class="section-card">
+            <div class="sec-header">
+                <div class="sec-num">13</div>
+                <div class="sec-title">
+                    <h2>職員マスタ ＆ 統合認証基盤連携</h2>
+                    <p>人事システムとの連携 (stf_api.php) および 統合認証基盤 (auth_db) との接続</p>
+                </div>
+            </div>
+
+            <table class="param-table">
+                <thead>
+                    <tr>
+                        <th>コンポーネント</th>
+                        <th>仕様・役割</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>職員マスタAPI (stf_api.php)</strong></td>
+                        <td>
+                            院内人事データベース (<code>staff_data.json</code>) を基に、職員コード、氏名、カナ、所属部署、役職、雇用形態、電話番号、住所等の最新プロファイルをJSON形式で他システムへ提供。
+                        </td>
+                    </tr>
+                    <tr>
+                        <td><strong>統合認証基盤 (auth_db)</strong></td>
+                        <td>
+                            <code>/auth_db/api/v1/</code> が発行するセキュアなJWTトークンにより、電子カルテや他システムとシングルサインオン（SSO）連携。将来的にかわら版APIの書き込みエンドポイントにJWT認可ガード（Bearer Token）を導入可能。
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        <!-- 14. 端末認証＆多層防御API -->
+        <section id="sec-device-auth" class="section-card">
+            <div class="sec-header">
+                <div class="sec-num">14</div>
+                <div class="sec-title">
+                    <h2>端末認証 ＆ LINE多層防御API</h2>
+                    <p>院外スマホ用 30日暗号署名Cookie発行・LINE 6桁コード検証・即時失効エンドポイント (device_auth.php)</p>
+                </div>
+            </div>
+
+            <div class="endpoint-box">
+                <span class="http-method post">POST / GET</span>
+                <span class="endpoint-path">/kawara/api/device_auth.php</span>
+            </div>
+
+            <p style="font-size:0.9rem; color:#334155; margin-bottom:1rem;">
+                Cloudflare WAFエッジ防御と連動し、院外スマホへ「30日間有効な暗号署名付き入室Cookie (<code>kawara_device_token</code>)」を発行・検証・失効させる中核APIです。
+            </p>
+
+            <table class="param-table">
+                <thead>
+                    <tr>
+                        <th>actionパラメータ</th>
+                        <th>メソッド</th>
+                        <th>パラメータ</th>
+                        <th>概要とレスポンス</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><code>send_code</code></td>
+                        <td>POST / GET</td>
+                        <td><code>staff_id</code></td>
+                        <td>
+                            対象職員の登録LINEへ6桁ワンタイム認証コード（有効10分）をプッシュ送信。<br>
+                            <code>{"success": true, "message": "LINEに認証コードを送信しました。"}</code>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td><code>verify_code</code></td>
+                        <td>POST</td>
+                        <td><code>staff_id</code>, <code>code</code></td>
+                        <td>
+                            6桁コードを検証。成功時に <code>Set-Cookie: kawara_device_token=...</code>（30日有効、HttpOnly）を発行。<br>
+                            <code>{"success": true, "message": "端末認証に成功しました。"}</code>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td><code>revoke</code></td>
+                        <td>POST</td>
+                        <td><code>staff_id</code></td>
+                        <td>
+                            <strong>管理者専用・端末即時失効</strong><br>
+                            職員の <code>device_token_version</code> をインクリメントし、旧端末のCookieを即時無効化（スマホ紛失・退職時用）。
+                        </td>
+                    </tr>
+                    <tr>
+                        <td><code>check</code></td>
+                        <td>GET</td>
+                        <td>-</td>
+                        <td>
+                            アクセス元が院内LANか、または有効な端末Cookieを保持しているかを即時判定。<br>
+                            <code>{"success": true, "authenticated": true, "is_internal": false}</code>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </section>
+
+        <!-- 15. 医師予定表連携API -->
+        <section id="sec-doctor" class="section-card">
+            <div class="sec-header">
+                <div class="sec-num">15</div>
+                <div class="sec-title">
+                    <h2>医師予定表システム（yotei）内部連携API</h2>
+                    <p>同一サーバー内の医師予定表APIと連携し、休診・外来・申し送りをスマホへリアルタイム配信</p>
+                </div>
+            </div>
+
+            <table class="param-table">
+                <thead>
+                    <tr>
+                        <th>エンドポイント</th>
+                        <th>Method</th>
+                        <th>説明</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><code>/yotei/api/today.php</code></td>
+                        <td><span class="method-badge method-get">GET</span></td>
+                        <td>
+                            本日の医師勤務サマリー（休診医師・診察担当医・全体会予定・申し送りメモテキスト）を取得。<br>
+                            レスポンス: <code>{"status":"success","data":{"absent_doctors":[],"clinic_doctors":[],"memo":{...}}}</code>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td><code>/yotei/api/events.php</code></td>
+                        <td><span class="method-badge method-get">GET</span></td>
+                        <td>
+                            パラメータ: <code>start_date</code>, <code>end_date</code>, <code>expand_period=1</code>, <code>doctor_id</code><br>
+                            週間・月間カレンダー用の医師予定・休診イベント一覧を取得。
+                        </td>
+                    </tr>
+                    <tr>
+                        <td><code>/yotei/api/doctors.php</code></td>
+                        <td><span class="method-badge method-get">GET</span></td>
+                        <td>
+                            登録医師マスタ一覧（小野院長、矢野副院長、診療科、テーマカラー色）を取得。
+                        </td>
+                    </tr>
+                    <tr>
+                        <td><code>/kawara/doctor_schedule.php</code></td>
+                        <td><span class="method-badge method-get">GET</span></td>
+                        <td>
+                            <strong>スマホ対応 医師予定表ビューア画面</strong><br>
+                            パラメータ: <code>view=today|week|month</code>, <code>date=YYYY-MM-DD</code>, <code>doctor_id=N</code><br>
+                            かわら版の30日端末Cookieと完全連動し、追加ログインなしで即座にレスポンシブ画面を表示。
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </section>
+
+        <!-- 16. Cloudflare外部トンネル緊急制御API -->
+        <section id="sec-tunnel-control" class="section-card">
+            <div class="sec-header">
+                <div class="sec-num">16</div>
+                <div class="sec-title">
+                    <h2>Cloudflare外部トンネル 緊急制御API（物理キルスイッチ）</h2>
+                    <p>外部侵入経路（Cloudflaredトンネル）を即座に物理切断・再開し、インシデント発生時の被害をゼロにする緊急API</p>
+                </div>
+            </div>
+
+            <div class="endpoint-card">
+                <div class="endpoint-header">
+                    <div class="endpoint-left">
+                        <span class="method-badge method-post">POST</span>
+                        <span class="method-badge method-get">GET</span>
+                        <code>/kawara/api/tunnel_control.php</code>
+                    </div>
+                    <div class="endpoint-right">
+                        <span style="background:#fee2e2; color:#991b1b; padding:2px 8px; border-radius:4px; font-size:0.75rem; font-weight:bold;">事務長・管理者専用 (二重ガード)</span>
+                    </div>
+                </div>
+                <div style="padding:1.4rem;">
+                    <p style="font-size:0.88rem; color:#334155; margin-bottom:1rem; line-height:1.6;">
+                        事務長（山本太 / <code>staff_id = 15</code>）またはシステム管理者（<code>is_admin = true</code>）のみ実行可能です。未認証アクセスは401、一般職員アクセスは403 Forbiddenで即座に拒絶されます。<br>
+                        本番サーバー上のWindowsサービス <code>Cloudflared</code> を <code>sc.exe stop / start</code> で直接操作し、外部トンネルを物理的に停止／再開します。
+                    </p>
+
+                    <table class="param-table">
+                        <thead>
+                            <tr>
+                                <th>パラメータ</th>
+                                <th>型</th>
+                                <th>必須</th>
+                                <th>説明</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td><code>action</code></td>
+                                <td>string</td>
+                                <td><span class="badge-req">必須</span></td>
+                                <td>
+                                    <code>status</code>: 現在のサービス稼働状態（RUNNING / STOPPED）を取得<br>
+                                    <code>stop</code>: 外部トンネルを緊急停止（外部からの全通信を物理遮断＆ログ記録）<br>
+                                    <code>start</code>: 外部トンネルを再開（外部スマホからのアクセス回復＆ログ記録）
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+
+                    <div style="margin-top:1.2rem;">
+                        <div style="font-size:0.82rem; font-weight:bold; color:#475569; margin-bottom:4px;">レスポンス例 (停止完了時 JSON):</div>
+                        <div class="code-container">
+                            <pre class="code-block json"><code>{
+  "success": true,
+  "status": "STOPPED",
+  "is_online": false,
+  "label": "遮断中 (OFF)",
+  "color": "#dc2626",
+  "message": "Cloudflare外部トンネルを正常に停止（遮断）しました。外部からの全アクセスが遮断されました。"
+}</code></pre>
+                        </div>
+                    </div>
+
+                    <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:10px 12px; margin-top:14px; font-size:0.8rem; color:#64748b; line-height:1.5;">
+                        ※ <code>stop</code> / <code>start</code> 実行時は、操作者氏名・スタッフID・日時が <code>logs/security_audit.log</code> に自動記録されます。<br>
+                        ※ トンネル停止中も、院内LAN（電子カルテPC・院内Wi-Fi）によるアクセスには一切影響しません。
+                    </div>
+                </div>
+            </div>
+        </section>
+
+    </main>
+</div>
+
+<div id="toast" class="toast">✓ クリップボードにコピーしました</div>
+
+<footer>
+    <div style="font-weight: 800; color: #f8fafc; margin-bottom: 6px;">
+        医療法人小野会 院内かわら版 開発推進チーム
+    </div>
+    <div>
+        Kawara Communication Platform • Version 1.0.0 • All Rights Reserved.
+    </div>
+</footer>
+
+<script>
+function showToast(msg) {
+    const t = document.getElementById('toast');
+    if (msg) t.textContent = msg;
+    t.classList.add('show');
+    setTimeout(() => t.classList.remove('show'), 2000);
+}
+
+function copySnippet(id) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    navigator.clipboard.writeText(el.textContent.trim()).then(() => {
+        showToast('✓ コードをクリップボードにコピーしました');
+    });
+}
+</script>
+
+</body>
+</html>

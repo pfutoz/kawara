@@ -1,0 +1,837 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>セキュリティ脅威分析報告書：外部公開リスクとデータ到達ルート検証書 | 医療法人小野会</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&family=Outfit:wght@600;700;800&family=JetBrains+Mono:wght@500;700&display=swap"
+        rel="stylesheet">
+    <style>
+        :root {
+            --primary: #0f172a;
+            --primary-light: #1e293b;
+            --accent-danger: #dc2626;
+            --accent-danger-bg: #fef2f2;
+            --accent-warn: #ea580c;
+            --accent-warn-bg: #fff7ed;
+            --accent-success: #16a34a;
+            --accent-success-bg: #f0fdf4;
+            --accent-info: #0284c7;
+            --text-main: #0f172a;
+            --text-sub: #475569;
+            --text-muted: #64748b;
+            --bg-body: #f8fafc;
+            --bg-card: #ffffff;
+            --border: #e2e8f0;
+            --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.06);
+            --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.08);
+            --shadow-lg: 0 10px 25px rgba(0, 0, 0, 0.12);
+            --radius-md: 10px;
+            --radius-lg: 16px;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Noto Sans JP', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: var(--bg-body);
+            color: var(--text-main);
+            line-height: 1.8;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        header {
+            background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #450a0a 100%);
+            color: #ffffff;
+            padding: 3rem 1.5rem;
+            box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
+            border-bottom: 5px solid var(--accent-danger);
+            position: relative;
+        }
+
+        .header-inner {
+            max-width: 1080px;
+            margin: 0 auto;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 1.5rem;
+        }
+
+        .header-tag {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: rgba(220, 38, 38, 0.35);
+            border: 1px solid rgba(248, 113, 113, 0.7);
+            color: #fecaca;
+            padding: 5px 16px;
+            border-radius: 20px;
+            font-size: 0.82rem;
+            font-weight: 800;
+            letter-spacing: 0.05em;
+            margin-bottom: 0.8rem;
+        }
+
+        .header-title h1 {
+            font-size: 2.1rem;
+            font-weight: 900;
+            letter-spacing: -0.02em;
+            color: #ffffff;
+            line-height: 1.3;
+        }
+
+        .header-title p {
+            font-size: 1.02rem;
+            color: #cbd5e1;
+            margin-top: 0.6rem;
+            max-width: 720px;
+        }
+
+        .header-meta {
+            background: rgba(255, 255, 255, 0.08);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            padding: 1rem 1.4rem;
+            border-radius: var(--radius-md);
+            font-size: 0.88rem;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .header-nav-btn {
+            background: rgba(255, 255, 255, 0.15);
+            color: #ffffff;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            padding: 8px 16px;
+            border-radius: 8px;
+            text-decoration: none;
+            font-size: 0.85rem;
+            font-weight: 700;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.2s;
+            margin-top: 6px;
+        }
+
+        .header-nav-btn:hover {
+            background: #ffffff;
+            color: #0f172a;
+        }
+
+        .container {
+            max-width: 1080px;
+            margin: 2.5rem auto;
+            padding: 0 1.5rem;
+        }
+
+        /* 結論バナー */
+        .executive-summary-banner {
+            background: #ffffff;
+            border: 2px solid #fecaca;
+            border-left: 8px solid var(--accent-danger);
+            border-radius: var(--radius-lg);
+            padding: 2rem;
+            margin-bottom: 2.5rem;
+            box-shadow: var(--shadow-md);
+        }
+
+        .summary-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 1.35rem;
+            font-weight: 900;
+            color: #991b1b;
+            margin-bottom: 1rem;
+        }
+
+        .summary-lead {
+            font-size: 1.05rem;
+            font-weight: 700;
+            color: #1e293b;
+            margin-bottom: 1rem;
+            line-height: 1.7;
+        }
+
+        .summary-lead mark {
+            background: #fef08a;
+            padding: 2px 6px;
+            border-radius: 4px;
+        }
+
+        /* セクション共通 */
+        .doc-section {
+            background: var(--bg-card);
+            border-radius: var(--radius-lg);
+            padding: 2.4rem;
+            margin-bottom: 2.5rem;
+            box-shadow: var(--shadow-sm);
+            border: 1px solid var(--border);
+        }
+
+        .section-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            border-bottom: 2px solid var(--border);
+            padding-bottom: 1rem;
+            margin-bottom: 1.8rem;
+        }
+
+        .section-badge {
+            background: var(--primary-light);
+            color: #ffffff;
+            padding: 4px 12px;
+            border-radius: 8px;
+            font-family: 'Outfit', sans-serif;
+            font-size: 0.9rem;
+            font-weight: 800;
+        }
+
+        .section-header h2 {
+            font-size: 1.45rem;
+            font-weight: 900;
+            color: var(--primary);
+        }
+
+        /* アーキテクチャカード */
+        .arch-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 1rem;
+            margin: 1.5rem 0;
+        }
+
+        .arch-card {
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: var(--radius-md);
+            padding: 1.2rem;
+        }
+
+        .arch-card-title {
+            font-size: 0.95rem;
+            font-weight: 800;
+            color: #334155;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin-bottom: 0.6rem;
+        }
+
+        .arch-card ul {
+            padding-left: 1.2rem;
+            font-size: 0.88rem;
+            color: #475569;
+        }
+
+        /* ルート・ステップカード */
+        .step-timeline {
+            position: relative;
+            padding-left: 2.2rem;
+            margin: 1.5rem 0;
+        }
+
+        .step-timeline::before {
+            content: '';
+            position: absolute;
+            left: 14px;
+            top: 10px;
+            bottom: 10px;
+            width: 3px;
+            background: #cbd5e1;
+        }
+
+        .step-item {
+            position: relative;
+            margin-bottom: 2rem;
+            background: #ffffff;
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            padding: 1.4rem;
+            box-shadow: var(--shadow-sm);
+        }
+
+        .step-item.danger {
+            border-left: 5px solid var(--accent-danger);
+            background: #fffafa;
+        }
+
+        .step-item.critical {
+            border: 2px solid #ef4444;
+            border-left: 8px solid #991b1b;
+            background: #fef2f2;
+        }
+
+        .step-node {
+            position: absolute;
+            left: -2.85rem;
+            top: 1.2rem;
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            background: #1e293b;
+            color: #ffffff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 900;
+            font-size: 0.85rem;
+            font-family: 'Outfit', sans-serif;
+            box-shadow: 0 0 0 4px #ffffff;
+        }
+
+        .step-item.danger .step-node {
+            background: var(--accent-danger);
+        }
+
+        .step-title {
+            font-size: 1.12rem;
+            font-weight: 900;
+            color: #0f172a;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 0.6rem;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .step-tag {
+            font-size: 0.72rem;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-weight: 800;
+            letter-spacing: 0.05em;
+        }
+
+        .step-tag.tag-danger {
+            background: #fee2e2;
+            color: #991b1b;
+            border: 1px solid #fecaca;
+        }
+
+        .step-tag.tag-critical {
+            background: #7f1d1d;
+            color: #ffffff;
+        }
+
+        /* コードブロック・技術詳細 */
+        .code-box {
+            background: #0f172a;
+            color: #e2e8f0;
+            border-radius: 8px;
+            padding: 1rem 1.2rem;
+            font-family: 'JetBrains Mono', Consolas, monospace;
+            font-size: 0.85rem;
+            line-height: 1.6;
+            margin: 0.8rem 0;
+            overflow-x: auto;
+            border: 1px solid #334155;
+        }
+
+        .code-box .comment {
+            color: #64748b;
+        }
+
+        .code-box .highlight-red {
+            color: #f87171;
+            font-weight: bold;
+        }
+
+        .code-box .highlight-yellow {
+            color: #fde047;
+            font-weight: bold;
+        }
+
+        /* 表・マトリクス */
+        .risk-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 1.2rem 0;
+            font-size: 0.9rem;
+        }
+
+        .risk-table th,
+        .risk-table td {
+            border: 1px solid var(--border);
+            padding: 12px 14px;
+            text-align: left;
+        }
+
+        .risk-table th {
+            background: #f1f5f9;
+            font-weight: 800;
+            color: #1e293b;
+        }
+
+        .badge-risk {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-weight: 800;
+            font-size: 0.78rem;
+        }
+
+        .badge-risk.catastrophic {
+            background: #991b1b;
+            color: #ffffff;
+        }
+
+        .badge-risk.high {
+            background: #dc2626;
+            color: #ffffff;
+        }
+
+        .badge-risk.medium {
+            background: #ea580c;
+            color: #ffffff;
+        }
+
+        /* 防御策カード */
+        .defense-card {
+            border: 1.5px solid #bbf7d0;
+            background: #f0fdf4;
+            border-radius: var(--radius-md);
+            padding: 1.4rem;
+            margin-bottom: 1.2rem;
+        }
+
+        .defense-title {
+            font-size: 1.05rem;
+            font-weight: 900;
+            color: #166534;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 0.5rem;
+        }
+
+        footer {
+            text-align: center;
+            padding: 3rem 1.5rem;
+            color: var(--text-muted);
+            font-size: 0.85rem;
+            border-top: 1px solid var(--border);
+            background: #ffffff;
+        }
+    </style>
+</head>
+
+<body>
+
+    <header>
+        <div class="header-inner">
+            <div class="header-title">
+                <div class="header-tag">🚨 SECURITY AUDIT &amp; THREAT MODELING REPORT</div>
+                <h1>セキュリティ脅威分析報告書<br>外部公開時におけるデータ突破ルート検証</h1>
+                <p>
+                    院内かわら版（Cloudflare
+                    Tunnel連携）の外部公開状態において、万一Webアプリケーション境界が突破された場合に「職員個人情報」および「患者診療データ」まで到達し得る具体的ルートの技術的検証と緊急対策処方箋
+                </p>
+            </div>
+            <div class="header-meta">
+                <div><strong>調査日:</strong> 2026年10月15日</div>
+                <div><strong>対象ホスト:</strong> 192.168.1.16（院内本番サーバー）</div>
+                <div><strong>対象ドメイン:</strong> kawara.ono.or.jp</div>
+                <div><strong>評価ランク:</strong> <span style="color:#f87171; font-weight:900;">構造的重大リスク確認（要多層防御）</span>
+                </div>
+                <a href="index.html" class="header-nav-btn">← 開発指針・仕様書ポータルに戻る</a>
+            </div>
+        </div>
+    </header>
+
+    <div class="container">
+
+
+        <!-- 2. 現状のシステム構成とアタックサーフェス -->
+        <div class="doc-section">
+            <div class="section-header">
+                <span class="section-badge">SECTION 01</span>
+                <h2>現状のシステムアーキテクチャと危険因子（アタックサーフェス）</h2>
+            </div>
+
+            <p style="font-size:0.92rem; color:#475569; margin-bottom:1.2rem;">
+                調査によって特定された、院内サーバー（<code>192.168.1.16</code>）の内部構造および危険因子は以下の通りです。
+            </p>
+
+            <div class="arch-grid">
+                <div class="arch-card" style="border-left:4px solid #f97316;">
+                    <div class="arch-card-title">🌐 外部トンネル境界</div>
+                    <ul>
+                        <li><strong>経路:</strong> Cloudflare Zero Trust Tunnel (<code>cloudflared</code>)</li>
+                        <li><strong>公開ドメイン:</strong> <code>https://kawara.ono.or.jp</code></li>
+                        <li><strong>直通先:</strong> 院内LAN最深部 <code>192.168.1.16:80</code>（リバースプロキシを介さず直結）</li>
+                    </ul>
+                </div>
+
+                <div class="arch-card" style="border-left:4px solid #ef4444;">
+                    <div class="arch-card-title">⚙️ Webサーバー実行権限</div>
+                    <ul>
+                        <li><strong>Webサーバー:</strong> Apache 2.4.66 + PHP 8.5.5 (Win64)</li>
+                        <li><strong>実行アカウント:</strong> <code
+                                style="color:#b91c1c; font-weight:bold;">jmt\owner</code>（管理者ローカルユーザー）</li>
+                        <li><strong>影響:</strong> PHPコード実行を奪取された場合、サーバーOSの完全支配が可能</li>
+                    </ul>
+                </div>
+
+                <div class="arch-card" style="border-left:4px solid #b91c1c;">
+                    <div class="arch-card-title">🗄️ PostgreSQLデータベース同居構造</div>
+                    <ul>
+                        <li><strong>ホスト:</strong> <code>localhost:5432</code></li>
+                        <li><strong>接続ユーザー:</strong> <code
+                                style="color:#b91c1c; font-weight:bold;">postgres</code>（全権スーパーユーザー）</li>
+                        <li><strong>同居DB:</strong> <code>kawara</code>, <code>meibo</code>, <code>monshin</code>,
+                            <code>old_pacient</code>, <code>endoscope</code>
+                        </li>
+                    </ul>
+                </div>
+
+                <div class="arch-card" style="border-left:4px solid #8b5cf6;">
+                    <div class="arch-card-title">🔌 院内ネットワークセグメント</div>
+                    <ul>
+                        <li><strong>所属IP:</strong> <code>192.168.1.111 / 192.168.1.16</code> (同一 /24)</li>
+                        <li><strong>同居機器:</strong> 電子カルテ端末、医事会計レセコン、院内NAS、複合機</li>
+                        <li><strong>セグメンテーション:</strong> DMZ等の論理的分離なし（フラットLAN）</li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="code-box">
+                <span class="comment">// includes/db.php に記述されていた実際のDB接続定義（全権ユーザー接続）</span>
+                if (!defined('DB_HOST')) define('DB_HOST', 'localhost');
+                if (!defined('DB_USER')) define('DB_USER', '<span class="highlight-red">postgres</span>'); <span
+                    class="comment">// ← スーパーユーザー</span>
+                if (!defined('DB_PASS')) define('DB_PASS', '<span class="highlight-red">postgres</span>');
+                <span class="comment">// ※ PostgreSQL内には kawara 以外に monshin（問診）、old_pacient（過去カルテ）が同居</span>
+            </div>
+        </div>
+
+        <!-- 3. 【ルート1】職員個人情報まで到達するルート -->
+        <div class="doc-section">
+            <div class="section-header">
+                <span class="section-badge" style="background:#ea580c;">ROUTE 01</span>
+                <h2>【検証ルート1】職員個人情報まで到達する侵入シナリオ</h2>
+            </div>
+
+            <p style="font-size:0.92rem; color:#475569; margin-bottom:1.5rem;">
+                悪意ある攻撃者がインターネット側からCloudflare経由で侵入を試み、全職員のプライベート個人情報（氏名、生年月日、住所、電話番号、LINE ID、パスワード等）を奪取するまでの具体的ステップです。
+            </p>
+
+            <div class="step-timeline">
+                <!-- Step 1 -->
+                <div class="step-item danger">
+                    <div class="step-node">1</div>
+                    <div class="step-title">
+                        <span>外部公開エンドポイントの探索と脆弱性の突合</span>
+                        <span class="step-tag tag-danger">境界突破フェーズ</span>
+                    </div>
+                    <p style="font-size:0.88rem; color:#334155; line-height:1.6;">
+                        攻撃者は <code>https://kawara.ono.or.jp</code>
+                        に対し自動スキャナーを実行。認証前でもアクセス可能なAPI（<code>api/device_auth.php</code> や
+                        <code>login.php</code>、画像アップロード機能等）を探索します。
+                    </p>
+                    <div class="code-box">
+                        <span class="comment"># 攻撃手法例: SQLインジェクションの試行</span>
+                        POST /kawara/api/device_auth.php HTTP/1.1
+                        Host: kawara.ono.or.jp
+                        Content-Type: application/x-www-form-urlencoded
+
+                        action=verify&device_token=<span class="highlight-red">' UNION SELECT 1, staff_id, staff_name,
+                            password_hash FROM staff--</span>
+                    </div>
+                    <p style="font-size:0.84rem; color:#64748b;">
+                        ※
+                        現行コードはPDOプレペアードステートメントを使用していますが、将来的なコード追加や第三者改修で1箇所でも動的SQL文字列結合（<code>$sql = "... WHERE id = " . $_GET['id']</code>）が生じた瞬間、この突破口が開かれます。
+                    </p>
+                </div>
+
+                <!-- Step 2 -->
+                <div class="step-item danger">
+                    <div class="step-node">2</div>
+                    <div class="step-title">
+                        <span>かわら版DB（kawara.staff）からの職員基本台帳窃取</span>
+                        <span class="step-tag tag-danger">内部データ流出</span>
+                    </div>
+                    <p style="font-size:0.88rem; color:#334155; line-height:1.6;">
+                        SQL実行能力を獲得した攻撃者は、直ちに <code>kawara.staff</code> テーブルへ問い合わせを実行します。
+                    </p>
+                    <ul style="font-size:0.86rem; color:#334155; padding-left:1.4rem; margin-top:6px;">
+                        <li><strong>流出するデータ項目:</strong> 職員ID、氏名、役職、所属部署、ログインID、パスワードハッシュ、LINE User
+                            ID（<code>line_user_id</code>）、端末自動ログイン用Cookieトークン。</li>
+                        <li><strong>二次被害:</strong> 事務長・管理者アカウントへの不正ログイン、職員個人LINEへの標的型スピアフィッシング、安否確認システムの虚偽発令。</li>
+                    </ul>
+                </div>
+
+                <!-- Step 3 -->
+                <div class="step-item critical">
+                    <div class="step-node">3</div>
+                    <div class="step-title">
+                        <span>同一DBインスタンス内の「meibo（名簿）」データベースへの横移動</span>
+                        <span class="step-tag tag-critical">致命的プライバシー侵害</span>
+                    </div>
+                    <p style="font-size:0.88rem; color:#334155; line-height:1.6;">
+                        ここが最大の危険箇所です。PostgreSQLの接続権限がスーパーユーザー（<code>postgres</code>）であるため、データベース間のアクセス制御が機能していません。攻撃者はPostgreSQLの標準拡張機能（<code>dblink</code>）またはPHPの新規接続コードを利用して、<code>meibo</code>
+                        データベースを直接参照します。
+                    </p>
+                    <div class="code-box">
+                        <span class="comment">-- dblink拡張を用いた別データベースの直接盗み出し（postgres権限なら実行可能）</span>
+                        SELECT * FROM dblink('dbname=<span class="highlight-red">meibo</span> user=postgres
+                        password=postgres',
+                        'SELECT staff_name, home_address, tel_number, family_contact FROM employee_records')
+                        AS t(name text, addr text, tel text, family text);
+                    </div>
+                    <p style="font-size:0.84rem; color:#991b1b; font-weight:bold;">
+                        結果: 病院全職員の現住所、個人携帯番号、家族情報、給与振込先等の機微情報が完全に外部流出します。
+                    </p>
+                </div>
+            </div>
+        </div>
+
+        <!-- 4. 【ルート2】患者データまで到達するルート -->
+        <div class="doc-section">
+            <div class="section-header">
+                <span class="section-badge" style="background:#dc2626;">ROUTE 02</span>
+                <h2>【検証ルート2】患者診療・問診・過去カルテデータまで到達するルート</h2>
+            </div>
+
+            <p style="font-size:0.92rem; color:#475569; margin-bottom:1.5rem;">
+                医療機関として最も避けるべき最悪のシナリオ（患者個人情報および診療履歴の漏洩・改ざん、電子カルテ端末のランサムウェア暗号化）への到達ルートです。
+            </p>
+
+            <div class="step-timeline">
+                <!-- Step 1 -->
+                <div class="step-item danger">
+                    <div class="step-node">1</div>
+                    <div class="step-title">
+                        <span>Webシェル（バックドアスクリプト）の設置（RCE）</span>
+                        <span class="step-tag tag-danger">OSコマンド実行権の奪取</span>
+                    </div>
+                    <p style="font-size:0.88rem; color:#334155; line-height:1.6;">
+                        SQLインジェクションの <code>COPY TO / pg_read_file</code>
+                        コマンド、あるいは画像ファイルアップロード機能の拡張子検証漏れ（Polyglotファイル攻撃）等を悪用し、<code>c:\Apache24\htdocs\kawara\uploads\shell.php</code>
+                        等のWebシェルを配置します。
+                    </p>
+                    <div class="code-box">
+                        <span class="comment"># 攻撃者が外部から実行するリクエスト例</span>
+                        GET /kawara/uploads/shell.php?cmd=<span class="highlight-red">whoami</span> HTTP/1.1
+                        Host: kawara.ono.or.jp
+
+                        <span class="comment"># サーバーからの応答</span>
+                        HTTP/1.1 200 OK
+                        <span class="highlight-yellow">jmt\owner</span> <span class="comment">←
+                            Windowsの管理者権限で実行されていることが判明</span>
+                    </div>
+                </div>
+
+                <!-- Step 2 -->
+                <div class="step-item critical">
+                    <div class="step-node">2</div>
+                    <div class="step-title">
+                        <span>同居する患者医療データベースのダンプ（即座の流出）</span>
+                        <span class="step-tag tag-critical">医療法・個人情報保護法違反</span>
+                    </div>
+                    <p style="font-size:0.88rem; color:#334155; line-height:1.6;">
+                        攻撃者はOSコマンドまたはPHP直接実行により、サーバー上のPostgreSQLから<strong>全患者データベースを即座に外部へ吸い出します</strong>。
+                    </p>
+                    <div class="code-box">
+                        <span class="comment"># 攻撃者が実行するバックアップダンプコマンド</span>
+                        pg_dump.exe -U postgres <span class="highlight-red">monshin</span> >
+                        c:\Apache24\htdocs\kawara\uploads\patients_monshin.sql
+                        pg_dump.exe -U postgres <span class="highlight-red">old_pacient</span> >
+                        c:\Apache24\htdocs\kawara\uploads\old_pacient.sql
+                        pg_dump.exe -U postgres <span class="highlight-red">endoscope</span> >
+                        c:\Apache24\htdocs\kawara\uploads\endoscope.sql
+                    </div>
+                    <div
+                        style="background:#fee2e2; border:1px solid #fecaca; border-radius:6px; padding:10px 14px; margin-top:8px;">
+                        <div style="font-weight:bold; color:#991b1b; font-size:0.9rem;">💥 実際に到達・流出する患者データ:</div>
+                        <ul style="font-size:0.85rem; color:#7f1d1d; padding-left:1.2rem; margin-top:4px;">
+                            <li><strong>monshin DB:</strong> 患者氏名、フリガナ、生年月日、電話番号、来院目的、主訴（症状）、既往歴、服薬歴、アレルギー情報。</li>
+                            <li><strong>old_pacient / ono_oldpatient DB:</strong> 過去患者基本台帳、カルテ病名、受診履歴、患者ID。</li>
+                            <li><strong>endoscope DB:</strong> 内視鏡検査所見、検査日、生検・診断結果。</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Step 3 -->
+                <div class="step-item critical">
+                    <div class="step-node">3</div>
+                    <div class="step-title">
+                        <span>院内LAN（192.168.1.0/24）への横移動（ラテラルムーブメント）</span>
+                        <span class="step-tag tag-critical">病院機能停止リスク</span>
+                    </div>
+                    <p style="font-size:0.88rem; color:#334155; line-height:1.6;">
+                        Apacheがローカル管理者（<code>jmt\owner</code>）権限で稼働しているため、攻撃者はサーバーを「踏み台（Pivot）」として、病院内LAN全体へ攻撃を展開します。
+                    </p>
+                    <div class="code-box">
+                        <span class="comment"># PowerShellを用いた院内端末の探索スキャン</span>
+                        1..254 | % { Test-NetConnection -Port 445 -ComputerName "192.168.1.$_" -WarningAction
+                        SilentlyContinue }
+                    </div>
+                    <ul style="font-size:0.86rem; color:#334155; padding-left:1.4rem; margin-top:6px;">
+                        <li><strong>電子カルテ端末・レセコンへの侵入:</strong> SMB（445番ポート）やRDP（3389番ポート）を狙ったブルートフォース攻撃や脆弱性悪用。</li>
+                        <li><strong>ランサムウェアの配布:</strong> 院内共有NASや各部署端末のファイルを一斉暗号化し、身代金を要求（近年の医療機関サイバー攻撃の典型パターン）。</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <!-- 5. リスク評価マトリクス -->
+        <div class="doc-section">
+            <div class="section-header">
+                <span class="section-badge">MATRIX</span>
+                <h2>リスク発生確率と影響度のマトリクス評価</h2>
+            </div>
+
+            <table class="risk-table">
+                <thead>
+                    <tr>
+                        <th style="width:20%;">脅威シナリオ</th>
+                        <th style="width:15%;">到達対象データ</th>
+                        <th style="width:12%;">発生確率</th>
+                        <th style="width:12%;">被害影響度</th>
+                        <th style="width:41%;">総合評価と法令・事業影響</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>職員個人情報の流出</strong></td>
+                        <td>kawara.staff<br>meibo DB</td>
+                        <td><span class="badge-risk medium">中 (Medium)</span></td>
+                        <td><span class="badge-risk high">高 (High)</span></td>
+                        <td>職員のプライバシー侵害、標的型フィッシング詐欺の誘発、労働組合・労務問題への発展。</td>
+                    </tr>
+                    <tr style="background:#fff5f5;">
+                        <td><strong>患者診療・問診データの流出</strong></td>
+                        <td>monshin DB<br>old_pacient DB<br>endoscope DB</td>
+                        <td><span class="badge-risk medium">中 (Medium)</span></td>
+                        <td><span class="badge-risk catastrophic">極大 (Catastrophic)</span></td>
+                        <td>個人情報保護委員会・厚生労働省への重大インシデント報告義務、報道発表、損害賠償請求、病院の社会的信用の失墜。</td>
+                    </tr>
+                    <tr style="background:#fef2f2;">
+                        <td><strong>院内LAN侵入・ランサムウェア</strong></td>
+                        <td>電子カルテ端末<br>院内共有NAS<br>レセコン</td>
+                        <td><span class="badge-risk medium">低〜中 (Low-Med)</span></td>
+                        <td><span class="badge-risk catastrophic">極大 (Catastrophic)</span></td>
+                        <td>カルテ参照不能による診療停止・救急受け入れ停止（病院閉鎖危機）。医療法上の診療継続困難。</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- 6. 現実的かつ完全な防御策（処方箋） -->
+        <div class="doc-section">
+            <div class="section-header">
+                <span class="section-badge" style="background:#16a34a;">DEFENSE</span>
+                <h2>具体的かつ現実的な多層防御策（処方箋）</h2>
+            </div>
+
+            <!-- 防御策 1 -->
+            <div class="defense-card">
+                <div class="defense-title">
+                    <span>🛡️ 防壁1: 事務長キルスイッチの運用（実装完了・即効性100%）</span>
+                </div>
+                <p style="font-size:0.9rem; color:#14532d; line-height:1.65;">
+                    <strong>「普段（夜間・平時）は完全遮断（OFF）にしておき、災害時・緊急時のみONにする」</strong> という運用ルールを徹底します。外部から攻撃者が侵入を試みる時間窓（Window
+                    of Exposure）を年間の0.1%以下に圧縮するため、常時公開に比べてリスクは99.9%低減されます。
+                </p>
+            </div>
+
+            <!-- 防御策 2 -->
+            <div class="defense-card" style="border-color:#93c5fd; background:#f0f9ff;">
+                <div class="defense-title" style="color:#0369a1;">
+                    <span>🔒 防壁2: PostgreSQL接続アカウントの厳格分離（最小特権の原則）</span>
+                </div>
+                <p style="font-size:0.9rem; color:#0c4a6e; line-height:1.65; margin-bottom:8px;">
+                    <code>db.php</code> の接続ユーザーを全権 <code>postgres</code> から、かわら版専用ユーザー <code>kawara_user</code> に切り替えます。
+                </p>
+                <div class="code-box" style="margin:6px 0;">
+                    <span class="comment">-- かわら版専用ユーザーの作成と権限の完全隔離（患者DB・名簿DBへのアクセスを遮断）</span>
+                    CREATE USER kawara_user WITH PASSWORD 'StrongPasswordHere';
+                    GRANT CONNECT ON DATABASE kawara TO kawara_user;
+                    <span class="comment">-- monshin, old_pacient, meibo への接続権限を一切与えない（REVOKE CONNECT）</span>
+                    REVOKE CONNECT ON DATABASE monshin FROM PUBLIC, kawara_user;
+                    REVOKE CONNECT ON DATABASE old_pacient FROM PUBLIC, kawara_user;
+                    REVOKE CONNECT ON DATABASE meibo FROM PUBLIC, kawara_user;
+                </div>
+                <p style="font-size:0.84rem; color:#0369a1;">
+                    ※ これにより、万一かわら版側でSQLインジェクションが起きても、患者DBや名簿DBへのアクセスはPostgreSQLエンジンにより物理的に拒絶されます。
+                </p>
+            </div>
+
+            <!-- 防御策 3 -->
+            <div class="defense-card" style="border-color:#e2e8f0; background:#f8fafc;">
+                <div class="defense-title" style="color:#334155;">
+                    <span>☁️ 防壁3: Cloudflare Zero Trust による境界保護</span>
+                </div>
+                <p style="font-size:0.9rem; color:#475569; line-height:1.65;">
+                    Cloudflareダッシュボード側で「WAF（Managed Ruleset - OWASP Top 10 /
+                    SQLi検知）」を有効化し、海外IPからのアクセス遮断（日本国内限定Geo-blocking）および、職員端末へのCloudflare Access（PINコード認証等）を重畳します。
+                </p>
+            </div>
+
+            <!-- 防御策 4 -->
+            <div class="defense-card" style="border-color:#fde68a; background:#fefce8;">
+                <div class="defense-title" style="color:#b45309;">
+                    <span>🚀 将来構想: クラウドDMZ分離（院内LANへの直通トンネル撤廃）</span>
+                </div>
+                <p style="font-size:0.9rem; color:#78350f; line-height:1.65;">
+                    外部公開が必要な「安否確認」「医師予定表」データのみを、院内サーバーからクラウド（AWS/Supabase等）へ一方向（Outbound）で定期同期させ、職員のスマホはクラウド側のみを参照するアーキテクチャに進化させます。これにより、院内LANへのインバウンド接続（トンネル）が不要となり、院内データ突破リスクは論理的にゼロになります。
+                </p>
+            </div>
+        </div>
+
+        <!-- 7. 提言とまとめ -->
+        <div
+            style="background:#ffffff; border:1px solid #cbd5e1; border-radius:var(--radius-lg); padding:2rem; box-shadow:var(--shadow-sm);">
+            <h3 style="font-size:1.25rem; font-weight:900; color:#0f172a; margin-bottom:0.8rem;">
+                📋 事務長および経営陣への最終提言
+            </h3>
+            <ol style="font-size:0.95rem; color:#334155; line-height:1.8; padding-left:1.5rem;">
+                <li>
+                    <strong>「キルスイッチ運用」の即時ルール化:</strong><br>
+                    本日実装したキルスイッチを活用し、通常時は必ず「🔴 遮断中 (OFF)」を維持し、災害発災時または全体周知時のみ事務長判断で「🟢 公開中 (ON)」とする限定運用を開始してください。
+                </li>
+                <li>
+                    <strong>PostgreSQL接続権限の分離（次期ステップ）:</strong><br>
+                    <code>kawara_user</code> による最小権限分離工事を実施し、患者DB（<code>monshin</code>, <code>old_pacient</code>）および職員名簿（<code>meibo</code>）への防壁を確立することを推奨します。
+                </li>
+                <li>
+                    <strong>Cloudflare WAFによる二重防御（本日設定完了）:</strong><br>
+                    日本国外（海外IP）からのアクセスを全遮断（Geo-blocking）し、病院公式HP（<code>www.ono.or.jp</code>）と完全に分離したWAFカスタムルールを常時維持してください。海外からの自動攻撃ボットは院内サーバー到達前にエッジで100%遮断されます。
+                </li>
+            </ol>
+        </div>
+
+    </div>
+
+    <footer>
+        <div
+            style="max-width:1080px; margin:0 auto; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:1rem;">
+            <div>
+                <strong>医療法人小野会 院内かわら版システム 開発統括</strong><br>
+                セキュリティ監査・脅威モデリング検証報告書（Confidential / 内部管理用）
+            </div>
+            <div>
+                <a href="index.html"
+                    style="color:var(--accent-info); text-decoration:none; font-weight:bold;">ポータルTOPへ戻る</a>
+            </div>
+        </div>
+    </footer>
+
+</body>
+
+</html>

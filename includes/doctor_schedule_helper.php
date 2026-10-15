@@ -151,3 +151,13 @@ function map_doctor_events_by_date(array $events): array {
 
     return $map;
 }
+
+/**
+ * 登録医師一覧（名前・役職・診療科・テーマ色）を取得
+ *
+ * @return array 医師情報配列
+ */
+function fetch_doctors_list(): array {
+    $res = call_doctor_api('doctors.php');
+    return is_array($res) ? $res : [];
+}
